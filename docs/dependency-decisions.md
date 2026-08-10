@@ -252,6 +252,7 @@
 # 2026-08-10：音频捕获与火山 RTC 字幕
 
 - 会议音频捕获：采用微软官方 `ActivateAudioInterfaceAsync` Application Loopback 接口模式，按选定会议进程树捕获。官方示例表明可包含指定进程及子进程；目标系统版本不支持时仅在用户确认后降级到 WASAPI 整体输出捕获。
+- 捕获实现依赖：采用 NAudio.Wasapi `3.0.0-preview.20`（MIT）的 `WasapiRecorderBuilder.WithProcessLoopback`，使用本机已有 .NET SDK 构建自包含 x64 sidecar。该 API 要求 Windows 10 2004/build 19041 或更高。当前为 preview，必须固定版本并通过两种会议软件实机测试；若后续稳定版可用，发布前优先升级稳定版。未选择自行移植微软 C++ 示例，因为本机无 MSVC 且 COM 生命周期、格式转换和泄漏风险更高。
 - RTC：优先火山引擎官方 Electron/Windows SDK、自定义音频源和 `startSubtitle` 字幕回调。SDK 版本、许可、计费、数据地域和二进制重分发权仍是接入闸门；没有官方许可文本时不把 SDK 二进制提交到 GitHub 或安装包。
 - 最小验证：官方 npm 包 `@volcengine/rtc 4.69.0`，BSD-3-Clause，仅新增 `eventemitter3` 运行依赖，`npm audit` 为 0。其官方类型定义确认具有 `setExternalAudioTrack`、`setAudioSourceType`、`startSubtitle` 和 `onSubtitleMessageReceived`，可在 Electron 的 Chromium 渲染环境接收由 Web Audio 生成的外部 `MediaStreamTrack`；因此不采用额外的火山 Windows DLL sidecar。
 - 监听：复用会议软件原始播放，不重新播放回环 PCM，避免双声和回声。

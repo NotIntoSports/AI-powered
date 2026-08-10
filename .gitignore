@@ -12,6 +12,9 @@ out/
 dist/
 dist-desktop/
 *.tsbuildinfo
+native/**/bin/
+native/**/obj/
+native/**/publish/
 .desktop-runtime/
 .worktrees/
 resources/prerequisites/*.exe

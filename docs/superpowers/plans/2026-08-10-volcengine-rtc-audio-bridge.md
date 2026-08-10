@@ -6,7 +6,7 @@
 
 **Architecture:** 独立 Windows 音频 sidecar 按会议进程捕获 PCM，并通过火山官方 RTC SDK 自定义音频源发送到字幕房间；Electron 通过本地命名管道接收字幕和电平事件。AI TTS 与真实麦克风经过互斥混音后写入开源虚拟麦克风，人工介入始终优先。
 
-**Tech Stack:** Electron、Next.js、火山引擎官方 RTC Electron/Windows SDK、Windows Application Loopback API、Windows SAPI、Node test runner、C++/CMake sidecar（仅在官方 Electron SDK不能满足外部 PCM 与字幕回调时启用）。
+**Tech Stack:** Electron、Next.js、火山引擎官方 Web RTC SDK、Windows Application Loopback API、NAudio.Wasapi 3.0.0-preview.20、.NET 10 自包含 sidecar、Windows SAPI、Node test runner。
 
 ## Global Constraints
 
@@ -77,11 +77,10 @@ Run: `git add desktop/audio tests/desktop && git commit -m "feat: define meeting
 ### Task 3: Windows 应用级音频 Sidecar
 
 **Files:**
-- Create: `native/audio-bridge/CMakeLists.txt`
-- Create: `native/audio-bridge/src/main.cpp`
-- Create: `native/audio-bridge/src/application-loopback.cpp`
-- Create: `native/audio-bridge/src/application-loopback.h`
-- Create: `native/audio-bridge/tests/protocol-test.cpp`
+- Create: `native/AudioBridge/AudioBridge.csproj`
+- Create: `native/AudioBridge/Program.cs`
+- Create: `native/AudioBridge/CaptureSession.cs`
+- Create: `native/AudioBridge/Protocol.cs`
 - Create: `scripts/build-audio-bridge.ps1`
 
 **Interfaces:**
@@ -94,7 +93,7 @@ Run: `git add desktop/audio tests/desktop && git commit -m "feat: define meeting
 
 - [ ] **Step 2: 实现微软官方接口的最小适配**
 
-使用 `ActivateAudioInterfaceAsync` 和 process loopback activation params 捕获指定进程树；不保存 WAV，不在 sidecar 中实现字幕或业务逻辑。
+使用 NAudio.Wasapi `WasapiRecorderBuilder.WithProcessLoopback` 捕获指定进程树；不保存 WAV，不在 sidecar 中实现字幕或业务逻辑。
 
 - [ ] **Step 3: 实现系统级降级模式**
 
