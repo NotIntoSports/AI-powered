@@ -15,6 +15,7 @@ import { canAutoSubmitTranscription } from "../features/audio/transcription-turn
 import { describeTtsError } from "../features/audio/tts-error";
 import type { MicVAD } from "@ricky0123/vad-web/dist/real-time-vad";
 import { ModelSettings } from "../features/settings/model-settings";
+import { RtcSettings } from "../features/settings/rtc-settings";
 import { getInterviewReadiness } from "../features/readiness/interview-readiness";
 import { MeetingHandoffControl } from "../features/meeting/meeting-handoff-control";
 
@@ -683,6 +684,7 @@ export default function ConsolePage() {
           onConfirmedChange={handleMeetingPreviewConfirmed}
         />
         <ModelSettings />
+        <RtcSettings />
 
         <article className="card mediaSetup">
           <div className="cardHeading">
