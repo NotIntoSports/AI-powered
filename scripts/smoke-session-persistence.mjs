@@ -156,7 +156,8 @@ try {
   assert.deepEqual(obsRuntime, {
     managed: true,
     url: "ws://127.0.0.1:4455",
-    password: "managed-obs-smoke-password"
+    password: "managed-obs-smoke-password",
+    stageUrl: ""
   });
 
   const stageStatusUpdateResponse = await fetch(

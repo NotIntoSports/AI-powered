@@ -6,8 +6,9 @@ import { isSecureEndpoint } from "./endpoint-security";
 
 const settingsSchema = z.object({
   baseUrl: z.string().url(),
-  model: z.string().min(1).max(200),
-  encryptedApiKey: z.string().min(1).nullable()
+  model: z.string().max(200),
+  encryptedApiKey: z.string().min(1).nullable(),
+  disabled: z.boolean().default(false)
 });
 
 type StoredSettings = z.infer<typeof settingsSchema>;
@@ -64,6 +65,9 @@ async function getStoredSettings() {
 export async function getModelRuntimeConfig(): Promise<ModelRuntimeConfig> {
   const stored = await getStoredSettings();
   if (stored) {
+    if (stored.disabled) {
+      return { apiKey: "", baseUrl: stored.baseUrl, model: "", source: "settings" };
+    }
     let apiKey = "";
     if (stored.encryptedApiKey) {
       globalConfig.decryptedModelKey ??= runDpapi("Unprotect", stored.encryptedApiKey);
@@ -102,7 +106,8 @@ export async function saveModelRuntimeConfig(input: {
   const settings = settingsSchema.parse({
     baseUrl: input.baseUrl.replace(/\/$/, ""),
     model: input.model,
-    encryptedApiKey
+    encryptedApiKey,
+    disabled: false
   });
   await mkdir(dataDirectory, { recursive: true });
   const temporaryPath = `${settingsPath}.${process.pid}.tmp`;
@@ -115,9 +120,18 @@ export async function saveModelRuntimeConfig(input: {
 }
 
 export async function clearModelRuntimeConfig() {
-  await rm(settingsPath, { force: true });
+  const settings = settingsSchema.parse({
+    baseUrl: "https://api.openai.com/v1",
+    model: "",
+    encryptedApiKey: null,
+    disabled: true
+  });
+  await mkdir(dataDirectory, { recursive: true });
+  const temporaryPath = `${settingsPath}.${process.pid}.tmp`;
+  await writeFile(temporaryPath, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
+  await rename(temporaryPath, settingsPath);
   globalConfig.decryptedModelKey = undefined;
-  globalConfig.modelSettingsPromise = Promise.resolve(null);
+  globalConfig.modelSettingsPromise = Promise.resolve(settings);
 }
 
 export function isSecureModelEndpoint(value: string) {
