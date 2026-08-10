@@ -6,6 +6,11 @@ export interface DesktopStatus {
 
 export interface DesktopBridge {
   getStatus(): Promise<DesktopStatus>;
+  listMeetingProcesses(): Promise<Array<{ pid: number; name: string; title: string }>>;
+  startAudioCapture(pid: number): Promise<{ started: true }>;
+  stopAudioCapture(): Promise<{ stopped: true }>;
+  onAudioPcm(listener: (data: Uint8Array) => void): () => void;
+  onAudioEvent(listener: (event: unknown) => void): () => void;
 }
 
 export interface OwnedProcess {

@@ -16,6 +16,9 @@ import { describeTtsError } from "../features/audio/tts-error";
 import type { MicVAD } from "@ricky0123/vad-web/dist/real-time-vad";
 import { ModelSettings } from "../features/settings/model-settings";
 import { RtcSettings } from "../features/settings/rtc-settings";
+import { InterventionControls } from "../features/intervention/intervention-controls";
+import { LiveSubtitles } from "../features/subtitles/live-subtitles";
+import { RtcBridgeControl } from "../features/rtc/rtc-bridge-control";
 import { getInterviewReadiness } from "../features/readiness/interview-readiness";
 import { MeetingHandoffControl } from "../features/meeting/meeting-handoff-control";
 
@@ -685,6 +688,9 @@ export default function ConsolePage() {
         />
         <ModelSettings />
         <RtcSettings />
+        <RtcBridgeControl />
+        <LiveSubtitles />
+        <InterventionControls onAiPauseChange={(paused) => setAutomaticFollowup(!paused)} />
 
         <article className="card mediaSetup">
           <div className="cardHeading">

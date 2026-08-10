@@ -27,11 +27,11 @@ const dataDirectory = process.env.INTERVIEW_DATA_DIR
 const settingsPath = path.join(dataDirectory, "rtc.json");
 const dpapiScript = path.join(process.cwd(), "scripts", "dpapi-secret.ps1");
 
-function protect(value: string): string {
+function runDpapi(mode: "Protect" | "Unprotect", value: string): string {
   if (process.platform !== "win32") throw new Error("DPAPI_UNAVAILABLE");
   const result = spawnSync(
     "powershell.exe",
-    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", dpapiScript, "-Mode", "Protect"],
+    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", dpapiScript, "-Mode", mode],
     { input: value, encoding: "utf8", windowsHide: true, maxBuffer: 1024 * 1024 }
   );
   if (result.status !== 0) throw new Error("DPAPI_FAILED");
@@ -59,7 +59,7 @@ export async function saveRtcSettings(input: RtcSettingsInput) {
     language: input.language,
     mode: input.mode,
     tokenServiceUrl: production ? input.tokenServiceUrl : null,
-    encryptedTrialToken: production ? null : protect(input.trialToken!.trim()),
+    encryptedTrialToken: production ? null : runDpapi("Protect", input.trialToken!.trim()),
     trialExpiresAt: production ? null : new Date(input.trialExpiresAt!).toISOString()
   });
   await mkdir(dataDirectory, { recursive: true });
@@ -67,6 +67,32 @@ export async function saveRtcSettings(input: RtcSettingsInput) {
   await writeFile(temporaryPath, `${JSON.stringify(stored, null, 2)}\n`, "utf8");
   await rename(temporaryPath, settingsPath);
   return stored;
+}
+
+export async function issueRtcToken(roomId: string, userId: string) {
+  const settings = await loadRtcSettings();
+  if (!settings) throw new Error("RTC_NOT_CONFIGURED");
+  if (settings.mode === "trial") {
+    if (!settings.encryptedTrialToken || !settings.trialExpiresAt || Date.parse(settings.trialExpiresAt) <= Date.now()) {
+      throw new Error("RTC_TRIAL_TOKEN_EXPIRED");
+    }
+    return {
+      appId: settings.appId,
+      token: runDpapi("Unprotect", settings.encryptedTrialToken),
+      expiresAt: settings.trialExpiresAt,
+      language: settings.language
+    };
+  }
+  if (!settings.tokenServiceUrl) throw new Error("RTC_TOKEN_SERVICE_MISSING");
+  const response = await fetch(settings.tokenServiceUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ appId: settings.appId, roomId, userId }),
+    signal: AbortSignal.timeout(10_000)
+  });
+  if (!response.ok) throw new Error("RTC_TOKEN_SERVICE_FAILED");
+  const payload = z.object({ token: z.string().min(1), expiresAt: z.string().datetime() }).parse(await response.json());
+  return { appId: settings.appId, token: payload.token, expiresAt: payload.expiresAt, language: settings.language };
 }
 
 export function publicRtcSettings(settings: Awaited<ReturnType<typeof loadRtcSettings>>) {
