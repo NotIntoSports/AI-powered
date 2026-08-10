@@ -8,7 +8,9 @@ const inputSchema = z.object({
   mode: z.enum(["production", "trial"]),
   tokenServiceUrl: z.string().trim().max(500).optional(),
   trialToken: z.string().trim().max(4000).optional(),
-  trialExpiresAt: z.string().trim().max(100).optional()
+  trialExpiresAt: z.string().trim().max(100).optional(),
+  trialRoomId: z.string().trim().max(128).optional(),
+  trialUserId: z.string().trim().max(128).optional()
 }).strict();
 
 export async function GET() {

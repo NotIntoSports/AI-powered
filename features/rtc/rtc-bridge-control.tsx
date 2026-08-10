@@ -83,7 +83,7 @@ export function RtcBridgeControl() {
         } }));
       }
     });
-    await adapter.connect({ token: token.token, roomId, userId, language: token.language, track: pcm.track });
+    await adapter.connect({ token: token.token, roomId: token.roomId || roomId, userId: token.userId || userId, language: token.language, track: pcm.track });
     const removePcm = bridge.onAudioPcm(pcm.push);
     const removeEvent = bridge.onAudioEvent((event) => {
       const value = event as { type?: string; peak?: number; message?: string };

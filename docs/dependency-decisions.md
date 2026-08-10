@@ -266,3 +266,9 @@
 - 输出：OBS 监听设备仍由用户在“设置 → 音频 → 高级 → 监听设备”选择已安装的虚拟音频播放端；会议软件选择对应录音端。obs-websocket 没有受支持的全局监听设备设置请求，因此不修改 OBS 私有配置文件。
 - 许可证与成本：复用 OBS（GPL-2.0）和 obs-websocket-js（MIT），零新增体积、云端费用和密钥流转。应用通过标准 WebSocket 进程集成 OBS，不复制其源码。
 - 限制：默认使用 Windows 当前默认麦克风；发布前必须在真实 OBS、虚拟音频驱动和至少两种会议软件上人工验证，自动化测试只验证调用序列。
+
+# 2026-08-10：火山 RTC 临时 Token 绑定
+
+- 官方约束：火山 RTC 文档要求测试 Token 使用的 AppID、RoomID、UserID 与客户端进房参数完全一致；正式上线则应由业务服务端使用密钥 SDK 动态生成并下发 Token。AppKey 只留在服务端。
+- 采用：试用配置显式保存临时 Token 对应的 RoomID/UserID，并在进房时复用；Token 使用 Windows DPAPI 加密。正式模式仍随机生成单场 RoomID/UserID，再向用户配置的 HTTPS Token 服务请求短期 Token。
+- 字幕前置：RTC 控制台必须开启实时字幕和流式语音识别，并配置语音技术控制台创建的流式语音识别 APP ID、Access Token、Cluster ID；这与 RTC AppID/AppKey 是两套凭据，均不写入客户端源码。

@@ -9,6 +9,8 @@ export function RtcSettings() {
   const [tokenServiceUrl, setTokenServiceUrl] = useState("");
   const [trialToken, setTrialToken] = useState("");
   const [trialExpiresAt, setTrialExpiresAt] = useState("");
+  const [trialRoomId, setTrialRoomId] = useState("interview_test");
+  const [trialUserId, setTrialUserId] = useState("bridge_test");
   const [message, setMessage] = useState("正在读取火山 RTC 配置…");
   const [working, setWorking] = useState(false);
 
@@ -20,6 +22,8 @@ export function RtcSettings() {
       setLanguage(data.language);
       setTokenServiceUrl(data.tokenServiceUrl || "");
       if (data.trialExpiresAt) setTrialExpiresAt(data.trialExpiresAt.slice(0, 16));
+      if (data.trialRoomId) setTrialRoomId(data.trialRoomId);
+      if (data.trialUserId) setTrialUserId(data.trialUserId);
       setMessage(data.configured ? "火山 RTC 配置已保存。" : "请配置实时字幕服务。");
     }).catch(() => setMessage("读取 RTC 配置失败。"));
   }, []);
@@ -31,7 +35,7 @@ export function RtcSettings() {
       const response = await fetch("/api/settings/rtc", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ appId, language, mode, tokenServiceUrl, trialToken, trialExpiresAt })
+        body: JSON.stringify({ appId, language, mode, tokenServiceUrl, trialToken, trialExpiresAt, trialRoomId, trialUserId })
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || "保存失败");
@@ -59,6 +63,8 @@ export function RtcSettings() {
         {mode === "production" ? (
           <label>Token 服务 HTTPS 地址<input type="url" value={tokenServiceUrl} onChange={(event) => setTokenServiceUrl(event.target.value)} required /></label>
         ) : <>
+          <label>临时 Token 房间 ID<input value={trialRoomId} onChange={(event) => setTrialRoomId(event.target.value)} required pattern="[A-Za-z0-9_-]{1,128}" /></label>
+          <label>临时 Token 用户 ID<input value={trialUserId} onChange={(event) => setTrialUserId(event.target.value)} required pattern="[A-Za-z0-9_-]{1,128}" /></label>
           <label>临时 Token<input type="password" value={trialToken} onChange={(event) => setTrialToken(event.target.value)} required autoComplete="new-password" /></label>
           <label>到期时间<input type="datetime-local" value={trialExpiresAt} onChange={(event) => setTrialExpiresAt(event.target.value)} required /></label>
         </>}

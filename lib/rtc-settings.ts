@@ -9,7 +9,9 @@ const storedSchema = z.object({
   mode: z.enum(["production", "trial"]),
   tokenServiceUrl: z.string().url().nullable(),
   encryptedTrialToken: z.string().nullable(),
-  trialExpiresAt: z.string().datetime().nullable()
+  trialExpiresAt: z.string().datetime().nullable(),
+  trialRoomId: z.string().nullable().default(null),
+  trialUserId: z.string().nullable().default(null)
 });
 
 export type RtcSettingsInput = {
@@ -19,6 +21,8 @@ export type RtcSettingsInput = {
   tokenServiceUrl?: string;
   trialToken?: string;
   trialExpiresAt?: string;
+  trialRoomId?: string;
+  trialUserId?: string;
 };
 
 const dataDirectory = process.env.INTERVIEW_DATA_DIR
@@ -53,6 +57,10 @@ export async function saveRtcSettings(input: RtcSettingsInput) {
     if (!input.trialExpiresAt || Date.parse(input.trialExpiresAt) <= Date.now()) {
       throw new Error("TRIAL_TOKEN_EXPIRED");
     }
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(input.trialRoomId || "") ||
+        !/^[A-Za-z0-9_-]{1,128}$/.test(input.trialUserId || "")) {
+      throw new Error("TRIAL_RTC_ID_REQUIRED");
+    }
   }
   const stored = storedSchema.parse({
     appId: input.appId,
@@ -60,7 +68,9 @@ export async function saveRtcSettings(input: RtcSettingsInput) {
     mode: input.mode,
     tokenServiceUrl: production ? input.tokenServiceUrl : null,
     encryptedTrialToken: production ? null : runDpapi("Protect", input.trialToken!.trim()),
-    trialExpiresAt: production ? null : new Date(input.trialExpiresAt!).toISOString()
+    trialExpiresAt: production ? null : new Date(input.trialExpiresAt!).toISOString(),
+    trialRoomId: production ? null : input.trialRoomId,
+    trialUserId: production ? null : input.trialUserId
   });
   await mkdir(dataDirectory, { recursive: true });
   const temporaryPath = `${settingsPath}.${process.pid}.tmp`;
@@ -73,14 +83,16 @@ export async function issueRtcToken(roomId: string, userId: string) {
   const settings = await loadRtcSettings();
   if (!settings) throw new Error("RTC_NOT_CONFIGURED");
   if (settings.mode === "trial") {
-    if (!settings.encryptedTrialToken || !settings.trialExpiresAt || Date.parse(settings.trialExpiresAt) <= Date.now()) {
+    if (!settings.encryptedTrialToken || !settings.trialExpiresAt || !settings.trialRoomId || !settings.trialUserId || Date.parse(settings.trialExpiresAt) <= Date.now()) {
       throw new Error("RTC_TRIAL_TOKEN_EXPIRED");
     }
     return {
       appId: settings.appId,
       token: runDpapi("Unprotect", settings.encryptedTrialToken),
       expiresAt: settings.trialExpiresAt,
-      language: settings.language
+      language: settings.language,
+      roomId: settings.trialRoomId,
+      userId: settings.trialUserId
     };
   }
   if (!settings.tokenServiceUrl) throw new Error("RTC_TOKEN_SERVICE_MISSING");
@@ -92,7 +104,7 @@ export async function issueRtcToken(roomId: string, userId: string) {
   });
   if (!response.ok) throw new Error("RTC_TOKEN_SERVICE_FAILED");
   const payload = z.object({ token: z.string().min(1), expiresAt: z.string().datetime() }).parse(await response.json());
-  return { appId: settings.appId, token: payload.token, expiresAt: payload.expiresAt, language: settings.language };
+  return { appId: settings.appId, token: payload.token, expiresAt: payload.expiresAt, language: settings.language, roomId, userId };
 }
 
 export function publicRtcSettings(settings: Awaited<ReturnType<typeof loadRtcSettings>>) {
@@ -103,7 +115,9 @@ export function publicRtcSettings(settings: Awaited<ReturnType<typeof loadRtcSet
     mode: settings.mode,
     tokenServiceUrl: settings.tokenServiceUrl,
     trialTokenConfigured: Boolean(settings.encryptedTrialToken),
-    trialExpiresAt: settings.trialExpiresAt
+    trialExpiresAt: settings.trialExpiresAt,
+    trialRoomId: settings.trialRoomId,
+    trialUserId: settings.trialUserId
   } : {
     configured: false,
     appId: "",
@@ -111,6 +125,8 @@ export function publicRtcSettings(settings: Awaited<ReturnType<typeof loadRtcSet
     mode: "production" as const,
     tokenServiceUrl: "",
     trialTokenConfigured: false,
-    trialExpiresAt: null
+    trialExpiresAt: null,
+    trialRoomId: "",
+    trialUserId: ""
   };
 }
