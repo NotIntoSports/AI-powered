@@ -38,6 +38,8 @@ const securityHeaders = [
 
 /** @type {import("next").NextConfig} */
 const nextConfig = {
+  output: "standalone",
+  outputFileTracingRoot: process.cwd(),
   poweredByHeader: false,
   async headers() {
     return [{

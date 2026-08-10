@@ -8,6 +8,7 @@
     "dev": "next dev -H 127.0.0.1",
     "prebuild": "npm run prepare:vad",
     "build": "next build",
+    "build:standalone": "node scripts/build-next-standalone.mjs",
     "start": "next start -H 127.0.0.1",
     "test:transcription": "node scripts/smoke-transcription.mjs",
     "test:transcription-security": "node --no-warnings --experimental-strip-types scripts/test-transcription-security.mjs",
