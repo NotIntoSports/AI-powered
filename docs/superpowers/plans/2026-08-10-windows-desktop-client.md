@@ -6,7 +6,7 @@
 
 **Architecture:** Electron 主进程以单实例方式启动独立的 Next.js standalone 子进程，在安全 BrowserWindow 中加载回环地址，并管理自己启动的 OBS。前置组件安装器使用固定清单、SHA-256、Authenticode 验证和可恢复状态机；OBS 与虚拟音频驱动仍作为独立开源组件安装，客户端不自行实现驱动。
 
-**Tech Stack:** Electron 43.3.0、Electron Forge 7.11.2、Next.js 15、React 19、TypeScript、Node test runner、OBS Studio 32.1.2、Windows PowerShell/DPAPI、GitHub CLI。
+**Tech Stack:** Electron 43.3.0、electron-builder 26.15.3、Next.js 15、React 19、TypeScript、Node test runner、OBS Studio 32.1.2、Windows PowerShell/DPAPI、GitHub CLI。
 
 ## Global Constraints
 
@@ -38,7 +38,7 @@
 - `scripts/fetch-prerequisites.ps1`：从官方发布页下载固定组件并校验。
 - `scripts/verify-release.ps1`：发布包、许可证和敏感信息检查。
 - `tests/desktop/*.test.mjs`：桌面主进程和前置组件测试。
-- `forge.config.ts`：Electron Forge Windows 打包配置。
+- `electron-builder.yml`：electron-builder NSIS Windows 打包配置。
 - `resources/licenses/`：第三方许可证和声明。
 - `resources/prerequisites/`：构建时下载、Git 忽略的固定二进制。
 - `app/api/desktop/status/route.ts`：只读桌面运行状态。
@@ -64,7 +64,7 @@
 
 - [ ] **Step 2: 安装桌面构建依赖**
 
-Run: `npm install --save-dev --save-exact electron@43.3.0 @electron-forge/cli@7.11.2 @electron-forge/maker-squirrel@7.11.2 @electron-forge/plugin-vite@7.11.2 vite typescript`
+Run: `npm install --save-dev --save-exact electron@43.3.0 electron-builder@26.15.3 vite typescript`
 Expected: `package-lock.json` 固定全部版本且 `npm audit` 不出现 high/critical。
 
 - [ ] **Step 3: 建立公开许可证文件**
@@ -273,10 +273,10 @@ Expected: PASS。
 
 Run: `git add app features/desktop features/readiness tests/desktop/client-readiness.test.mjs && git commit -m "feat: add desktop interview readiness controls"`
 
-### Task 7: Forge 打包、许可证与发布验证
+### Task 7: NSIS 打包、许可证与发布验证
 
 **Files:**
-- Create: `forge.config.ts`
+- Create: `electron-builder.yml`
 - Create: `scripts/verify-release.ps1`
 - Create: `docs/windows-client.md`
 - Modify: `package.json`
@@ -290,9 +290,9 @@ Run: `git add app features/desktop features/readiness tests/desktop/client-readi
 
 脚本检查安装产物存在、架构为 x64、standalone 静态资源完整、第三方许可证齐全、二进制哈希匹配，并用高置信规则扫描 `.env`、API Key、令牌和 `data/` 候选人记录。
 
-- [ ] **Step 2: 配置 Forge**
+- [ ] **Step 2: 配置 electron-builder**
 
-配置 Squirrel Windows x64 maker、应用图标、asar、额外资源和 `packagerConfig.executableName`；只包含运行所需文件，不打包源数据、测试、`.env` 或本地日志。
+配置 NSIS Windows x64 安装器、应用图标、asar、额外资源和 `executableName`；只包含运行所需文件，不打包源数据、测试、`.env` 或本地日志。
 
 - [ ] **Step 3: 补充使用文档**
 
@@ -308,7 +308,7 @@ Expected: PASS。
 
 - [ ] **Step 5: 提交**
 
-Run: `git add forge.config.ts scripts/verify-release.ps1 docs/windows-client.md README.md package.json package-lock.json && git commit -m "build: package Windows desktop client"`
+Run: `git add electron-builder.yml scripts/verify-release.ps1 docs/windows-client.md README.md package.json package-lock.json && git commit -m "build: package Windows desktop client"`
 
 ### Task 8: 全量回归与 GitHub 开源发布
 
@@ -325,7 +325,7 @@ Run: `git add forge.config.ts scripts/verify-release.ps1 docs/windows-client.md 
 
 - [ ] **Step 1: 创建 CI 和社区文件**
 
-CI 在 Windows runner 使用固定 Node LTS，执行 `npm ci`、全部 `test:*`、`npm run build`、桌面测试和无二进制的 Forge package smoke；`SECURITY.md` 禁止公开提交候选人数据或密钥。
+CI 在 Windows runner 使用固定 Node LTS，执行 `npm ci`、全部 `test:*`、`npm run build`、桌面测试和无前置二进制的 electron-builder package smoke；`SECURITY.md` 禁止公开提交候选人数据或密钥。
 
 - [ ] **Step 2: 执行完整本地回归**
 

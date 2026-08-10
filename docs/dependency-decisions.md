@@ -240,3 +240,19 @@
 - 选择：使用现有 npm `overrides` 将 nanoid 固定为 `3.3.17`。这是同一 3.x 版本线的安全补丁，许可证仍为 MIT，不新增运行时能力或数据传输。
 - 兼容性：PostCSS 的依赖范围允许该补丁版本；通过完整构建、现有测试和 `npm audit --audit-level=high` 验证。
 - 未选择：直接升级到 nanoid 6，因为属于不必要的主版本升级，可能增加 Next.js/PostCSS 兼容风险。
+
+# 2026-08-10：Windows 桌面壳与安装打包
+
+- Electron：固定 `43.3.0`，MIT。官方文档推荐配合独立打包工具；它保留现有 Next.js 服务端 API，避免将项目重写为纯静态前端。代价是安装体积与内存高于 Tauri，但当前复用成本最低。
+- electron-builder：固定 `26.15.3`，MIT，使用 NSIS 生成 Windows x64 安装器。它支持 extraResources、安装钩子和 Windows 签名，适合打包 OBS/驱动前置组件。
+- 未选择 Electron Forge 7.11.2：虽然是 Electron 官方推荐工具，但本次安装后 `npm audit` 报告 19 个 high 和 1 个 critical，来自构建链中的 `tar`、`tmp` 等依赖；默认无安全修复路径。切换 electron-builder 后审计为 0 漏洞，因此不接受通过跨主版本 overrides 强行覆盖。
+- 安全：Electron 渲染进程关闭 Node integration，开启 context isolation 和 sandbox；安装资源固定 SHA-256 并验证 Authenticode。构建工具只作为 devDependency，不进入网页运行时数据链路。
+- 维护：electron-builder 当前稳定版本仍有发布与 Windows NSIS 支持；构建链存在部分 deprecated 间接包警告，但 `npm audit --audit-level=high` 为 0，后续每次发布重新核验。
+
+# 2026-08-10：音频捕获与火山 RTC 字幕
+
+- 会议音频捕获：采用微软官方 `ActivateAudioInterfaceAsync` Application Loopback 接口模式，按选定会议进程树捕获。官方示例表明可包含指定进程及子进程；目标系统版本不支持时仅在用户确认后降级到 WASAPI 整体输出捕获。
+- RTC：优先火山引擎官方 Electron/Windows SDK、自定义音频源和 `startSubtitle` 字幕回调。SDK 版本、许可、计费、数据地域和二进制重分发权仍是接入闸门；没有官方许可文本时不把 SDK 二进制提交到 GitHub 或安装包。
+- 监听：复用会议软件原始播放，不重新播放回环 PCM，避免双声和回声。
+- 人工介入：本机真实麦克风与 AI TTS 通过互斥混音写入虚拟麦克风；人工通道不发送到 RTC 字幕房间。
+- 数据：原始 PCM 默认不落盘，增量字幕只显示，最终字幕才持久化；RTC Token 使用 DPAPI，AppKey 不进入客户端。
