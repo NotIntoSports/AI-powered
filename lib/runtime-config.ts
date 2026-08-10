@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { z } from "zod";
@@ -80,7 +80,7 @@ export async function getModelRuntimeConfig(): Promise<ModelRuntimeConfig> {
   return {
     apiKey,
     baseUrl: (process.env.OPENAI_BASE_URL || "https://api.openai.com/v1").replace(/\/$/, ""),
-    model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
+    model: process.env.OPENAI_MODEL || "",
     source: apiKey ? "environment" : "default"
   };
 }
@@ -115,17 +115,9 @@ export async function saveModelRuntimeConfig(input: {
 }
 
 export async function clearModelRuntimeConfig() {
-  const settings = settingsSchema.parse({
-    baseUrl: "https://api.openai.com/v1",
-    model: "gpt-4.1-mini",
-    encryptedApiKey: null
-  });
-  await mkdir(dataDirectory, { recursive: true });
-  const temporaryPath = `${settingsPath}.${process.pid}.tmp`;
-  await writeFile(temporaryPath, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
-  await rename(temporaryPath, settingsPath);
+  await rm(settingsPath, { force: true });
   globalConfig.decryptedModelKey = undefined;
-  globalConfig.modelSettingsPromise = Promise.resolve(settings);
+  globalConfig.modelSettingsPromise = Promise.resolve(null);
 }
 
 export function isSecureModelEndpoint(value: string) {
@@ -142,5 +134,5 @@ export function isLocalModelEndpoint(value: string) {
 }
 
 export function isModelRuntimeConfigured(config: ModelRuntimeConfig) {
-  return Boolean(config.apiKey) || isLocalModelEndpoint(config.baseUrl);
+  return Boolean(config.model) && (Boolean(config.apiKey) || isLocalModelEndpoint(config.baseUrl));
 }

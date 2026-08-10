@@ -20,7 +20,7 @@ const sourceLabels = {
 export function ModelSettings() {
   const [config, setConfig] = useState<PublicModelConfig | null>(null);
   const [baseUrl, setBaseUrl] = useState("https://api.openai.com/v1");
-  const [model, setModel] = useState("gpt-4.1-mini");
+  const [model, setModel] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [working, setWorking] = useState(false);
   const [message, setMessage] = useState("正在读取本机配置…");
@@ -87,8 +87,8 @@ export function ModelSettings() {
         modelConfigured: false,
         localEndpoint: false,
         baseUrl: "https://api.openai.com/v1",
-        model: "gpt-4.1-mini",
-        source: "settings"
+        model: "",
+        source: "default"
       };
       setConfig(next);
       setBaseUrl(next.baseUrl);
@@ -137,7 +137,12 @@ export function ModelSettings() {
         </label>
         <label>
           模型名称
-          <input value={model} onChange={(event) => setModel(event.target.value)} required />
+          <input
+            value={model}
+            onChange={(event) => setModel(event.target.value)}
+            placeholder="由你的 API 服务提供，例如自定义模型 ID"
+            required
+          />
         </label>
         <label>
           API 密钥
