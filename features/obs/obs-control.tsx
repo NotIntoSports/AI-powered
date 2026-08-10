@@ -6,6 +6,7 @@ import {
   configureObs,
   getVirtualCameraStatus,
   retryUntilSuccess,
+  setInterventionRouting,
   startVirtualCamera,
   stopVirtualCamera
 } from "./obs-service";
@@ -93,6 +94,23 @@ export function ObsControl({ onStatusChange }: ObsControlProps) {
     passwordRef.current = "";
   }, []);
 
+  useEffect(() => {
+    async function routeIntervention(event: Event) {
+      const client = clientRef.current;
+      if (!client) return;
+      const action = (event as CustomEvent<{ action?: "begin" | "end" | "resume" | "mute" }>).detail?.action;
+      if (!action) return;
+      try {
+        await setInterventionRouting(client, action);
+        setMessage(action === "begin" ? "人工麦克风已接入虚拟输出。" : action === "resume" ? "AI 音频已恢复。" : "输出已保持静音。");
+      } catch (cause) {
+        setMessage(`人工介入音频切换失败：${cause instanceof Error ? cause.message : String(cause)}`);
+      }
+    }
+    window.addEventListener("ai-intervention", routeIntervention);
+    return () => window.removeEventListener("ai-intervention", routeIntervention);
+  }, []);
+
   async function connect(
     targetUrl = url,
     targetPassword = password,
@@ -117,7 +135,7 @@ export function ObsControl({ onStatusChange }: ObsControlProps) {
         setVirtualCameraActive(true);
         setMessage(
           `OBS 已自动就绪：${result.sceneCreated ? "新建" : "更新"}场景、` +
-          `${result.inputCreated ? "新建" : "更新"}舞台源，虚拟摄像头已启动。`
+          `${result.inputCreated ? "新建" : "更新"}舞台源，人工麦克风已待命，虚拟摄像头已启动。`
         );
       } else {
         setVirtualCameraActive(await getVirtualCameraStatus(client));
@@ -158,7 +176,7 @@ export function ObsControl({ onStatusChange }: ObsControlProps) {
       setMessage(
         `OBS 已就绪：${result.sceneCreated ? "新建场景" : "更新场景"}，` +
         `${result.inputCreated ? "新建浏览器源" : "更新浏览器源"}，` +
-        `${result.audioMonitoringEnabled ? "舞台音频监听已开启" : "舞台音频待配置"}，虚拟摄像头已启动。`
+        `${result.audioMonitoringEnabled ? "舞台音频监听已开启" : "舞台音频待配置"}，人工麦克风已待命，虚拟摄像头已启动。`
       );
     } catch (cause) {
       const text = cause instanceof Error ? cause.message : String(cause);

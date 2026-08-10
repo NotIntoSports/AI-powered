@@ -1,11 +1,12 @@
 appId: com.aiinterviewer.desktop
 productName: AI Interviewer Desktop
+electronDist: node_modules/electron/dist
 directories:
   output: dist
 files:
   - dist-desktop/**/*
   - package.json
-  - node_modules/**/*
+  - node_modules/zod/**/*
 extraResources:
   - from: .desktop-runtime
     to: .desktop-runtime

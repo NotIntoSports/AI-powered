@@ -1,5 +1,6 @@
 export const OBS_SCENE_NAME = "AI Interviewer";
 export const OBS_INPUT_NAME = "AI Interviewer Stage";
+export const OBS_HUMAN_MIC_NAME = "AI Interviewer Human Mic";
 export const OBS_WIDTH = 1280;
 export const OBS_HEIGHT = 720;
 
@@ -28,7 +29,17 @@ export type ObsSetupResult = {
   inputCreated: boolean;
   audioMonitoringEnabled: boolean;
   virtualCameraStarted: boolean;
+  humanMicReady: boolean;
 };
+
+export type InterventionAction = "begin" | "end" | "resume" | "mute";
+
+export async function setInterventionRouting(client: ObsCallClient, action: InterventionAction) {
+  const humanSpeaking = action === "begin";
+  const aiSpeaking = action === "resume";
+  await client.call("SetInputMute", { inputName: OBS_HUMAN_MIC_NAME, inputMuted: !humanSpeaking });
+  await client.call("SetInputMute", { inputName: OBS_INPUT_NAME, inputMuted: !aiSpeaking });
+}
 
 export async function retryUntilSuccess(
   operation: () => Promise<boolean>,
@@ -126,6 +137,25 @@ export async function configureObs(
     monitorType: "OBS_MONITORING_TYPE_MONITOR_ONLY"
   });
 
+  const audioInputs = await client.call("GetInputList", {
+    inputKind: "wasapi_input_capture"
+  }) as InputListResponse;
+  const humanMicExists = audioInputs.inputs?.some((input) => input.inputName === OBS_HUMAN_MIC_NAME) ?? false;
+  if (!humanMicExists) {
+    await client.call("CreateInput", {
+      sceneName: OBS_SCENE_NAME,
+      inputName: OBS_HUMAN_MIC_NAME,
+      inputKind: "wasapi_input_capture",
+      inputSettings: { device_id: "default" },
+      sceneItemEnabled: true
+    });
+  }
+  await client.call("SetInputAudioMonitorType", {
+    inputName: OBS_HUMAN_MIC_NAME,
+    monitorType: "OBS_MONITORING_TYPE_MONITOR_ONLY"
+  });
+  await client.call("SetInputMute", { inputName: OBS_HUMAN_MIC_NAME, inputMuted: true });
+
   const virtualCamera = await client.call("GetVirtualCamStatus") as VirtualCameraResponse;
   if (!virtualCamera.outputActive) {
     await client.call("SetVideoSettings", {
@@ -170,7 +200,8 @@ export async function configureObs(
     sceneCreated: !sceneExists,
     inputCreated: !inputExists,
     audioMonitoringEnabled: true,
-    virtualCameraStarted: !virtualCamera.outputActive
+    virtualCameraStarted: !virtualCamera.outputActive,
+    humanMicReady: true
   };
 }
 

@@ -1,6 +1,8 @@
 {
   "name": "authorized-interview-screen-helper",
   "version": "0.1.0",
+  "description": "Windows desktop client for authorized AI-assisted interviews",
+  "author": "AI Interviewer Desktop contributors",
   "private": true,
   "main": "dist-desktop/main.js",
   "scripts": {

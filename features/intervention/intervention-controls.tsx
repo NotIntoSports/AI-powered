@@ -39,6 +39,7 @@ export function InterventionControls({ onAiPauseChange }: { onAiPauseChange(paus
         <button type="button" className="secondary" disabled={!state.aiPaused || state.humanMicActive} onClick={() => {
           setState((current) => resumeAi(current));
           onAiPauseChange(false);
+          window.dispatchEvent(new CustomEvent("ai-intervention", { detail: { action: "resume" } }));
         }}>恢复 AI</button>
         <button type="button" className="danger" onClick={() => {
           setState((current) => emergencyMute(current));

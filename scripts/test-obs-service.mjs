@@ -12,9 +12,11 @@ const compiled = ts.transpileModule(source, {
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`;
 const {
   OBS_INPUT_NAME,
+  OBS_HUMAN_MIC_NAME,
   OBS_SCENE_NAME,
   configureObs,
   retryUntilSuccess,
+  setInterventionRouting,
   startVirtualCamera,
   stopVirtualCamera
 } = await import(moduleUrl);
@@ -73,8 +75,9 @@ const freshResult = await configureObs(fresh, "http://localhost:3000/stage");
 assert.deepEqual(freshResult, {
   sceneCreated: true,
   inputCreated: true,
-  audioMonitoringEnabled: true,
-  virtualCameraStarted: true
+    audioMonitoringEnabled: true,
+  virtualCameraStarted: true,
+  humanMicReady: true
 });
 assert.equal(fresh.cameraActive, true);
 assert.ok(fresh.calls.some((call) => call.requestType === "CreateScene"));
@@ -97,13 +100,22 @@ const existingResult = await configureObs(existing, "http://localhost:3000/stage
 assert.deepEqual(existingResult, {
   sceneCreated: false,
   inputCreated: false,
-  audioMonitoringEnabled: true,
-  virtualCameraStarted: false
+    audioMonitoringEnabled: true,
+  virtualCameraStarted: false,
+  humanMicReady: true
 });
 assert.ok(existing.calls.some((call) => call.requestType === "SetInputSettings"));
 assert.equal(existing.calls.some((call) => call.requestType === "CreateScene"), false);
-assert.equal(existing.calls.some((call) => call.requestType === "CreateInput"), false);
+assert.equal(existing.calls.some((call) => call.requestType === "CreateInput" && call.requestData.inputName === OBS_INPUT_NAME), false);
+assert.ok(existing.calls.some((call) => call.requestType === "CreateInput" && call.requestData.inputName === OBS_HUMAN_MIC_NAME));
 assert.equal(existing.calls.some((call) => call.requestType === "SetVideoSettings"), false);
+
+await setInterventionRouting(existing, "begin");
+assert.ok(existing.calls.some((call) => call.requestType === "SetInputMute" && call.requestData.inputName === OBS_HUMAN_MIC_NAME && call.requestData.inputMuted === false));
+await setInterventionRouting(existing, "end");
+assert.ok(existing.calls.some((call) => call.requestType === "SetInputMute" && call.requestData.inputName === OBS_INPUT_NAME && call.requestData.inputMuted === true));
+await setInterventionRouting(existing, "resume");
+assert.ok(existing.calls.some((call) => call.requestType === "SetInputMute" && call.requestData.inputName === OBS_INPUT_NAME && call.requestData.inputMuted === false));
 
 await stopVirtualCamera(existing);
 assert.equal(existing.cameraActive, false);
