@@ -2,6 +2,7 @@
   "name": "authorized-interview-screen-helper",
   "version": "0.1.0",
   "private": true,
+  "main": "dist-desktop/main.js",
   "scripts": {
     "prepare:vad": "node scripts/copy-vad-assets.mjs",
     "predev": "npm run prepare:vad",
@@ -9,6 +10,8 @@
     "prebuild": "npm run prepare:vad",
     "build": "next build",
     "build:standalone": "node scripts/build-next-standalone.mjs",
+    "build:desktop": "tsc -p tsconfig.desktop.json",
+    "test:desktop-shell": "node --no-warnings --experimental-strip-types --test tests/desktop/server-process.test.mjs tests/desktop/window-security.test.mjs",
     "start": "next start -H 127.0.0.1",
     "test:transcription": "node scripts/smoke-transcription.mjs",
     "test:transcription-security": "node --no-warnings --experimental-strip-types scripts/test-transcription-security.mjs",

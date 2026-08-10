@@ -10,6 +10,8 @@ data/
 public/vendor/vad/
 out/
 dist/
+dist-desktop/
+*.tsbuildinfo
 .desktop-runtime/
 .worktrees/
 resources/prerequisites/*.exe
