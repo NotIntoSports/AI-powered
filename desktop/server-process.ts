@@ -29,7 +29,8 @@ export function buildServerEnvironment(
     ...inherited,
     ELECTRON_RUN_AS_NODE: "1",
     HOSTNAME: "127.0.0.1",
-    PORT: String(port)
+    PORT: String(port),
+    AI_INTERVIEW_BASE_URL: `http://127.0.0.1:${port}`
   };
 }
 

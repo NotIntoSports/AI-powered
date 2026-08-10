@@ -2,10 +2,12 @@ import path from "node:path";
 import { app, BrowserWindow, ipcMain, session } from "electron";
 
 import { registerDesktopIpc } from "./ipc";
+import { detectObs, startOwnedObs } from "./obs-process";
 import { startLocalServer, stopOwnedProcess } from "./server-process";
 import type { DesktopStatus, OwnedProcess } from "./types";
 
 let server: (OwnedProcess & { baseUrl: string }) | null = null;
+let obsProcess: OwnedProcess | null = null;
 let mainWindow: BrowserWindow | null = null;
 
 function isAllowedLocalUrl(value: string, baseUrl: string): boolean {
@@ -55,6 +57,8 @@ if (!hasLock) {
     session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
       callback(false);
     });
+    const obsInstallation = detectObs();
+    if (obsInstallation) obsProcess = startOwnedObs(obsInstallation);
     const runtimeRoot = app.isPackaged
       ? path.join(process.resourcesPath, ".desktop-runtime")
       : path.join(process.cwd(), ".desktop-runtime");
@@ -77,4 +81,7 @@ if (!hasLock) {
 }
 
 app.on("window-all-closed", () => app.quit());
-app.on("before-quit", () => { void stopOwnedProcess(server); });
+app.on("before-quit", () => {
+  void stopOwnedProcess(server);
+  void stopOwnedProcess(obsProcess);
+});

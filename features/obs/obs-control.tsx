@@ -39,14 +39,19 @@ export function ObsControl({ onStatusChange }: ObsControlProps) {
     void fetch("/api/obs/runtime", { cache: "no-store" })
       .then(async (response) => {
         if (!response.ok) throw new Error("OBS_RUNTIME_UNAVAILABLE");
-        return response.json() as Promise<{ managed: boolean; url: string; password: string }>;
+        return response.json() as Promise<{
+          managed: boolean;
+          url: string;
+          password: string;
+          stageUrl: string;
+        }>;
       })
       .then(async (runtime) => {
         if (!active) return;
         if (runtime.managed && runtime.password) {
           setUrl(runtime.url);
           const connected = await retryUntilSuccess(
-            () => connect(runtime.url, runtime.password, true),
+            () => connect(runtime.url, runtime.password, true, runtime.stageUrl),
             {
               attempts: 20,
               delayMs: 1_500,
@@ -91,7 +96,8 @@ export function ObsControl({ onStatusChange }: ObsControlProps) {
   async function connect(
     targetUrl = url,
     targetPassword = password,
-    configureAfterConnect = false
+    configureAfterConnect = false,
+    configuredStageUrl = ""
   ) {
     setConnection("connecting");
     setMessage(configureAfterConnect ? "正在自动连接并配置 OBS…" : "正在连接 OBS…");
@@ -104,7 +110,10 @@ export function ObsControl({ onStatusChange }: ObsControlProps) {
       setVersion(hello.obsWebSocketVersion);
       setConnection("connected");
       if (configureAfterConnect) {
-        const result = await configureObs(client, `${window.location.origin}/stage`);
+        const result = await configureObs(
+          client,
+          configuredStageUrl || `${window.location.origin}/stage`
+        );
         setVirtualCameraActive(true);
         setMessage(
           `OBS 已自动就绪：${result.sceneCreated ? "新建" : "更新"}场景、` +
