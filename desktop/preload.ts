@@ -15,7 +15,9 @@ const bridge: DesktopBridge = Object.freeze({
     const handler = (_event: Electron.IpcRendererEvent, data: unknown) => listener(data);
     ipcRenderer.on("desktop:audio-event", handler);
     return () => ipcRenderer.removeListener("desktop:audio-event", handler);
-  }
+  },
+  getPrerequisiteStatus: () => ipcRenderer.invoke("desktop:get-prerequisite-status"),
+  installPrerequisite: (component: "obs" | "virtual-audio") => ipcRenderer.invoke("desktop:install-prerequisite", component)
 });
 
 contextBridge.exposeInMainWorld("aiInterviewerDesktop", bridge);

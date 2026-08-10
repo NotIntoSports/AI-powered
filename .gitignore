@@ -17,5 +17,5 @@ native/**/obj/
 native/**/publish/
 .desktop-runtime/
 .worktrees/
-resources/prerequisites/*.exe
-resources/prerequisites/*.zip
+resources/prerequisites/*
+!resources/prerequisites/.gitkeep

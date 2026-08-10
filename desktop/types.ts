@@ -11,6 +11,8 @@ export interface DesktopBridge {
   stopAudioCapture(): Promise<{ stopped: true }>;
   onAudioPcm(listener: (data: Uint8Array) => void): () => void;
   onAudioEvent(listener: (event: unknown) => void): () => void;
+  getPrerequisiteStatus(): Promise<{ obsInstalled: boolean; virtualAudioInstalled: boolean }>;
+  installPrerequisite(component: "obs" | "virtual-audio"): Promise<{ installed: true }>;
 }
 
 export interface OwnedProcess {

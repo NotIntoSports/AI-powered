@@ -1,0 +1,34 @@
+appId: com.aiinterviewer.desktop
+productName: AI Interviewer Desktop
+directories:
+  output: dist
+files:
+  - dist-desktop/**/*
+  - package.json
+  - node_modules/**/*
+extraResources:
+  - from: .desktop-runtime
+    to: .desktop-runtime
+  - from: native/AudioBridge/publish
+    to: audio-bridge
+  - from: resources/prerequisites
+    to: prerequisites
+  - from: scripts/install-prerequisite.ps1
+    to: scripts/install-prerequisite.ps1
+  - from: LICENSE
+    to: licenses/LICENSE
+  - from: THIRD_PARTY_NOTICES.md
+    to: licenses/THIRD_PARTY_NOTICES.md
+asar: true
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  executableName: AI-Interviewer
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: AI Interviewer Desktop
+  artifactName: AI-Interviewer-Desktop-${version}-Windows-x64.${ext}

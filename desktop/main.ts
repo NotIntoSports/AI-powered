@@ -79,7 +79,15 @@ if (!hasLock) {
       () => mainWindow,
       app.isPackaged
         ? path.join(process.resourcesPath, "audio-bridge", "AudioBridge.exe")
-        : path.join(process.cwd(), "native", "AudioBridge", "publish", "AudioBridge.exe")
+        : path.join(process.cwd(), "native", "AudioBridge", "publish", "AudioBridge.exe"),
+      {
+        scriptPath: app.isPackaged
+          ? path.join(process.resourcesPath, "scripts", "install-prerequisite.ps1")
+          : path.join(process.cwd(), "scripts", "install-prerequisite.ps1"),
+        directory: app.isPackaged
+          ? path.join(process.resourcesPath, "prerequisites")
+          : path.join(process.cwd(), "resources", "prerequisites")
+      }
     );
   }).catch((error) => {
     console.error("Desktop startup failed", error instanceof Error ? error.message : error);

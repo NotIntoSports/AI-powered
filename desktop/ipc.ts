@@ -1,6 +1,7 @@
 import type { BrowserWindow, IpcMain } from "electron";
 import { AudioCaptureProcess } from "./audio/capture-process";
 import { listMeetingProcesses } from "./audio/meeting-processes";
+import { getPrerequisiteStatus, installPrerequisite } from "./prerequisites/windows-install";
 import type { DesktopStatus } from "./types";
 
 export function registerDesktopIpc(
@@ -8,6 +9,7 @@ export function registerDesktopIpc(
   getStatus: () => DesktopStatus,
   getWindow: () => BrowserWindow | null,
   audioBridgePath: string
+  ,installResources?: { scriptPath: string; directory: string }
 ): void {
   ipcMain.handle("desktop:get-status", () => getStatus());
   const capture = new AudioCaptureProcess();
@@ -28,5 +30,12 @@ export function registerDesktopIpc(
   ipcMain.handle("desktop:stop-audio-capture", () => {
     capture.stop();
     return { stopped: true as const };
+  });
+  ipcMain.handle("desktop:get-prerequisite-status", () => getPrerequisiteStatus());
+  ipcMain.handle("desktop:install-prerequisite", async (_event, component: unknown) => {
+    if (component !== "obs" && component !== "virtual-audio") throw new Error("INVALID_PREREQUISITE");
+    if (!installResources) throw new Error("PREREQUISITES_NOT_PACKAGED");
+    await installPrerequisite({ component, scriptPath: installResources.scriptPath, resourcesDirectory: installResources.directory });
+    return { installed: true as const };
   });
 }

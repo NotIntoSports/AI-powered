@@ -19,6 +19,7 @@ import { RtcSettings } from "../features/settings/rtc-settings";
 import { InterventionControls } from "../features/intervention/intervention-controls";
 import { LiveSubtitles } from "../features/subtitles/live-subtitles";
 import { RtcBridgeControl } from "../features/rtc/rtc-bridge-control";
+import { PrerequisiteSetup } from "../features/desktop/prerequisite-setup";
 import { getInterviewReadiness } from "../features/readiness/interview-readiness";
 import { MeetingHandoffControl } from "../features/meeting/meeting-handoff-control";
 
@@ -671,6 +672,7 @@ export default function ConsolePage() {
       {error && <p className="error">{error}</p>}
 
       <section className="consoleGrid">
+        <PrerequisiteSetup />
         <ObsControl onStatusChange={handleObsStatus} />
         <VirtualCameraPreview
           active={virtualCameraActive}
