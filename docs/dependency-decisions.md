@@ -253,6 +253,7 @@
 
 - 会议音频捕获：采用微软官方 `ActivateAudioInterfaceAsync` Application Loopback 接口模式，按选定会议进程树捕获。官方示例表明可包含指定进程及子进程；目标系统版本不支持时仅在用户确认后降级到 WASAPI 整体输出捕获。
 - RTC：优先火山引擎官方 Electron/Windows SDK、自定义音频源和 `startSubtitle` 字幕回调。SDK 版本、许可、计费、数据地域和二进制重分发权仍是接入闸门；没有官方许可文本时不把 SDK 二进制提交到 GitHub 或安装包。
+- 最小验证：官方 npm 包 `@volcengine/rtc 4.69.0`，BSD-3-Clause，仅新增 `eventemitter3` 运行依赖，`npm audit` 为 0。其官方类型定义确认具有 `setExternalAudioTrack`、`setAudioSourceType`、`startSubtitle` 和 `onSubtitleMessageReceived`，可在 Electron 的 Chromium 渲染环境接收由 Web Audio 生成的外部 `MediaStreamTrack`；因此不采用额外的火山 Windows DLL sidecar。
 - 监听：复用会议软件原始播放，不重新播放回环 PCM，避免双声和回声。
 - 人工介入：本机真实麦克风与 AI TTS 通过互斥混音写入虚拟麦克风；人工通道不发送到 RTC 字幕房间。
 - 数据：原始 PCM 默认不落盘，增量字幕只显示，最终字幕才持久化；RTC Token 使用 DPAPI，AppKey 不进入客户端。

@@ -12,6 +12,7 @@
     "build:standalone": "node scripts/build-next-standalone.mjs",
     "build:desktop": "tsc -p tsconfig.desktop.json",
     "test:desktop-shell": "node --no-warnings --experimental-strip-types --test tests/desktop/server-process.test.mjs tests/desktop/window-security.test.mjs",
+    "test:rtc-capabilities": "node scripts/test-rtc-capabilities.mjs",
     "start": "next start -H 127.0.0.1",
     "test:transcription": "node scripts/smoke-transcription.mjs",
     "test:transcription-security": "node --no-warnings --experimental-strip-types scripts/test-transcription-security.mjs",
@@ -47,6 +48,7 @@
   },
   "dependencies": {
     "@ricky0123/vad-web": "^0.0.30",
+    "@volcengine/rtc": "4.69.0",
     "next": "^15.4.0",
     "obs-websocket-js": "^5.0.8",
     "react": "^19.1.0",
