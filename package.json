@@ -1,0 +1,61 @@
+{
+  "name": "authorized-interview-screen-helper",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "prepare:vad": "node scripts/copy-vad-assets.mjs",
+    "predev": "npm run prepare:vad",
+    "dev": "next dev -H 127.0.0.1",
+    "prebuild": "npm run prepare:vad",
+    "build": "next build",
+    "start": "next start -H 127.0.0.1",
+    "test:transcription": "node scripts/smoke-transcription.mjs",
+    "test:transcription-security": "node --no-warnings --experimental-strip-types scripts/test-transcription-security.mjs",
+    "test:transcription-security-route": "node scripts/smoke-transcription-security-route.mjs",
+    "test:transcription-turn": "node scripts/test-transcription-turn.mjs",
+    "test:audio": "node scripts/test-audio-devices.mjs",
+    "test:audio-signal": "node scripts/test-audio-signal.mjs",
+    "test:tts-error": "node scripts/test-tts-error.mjs",
+    "test:echo-guard": "node scripts/test-echo-guard.mjs",
+    "test:windows-stdio": "node scripts/test-windows-stdio.mjs",
+    "test:launchers": "node scripts/test-windows-launchers.mjs",
+    "test:node-setup": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test-ensure-node.ps1",
+    "test:ollama-setup": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test-setup-ollama.ps1",
+    "test:model-output": "node scripts/test-model-output.mjs",
+    "test:prompt-transcript": "node scripts/test-prompt-transcript.mjs",
+    "test:question-dedup": "node scripts/test-question-dedup.mjs",
+    "test:request-timeout": "node scripts/test-request-timeout.mjs",
+    "test:export": "node scripts/test-interview-export.mjs",
+    "test:obs": "node scripts/test-obs-service.mjs",
+    "test:camera": "node scripts/test-virtual-camera-device.mjs",
+    "test:readiness": "node --no-warnings --experimental-strip-types scripts/test-interview-readiness.mjs",
+    "test:meeting-handoff": "node --no-warnings --experimental-strip-types scripts/test-meeting-handoff.mjs",
+    "test:origin": "node scripts/test-request-origin.mjs",
+    "test:security-headers": "node scripts/smoke-security-headers.mjs",
+    "test:session": "node scripts/smoke-session-persistence.mjs",
+    "check:environment": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/check-environment.ps1",
+    "setup:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/setup-windows.ps1",
+    "setup:ollama": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/setup-ollama.ps1",
+    "start:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/start-windows.ps1",
+    "stop:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/stop-windows.ps1",
+    "setup:whisper": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/setup-whisper.ps1",
+    "start:whisper": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/start-whisper.ps1 -Background"
+  },
+  "dependencies": {
+    "@ricky0123/vad-web": "^0.0.30",
+    "next": "^15.4.0",
+    "obs-websocket-js": "^5.0.8",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "typescript": "^5.8.0"
+  },
+  "overrides": {
+    "postcss": "8.5.23",
+    "sharp": "0.35.3"
+  }
+}
