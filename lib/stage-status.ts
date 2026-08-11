@@ -7,6 +7,7 @@ export type StageStatus = {
   ttsError: string;
   lastSpeechAt: number;
   mediaReady: boolean;
+  stopSpeechAt: number;
 };
 
 export type StageTestSpeech = {
@@ -16,8 +17,9 @@ export type StageTestSpeech = {
 };
 
 const globalStatus = globalThis as typeof globalThis & {
-  stageStatus?: Omit<StageStatus, "connected">;
+  stageStatus?: Omit<StageStatus, "connected" | "stopSpeechAt">;
   stageTestSpeech?: StageTestSpeech;
+  stageStopSpeechAt?: number;
 };
 
 export function updateStageStatus(status: {
@@ -46,8 +48,14 @@ export function getStageStatus(): StageStatus {
   };
   return {
     ...status,
-    connected: Date.now() - status.lastSeen < 8_000
+    connected: Date.now() - status.lastSeen < 8_000,
+    stopSpeechAt: globalStatus.stageStopSpeechAt ?? 0
   };
+}
+
+export function requestStageSpeechStop() {
+  globalStatus.stageStopSpeechAt = Date.now();
+  return globalStatus.stageStopSpeechAt;
 }
 
 export function queueStageTestSpeech(text: string): StageTestSpeech {

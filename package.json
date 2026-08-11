@@ -2,6 +2,9 @@
   "name": "authorized-interview-screen-helper",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=22.13.0"
+  },
   "scripts": {
     "prepare:vad": "node scripts/copy-vad-assets.mjs",
     "predev": "npm run prepare:vad",
@@ -18,6 +21,8 @@
     "test:tts-error": "node scripts/test-tts-error.mjs",
     "test:echo-guard": "node scripts/test-echo-guard.mjs",
     "test:windows-stdio": "node scripts/test-windows-stdio.mjs",
+    "test:sqlite": "node --no-warnings scripts/test-sqlite-storage.mjs",
+    "test:sqlite-migration": "node --no-warnings scripts/smoke-sqlite-migration.mjs",
     "test:launchers": "node scripts/test-windows-launchers.mjs",
     "test:node-setup": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test-ensure-node.ps1",
     "test:ollama-setup": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test-setup-ollama.ps1",
@@ -29,10 +34,11 @@
     "test:obs": "node scripts/test-obs-service.mjs",
     "test:camera": "node scripts/test-virtual-camera-device.mjs",
     "test:readiness": "node --no-warnings --experimental-strip-types scripts/test-interview-readiness.mjs",
+    "test:readiness-snapshot": "node --no-warnings --experimental-strip-types scripts/test-readiness-snapshot.mjs",
     "test:meeting-handoff": "node --no-warnings --experimental-strip-types scripts/test-meeting-handoff.mjs",
     "test:origin": "node scripts/test-request-origin.mjs",
     "test:security-headers": "node scripts/smoke-security-headers.mjs",
-    "test:session": "node scripts/smoke-session-persistence.mjs",
+    "test:session": "node --no-warnings scripts/smoke-session-persistence.mjs",
     "check:environment": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/check-environment.ps1",
     "setup:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/setup-windows.ps1",
     "setup:ollama": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/setup-ollama.ps1",

@@ -10,7 +10,8 @@ $workspace = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $toolsRoot = Join-Path $workspace '.tools'
 $logsRoot = Join-Path $toolsRoot 'logs'
 $nextPidPath = Join-Path $toolsRoot 'next.pid'
-$obsPasswordPath = Join-Path $toolsRoot 'obs-websocket-password.protected'
+$legacyObsPasswordPath = Join-Path $toolsRoot 'obs-websocket-password.protected'
+$obsSecretStore = Join-Path $PSScriptRoot 'obs-secret-store.mjs'
 $envPath = Join-Path $workspace '.env.local'
 
 function Get-EnvFileValue([string]$Key) {
@@ -47,9 +48,12 @@ function Get-PortOwner([int]$TargetPort) {
 $npm = Get-Command 'npm.cmd' -ErrorAction SilentlyContinue
 $node = Get-Command 'node.exe' -ErrorAction SilentlyContinue
 $nodeVersion = if ($node) { (& $node.Source --version).Trim() } else { '' }
-$nodeMajor = if ($nodeVersion -match '^v(\d+)') { [int]$Matches[1] } else { 0 }
-if (-not $npm -or $nodeMajor -lt 22) {
-    throw 'Node.js 22 LTS or newer and npm are required. Run First-Time-Setup.cmd.'
+$nodeCompatible = if ($nodeVersion -match '^v(\d+)\.(\d+)\.(\d+)') {
+    ([int]$Matches[1] -gt 22) -or
+        ([int]$Matches[1] -eq 22 -and [int]$Matches[2] -ge 13)
+} else { $false }
+if (-not $npm -or -not $nodeCompatible) {
+    throw 'Node.js 22.13.0 or newer and npm are required. Run First-Time-Setup.cmd.'
 }
 if (-not (Test-Path -LiteralPath (Join-Path $workspace 'node_modules\next\package.json'))) {
     throw 'Project dependencies are missing. Run npm run setup:windows first.'
@@ -70,9 +74,36 @@ if (-not $SkipObs) {
         (Join-Path $env:ProgramFiles 'obs-studio\bin\64bit\obs64.exe'),
         (Join-Path $env:LOCALAPPDATA 'Programs\obs-studio\bin\64bit\obs64.exe')
     ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-    if ($obsPath -and -not (Get-Process 'obs64' -ErrorAction SilentlyContinue)) {
-        if (Test-Path -LiteralPath $obsPasswordPath) {
-            $protectedPassword = (Get-Content -Raw -LiteralPath $obsPasswordPath).Trim()
+    $obsProcesses = @(Get-Process 'obs64' -ErrorAction SilentlyContinue)
+    $mayManageObs = [bool]$obsPath
+    if ($obsPath -and $obsProcesses.Count -gt 0) {
+        Write-Host 'OBS is already running.' -ForegroundColor Yellow
+        Write-Host 'Stop any recording or live stream before continuing.' -ForegroundColor Yellow
+        $answer = Read-Host 'Allow AI Interviewer to close OBS normally and restart it for automatic connection? [Y/N]'
+        if ($answer -match '^(?i:y|yes)$') {
+            foreach ($process in $obsProcesses) { [void]$process.CloseMainWindow() }
+            $deadline = [DateTime]::UtcNow.AddSeconds(20)
+            while ((Get-Process 'obs64' -ErrorAction SilentlyContinue) -and [DateTime]::UtcNow -lt $deadline) {
+                Start-Sleep -Milliseconds 250
+            }
+            if (Get-Process 'obs64' -ErrorAction SilentlyContinue) {
+                Write-Warning 'OBS did not close normally. It was left running and will not be managed.'
+                $mayManageObs = $false
+            }
+        } else {
+            Write-Warning 'Existing OBS was left running. Close it and run this launcher again for automatic connection.'
+            $mayManageObs = $false
+        }
+    }
+    if ($obsPath -and $mayManageObs) {
+        $protectedPassword = (& $node.Source --no-warnings $obsSecretStore 'get' $workspace).Trim()
+        if ($LASTEXITCODE -ne 0) { throw 'Could not read the OBS password from SQLite.' }
+        if (-not $protectedPassword -and (Test-Path -LiteralPath $legacyObsPasswordPath)) {
+            $protectedPassword = (Get-Content -Raw -LiteralPath $legacyObsPasswordPath).Trim()
+            $protectedPassword | & $node.Source --no-warnings $obsSecretStore 'set' $workspace
+            if ($LASTEXITCODE -ne 0) { throw 'Could not migrate the OBS password to SQLite.' }
+        }
+        if ($protectedPassword) {
             $obsPassword = $protectedPassword |
                 powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
                     -File (Join-Path $PSScriptRoot 'dpapi-secret.ps1') -Mode Unprotect
@@ -90,7 +121,8 @@ if (-not $SkipObs) {
             if ($LASTEXITCODE -ne 0 -or -not $protectedPassword) {
                 throw 'Could not protect the local OBS WebSocket password.'
             }
-            Set-Content -LiteralPath $obsPasswordPath -Value $protectedPassword -Encoding ascii
+            $protectedPassword | & $node.Source --no-warnings $obsSecretStore 'set' $workspace
+            if ($LASTEXITCODE -ne 0) { throw 'Could not save the OBS password in SQLite.' }
         }
         $env:AI_INTERVIEW_OBS_MANAGED = '1'
         $env:AI_INTERVIEW_OBS_PASSWORD = $obsPassword

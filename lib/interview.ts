@@ -1,10 +1,16 @@
-import { mkdir, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import {
   interviewReportSchema,
   type InterviewReport
 } from "./interview-report";
+import {
+  dataRoot,
+  getDatabase,
+  hasMigration,
+  runTransaction
+} from "./database";
 
 export type TranscriptItem = {
   role: "interviewer" | "candidate";
@@ -74,11 +80,13 @@ const initialSession: InterviewSession = {
   report: null
 };
 
-const dataDirectory = process.env.INTERVIEW_DATA_DIR
-  ? path.resolve(process.env.INTERVIEW_DATA_DIR)
-  : path.join(process.cwd(), "data", "interviews");
+const dataDirectory = path.join(dataRoot, "interviews");
 const currentSessionPath = path.join(dataDirectory, "current.json");
 const archiveDirectory = path.join(dataDirectory, "archive");
+const legacyLocations = [
+  { current: currentSessionPath, archive: archiveDirectory },
+  { current: path.join(dataRoot, "current.json"), archive: path.join(dataRoot, "archive") }
+];
 
 const globalStore = globalThis as typeof globalThis & {
   interviewSession?: InterviewSession;
@@ -90,51 +98,86 @@ function now() {
   return new Date().toISOString();
 }
 
-async function loadSessionFromDisk(): Promise<InterviewSession> {
-  let serialized: string;
-  try {
-    serialized = await readFile(currentSessionPath, "utf8");
-  } catch (cause) {
-    if ((cause as NodeJS.ErrnoException).code !== "ENOENT") throw cause;
-    return structuredClone(initialSession);
+async function migrateLegacySessions() {
+  if (hasMigration("interview-json")) return;
+  let current: InterviewSession | null = null;
+  const archived = new Map<string, InterviewSession>();
+  for (const location of legacyLocations) {
+    try {
+      current ??= sessionSchema.parse(JSON.parse(await readFile(location.current, "utf8")));
+    } catch (cause) {
+      if ((cause as NodeJS.ErrnoException).code !== "ENOENT") {
+        console.warn("A legacy current interview file was invalid and was not imported.");
+      }
+    }
+    let filenames: string[] = [];
+    try { filenames = await readdir(location.archive); } catch { /* no legacy archive */ }
+    for (const filename of filenames.filter((name) => /^[a-zA-Z0-9-]+\.json$/.test(name))) {
+      try {
+        const session = sessionSchema.parse(JSON.parse(
+          await readFile(path.join(location.archive, filename), "utf8")
+        ));
+        if (session.sessionId) archived.set(session.sessionId, session);
+      } catch {
+        console.warn(`Legacy interview archive ${filename} was invalid and was not imported.`);
+      }
+    }
   }
+  runTransaction(() => {
+    const timestamp = now();
+    if (current) {
+      getDatabase().prepare(`
+        INSERT INTO current_session(singleton_id, payload, updated_at) VALUES (1, ?, ?)
+        ON CONFLICT(singleton_id) DO NOTHING
+      `).run(JSON.stringify(current), timestamp);
+    }
+    const insertArchive = getDatabase().prepare(`
+      INSERT INTO archived_sessions(session_id, finished_at, payload, updated_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(session_id) DO NOTHING
+    `);
+    for (const session of archived.values()) {
+      insertArchive.run(
+        session.sessionId,
+        session.finishedAt || session.startedAt || timestamp,
+        JSON.stringify(session),
+        timestamp
+      );
+    }
+    getDatabase().prepare(`
+      INSERT INTO app_settings(key, value, updated_at) VALUES (?, 'complete', ?)
+      ON CONFLICT(key) DO UPDATE SET value = 'complete', updated_at = excluded.updated_at
+    `).run("migration:interview-json", timestamp);
+  });
+}
+
+async function loadSessionFromDisk(): Promise<InterviewSession> {
+  await migrateLegacySessions();
+  const row = getDatabase().prepare(
+    "SELECT payload FROM current_session WHERE singleton_id = 1"
+  ).get() as { payload: string } | undefined;
+  if (!row) return structuredClone(initialSession);
   try {
-    return sessionSchema.parse(JSON.parse(serialized));
+    return sessionSchema.parse(JSON.parse(row.payload));
   } catch {
-    await mkdir(dataDirectory, { recursive: true });
-    const corruptBackupPath = path.join(
-      dataDirectory,
-      `current.corrupt.${Date.now()}.${crypto.randomUUID().slice(0, 8)}.json`
-    );
-    // Never continue with an empty session unless the unreadable source has
-    // first been moved aside successfully for manual recovery.
-    await rename(currentSessionPath, corruptBackupPath);
-    console.warn(`Unreadable interview session moved to ${path.basename(corruptBackupPath)}`);
+    runTransaction(() => {
+      getDatabase().prepare(`
+        INSERT INTO corrupt_records(source, payload, quarantined_at) VALUES (?, ?, ?)
+      `).run("current_session", row.payload, now());
+      getDatabase().prepare("DELETE FROM current_session WHERE singleton_id = 1").run();
+    });
+    console.warn("Unreadable interview session moved to the SQLite quarantine table.");
     return await loadLatestValidArchive() ?? structuredClone(initialSession);
   }
 }
 
 async function loadLatestValidArchive(): Promise<InterviewSession | null> {
-  let filenames: string[];
-  try {
-    filenames = await readdir(archiveDirectory);
-  } catch (cause) {
-    if ((cause as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw cause;
-  }
-  const sessions = await Promise.all(
-    filenames
-      .filter((filename) => /^[a-zA-Z0-9-]+\.json$/.test(filename))
-      .map(async (filename) => {
-        try {
-          return sessionSchema.parse(JSON.parse(
-            await readFile(path.join(archiveDirectory, filename), "utf8")
-          ));
-        } catch {
-          return null;
-        }
-      })
-  );
+  const rows = getDatabase().prepare(
+    "SELECT payload FROM archived_sessions ORDER BY finished_at DESC"
+  ).all() as Array<{ payload: string }>;
+  const sessions = rows.map((row) => {
+    try { return sessionSchema.parse(JSON.parse(row.payload)); } catch { return null; }
+  });
   return sessions
     .filter((session): session is InterviewSession => session !== null)
     .sort((left, right) =>
@@ -144,18 +187,24 @@ async function loadLatestValidArchive(): Promise<InterviewSession | null> {
 }
 
 async function persistSession(session: InterviewSession) {
-  await mkdir(dataDirectory, { recursive: true });
-  const serialized = `${JSON.stringify(session, null, 2)}\n`;
-  const temporaryPath = `${currentSessionPath}.${process.pid}.tmp`;
-  await writeFile(temporaryPath, serialized, "utf8");
-  await rename(temporaryPath, currentSessionPath);
-  if (session.status === "finished" && session.sessionId) {
-    await mkdir(archiveDirectory, { recursive: true });
-    const archivePath = path.join(archiveDirectory, `${session.sessionId}.json`);
-    const archiveTemporaryPath = `${archivePath}.${process.pid}.tmp`;
-    await writeFile(archiveTemporaryPath, serialized, "utf8");
-    await rename(archiveTemporaryPath, archivePath);
-  }
+  const serialized = JSON.stringify(session);
+  const timestamp = now();
+  runTransaction(() => {
+    getDatabase().prepare(`
+      INSERT INTO current_session(singleton_id, payload, updated_at) VALUES (1, ?, ?)
+      ON CONFLICT(singleton_id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at
+    `).run(serialized, timestamp);
+    if (session.status === "finished" && session.sessionId) {
+      getDatabase().prepare(`
+        INSERT INTO archived_sessions(session_id, finished_at, payload, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(session_id) DO UPDATE SET
+          finished_at = excluded.finished_at,
+          payload = excluded.payload,
+          updated_at = excluded.updated_at
+      `).run(session.sessionId, session.finishedAt || session.startedAt || timestamp, serialized, timestamp);
+    }
+  });
 }
 
 async function mutateSession(
@@ -387,32 +436,24 @@ export type ArchivedSessionSummary = Pick<
 };
 
 export async function listArchivedSessions(): Promise<ArchivedSessionSummary[]> {
-  let filenames: string[];
-  try {
-    filenames = await readdir(archiveDirectory);
-  } catch {
-    return [];
-  }
-  const sessions = await Promise.all(filenames
-    .filter((filename) => /^[a-zA-Z0-9-]+\.json$/.test(filename))
-    .map(async (filename) => {
-      try {
-        const session = sessionSchema.parse(JSON.parse(
-          await readFile(path.join(archiveDirectory, filename), "utf8")
-        ));
-        return {
-          sessionId: session.sessionId,
-          candidateName: session.candidateName,
-          roleName: session.roleName,
-          startedAt: session.startedAt,
-          finishedAt: session.finishedAt,
-          questionCount: countInterviewQuestions(session),
-          reportReady: Boolean(session.report)
-        };
-      } catch {
-        return null;
-      }
-    }));
+  await migrateLegacySessions();
+  const rows = getDatabase().prepare(
+    "SELECT payload FROM archived_sessions ORDER BY finished_at DESC"
+  ).all() as Array<{ payload: string }>;
+  const sessions = rows.map(({ payload }) => {
+    try {
+      const session = sessionSchema.parse(JSON.parse(payload));
+      return {
+        sessionId: session.sessionId,
+        candidateName: session.candidateName,
+        roleName: session.roleName,
+        startedAt: session.startedAt,
+        finishedAt: session.finishedAt,
+        questionCount: countInterviewQuestions(session),
+        reportReady: Boolean(session.report)
+      };
+    } catch { return null; }
+  });
   return sessions
     .filter((session): session is ArchivedSessionSummary => session !== null)
     .sort((left, right) => (right.finishedAt || "").localeCompare(left.finishedAt || ""));
@@ -420,10 +461,12 @@ export async function listArchivedSessions(): Promise<ArchivedSessionSummary[]> 
 
 export async function getArchivedSession(sessionId: string): Promise<InterviewSession | null> {
   if (!/^[a-zA-Z0-9-]{1,100}$/.test(sessionId)) return null;
+  await migrateLegacySessions();
   try {
-    return sessionSchema.parse(JSON.parse(
-      await readFile(path.join(archiveDirectory, `${sessionId}.json`), "utf8")
-    ));
+    const row = getDatabase().prepare(
+      "SELECT payload FROM archived_sessions WHERE session_id = ?"
+    ).get(sessionId) as { payload: string } | undefined;
+    return row ? sessionSchema.parse(JSON.parse(row.payload)) : null;
   } catch {
     return null;
   }
@@ -431,13 +474,11 @@ export async function getArchivedSession(sessionId: string): Promise<InterviewSe
 
 export async function deleteArchivedSession(sessionId: string): Promise<boolean> {
   if (!/^[a-zA-Z0-9-]{1,100}$/.test(sessionId)) return false;
-  const archivePath = path.join(archiveDirectory, `${sessionId}.json`);
-  try {
-    await unlink(archivePath);
-  } catch (cause) {
-    if ((cause as NodeJS.ErrnoException).code === "ENOENT") return false;
-    throw cause;
-  }
+  await migrateLegacySessions();
+  const result = getDatabase().prepare(
+    "DELETE FROM archived_sessions WHERE session_id = ?"
+  ).run(sessionId);
+  if (result.changes === 0) return false;
   const current = await getSession();
   if (current.sessionId === sessionId && current.status === "finished") {
     await mutateSession((session) => ({

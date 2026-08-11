@@ -59,7 +59,7 @@ export function ObsControl({ onStatusChange }: ObsControlProps) {
           }
           return;
         }
-        setMessage("如果 OBS 已自行启动，请输入其 WebSocket 密码；使用 npm run start:windows 可自动连接。");
+        setMessage("当前 OBS 未由启动器管理。请关闭 OBS 后重新运行 Start-AI-Interviewer.cmd，即可免填密码自动连接。");
       })
       .catch(() => {
         if (active) setMessage("无法读取 OBS 启动状态，请手动连接。");
@@ -188,23 +188,26 @@ export function ObsControl({ onStatusChange }: ObsControlProps) {
       </div>
 
       {!connected && (
-        <div className="obsCredentials">
-          <label>
-            WebSocket 地址
-            <input value={url} onChange={(event) => setUrl(event.target.value)} />
-          </label>
-          <label>
-            WebSocket 密码
-            <input
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              autoComplete="off"
-              placeholder="未设置密码可留空"
-            />
-          </label>
-          <button disabled={connection === "connecting"} onClick={() => void connect()}>连接 OBS</button>
-        </div>
+        <details className="obsManualConnection">
+          <summary>高级手动连接</summary>
+          <div className="obsCredentials">
+            <label>
+              WebSocket 地址
+              <input value={url} onChange={(event) => setUrl(event.target.value)} />
+            </label>
+            <label>
+              WebSocket 密码
+              <input
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                autoComplete="off"
+                placeholder="未设置密码可留空"
+              />
+            </label>
+            <button disabled={connection === "connecting"} onClick={() => void connect()}>连接 OBS</button>
+          </div>
+        </details>
       )}
 
       {connected && (
@@ -223,7 +226,7 @@ export function ObsControl({ onStatusChange }: ObsControlProps) {
         <i className={virtualCameraActive ? "active" : ""} />
         <p>{message}</p>
       </div>
-      <p className="muted">会议软件中选择“OBS Virtual Camera”。自动启动密码使用 DPAPI 加密落盘，仅由本机控制台读取；手动输入的密码不会发送到服务端。</p>
+      <p className="muted">会议软件中选择“OBS Virtual Camera”。自动启动密码经 DPAPI 加密后保存在本机 SQLite；高级手动输入的密码只保留在当前页面内存中。</p>
     </article>
   );
 }

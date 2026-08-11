@@ -39,6 +39,10 @@ const windowsStart = await readFile("scripts/start-windows.ps1", "utf8");
 assert.match(windowsStart, /ConvertFrom-Json/i);
 assert.match(windowsStart, /health\.service\s+-eq\s+'authorized-interview-screen-helper'/i);
 assert.match(windowsStart, /health\.status\s+-eq\s+'ok'/i);
+assert.match(windowsStart, /CloseMainWindow\(\)/i);
+assert.match(windowsStart, /obs-secret-store\.mjs/i);
+assert.match(windowsStart, /Node\.js 22\.13\.0 or newer/i);
+assert.doesNotMatch(windowsStart, /Stop-Process[^\r\n]*obs64/i);
 
 const windowsStop = await readFile("scripts/stop-windows.ps1", "utf8");
 const stopFunction = windowsStop.slice(

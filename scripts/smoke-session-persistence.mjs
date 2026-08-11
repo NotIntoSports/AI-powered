@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { DatabaseSync } from "node:sqlite";
 
 const appPort = 3138;
 const modelPort = 3139;
@@ -16,6 +17,11 @@ let rejectReasoningOnce = false;
 let failNextChat = false;
 let questionResponseQueue = [];
 let delayNextChatMs = 0;
+
+function withDatabase(operation, options) {
+  const database = new DatabaseSync(path.join(temporaryDirectory, "app.sqlite"), options || {});
+  try { return operation(database); } finally { database.close(); }
+}
 
 const modelServer = createServer(async (request, response) => {
   if (request.url === "/v1/models" && request.method === "GET") {
@@ -158,6 +164,10 @@ try {
     url: "ws://127.0.0.1:4455",
     password: "managed-obs-smoke-password"
   });
+  const crossSiteObsRuntime = await fetch(`http://127.0.0.1:${appPort}/api/obs/runtime`, {
+    headers: { Origin: "https://attacker.example", "Sec-Fetch-Site": "cross-site" }
+  });
+  assert.equal(crossSiteObsRuntime.status, 403);
 
   const stageStatusUpdateResponse = await fetch(
     `http://127.0.0.1:${appPort}/api/stage-status`,
@@ -563,15 +573,19 @@ try {
   assert.deepEqual(reported.report.evidence[0].quotes, ["我把首屏时间降低了百分之三十。"]);
   assert.match(reported.report.limitations.at(-1), /1 条.*已自动移除/);
 
-  const persisted = JSON.parse(await readFile(path.join(temporaryDirectory, "current.json"), "utf8"));
+  const persisted = JSON.parse(withDatabase(
+    (database) => database.prepare(
+      "SELECT payload FROM current_session WHERE singleton_id = 1"
+    ).get().payload,
+    { readOnly: true }
+  ));
   assert.equal(persisted.sessionId, started.sessionId);
   assert.equal(persisted.transcript.length, 8);
   assert.equal(persisted.report.humanReviewRequired, true);
 
-  const archived = JSON.parse(await readFile(
-    path.join(temporaryDirectory, "archive", `${started.sessionId}.json`),
-    "utf8"
-  ));
+  const archived = JSON.parse(withDatabase((database) => database.prepare(
+    "SELECT payload FROM archived_sessions WHERE session_id = ?"
+  ).get(started.sessionId).payload, { readOnly: true }));
   assert.equal(archived.report.summary, "候选人描述了组件架构和性能优化经历。");
 
   const historyResponse = await fetch(`http://127.0.0.1:${appPort}/api/sessions`);
@@ -604,11 +618,9 @@ try {
   assert.equal(restored.transcript.length, 8);
 
   await stopApp();
-  await writeFile(
-    path.join(temporaryDirectory, "current.json"),
-    "{ this is not valid interview JSON",
-    "utf8"
-  );
+  withDatabase((database) => database.prepare(
+    "UPDATE current_session SET payload = ? WHERE singleton_id = 1"
+  ).run("{ this is not valid interview JSON"));
   await startApp();
   const recoveredFromArchive = await fetch(
     `http://127.0.0.1:${appPort}/api/session`
@@ -616,13 +628,10 @@ try {
   assert.equal(recoveredFromArchive.sessionId, started.sessionId);
   assert.equal(recoveredFromArchive.status, "finished");
   assert.equal(recoveredFromArchive.transcript.length, 8);
-  const corruptBackups = (await readdir(temporaryDirectory))
-    .filter((filename) => /^current\.corrupt\.\d+\.[a-zA-Z0-9-]+\.json$/.test(filename));
-  assert.equal(corruptBackups.length, 1);
-  assert.equal(
-    await readFile(path.join(temporaryDirectory, corruptBackups[0]), "utf8"),
-    "{ this is not valid interview JSON"
-  );
+  const quarantined = withDatabase((database) => database.prepare(
+    "SELECT payload FROM corrupt_records WHERE source = 'current_session' ORDER BY id DESC LIMIT 1"
+  ).get(), { readOnly: true });
+  assert.equal(quarantined.payload, "{ this is not valid interview JSON");
 
   const exportResponse = await fetch(`http://127.0.0.1:${appPort}/api/session/export`);
   assert.equal(exportResponse.status, 200);
@@ -723,10 +732,9 @@ try {
   assert.equal(encryptedModelProbe.modelFound, true);
   assert.equal(lastModelAuthorization, `Bearer ${secretValue}`);
 
-  const storedModelConfigText = await readFile(
-    path.join(temporaryDirectory, "model.json"),
-    "utf8"
-  );
+  const storedModelConfigText = withDatabase((database) => database.prepare(
+    "SELECT value FROM app_settings WHERE key = 'model'"
+  ).get().value, { readOnly: true });
   assert.equal(storedModelConfigText.includes(secretValue), false);
   const storedModelConfig = JSON.parse(storedModelConfigText);
   assert.ok(storedModelConfig.encryptedApiKey);
@@ -770,10 +778,9 @@ try {
   );
   assert.equal(localWithoutKeyProbeResponse.status, 200);
   assert.equal(lastModelAuthorization, undefined);
-  const localStoredModelConfig = JSON.parse(await readFile(
-    path.join(temporaryDirectory, "model.json"),
-    "utf8"
-  ));
+  const localStoredModelConfig = JSON.parse(withDatabase((database) => database.prepare(
+    "SELECT value FROM app_settings WHERE key = 'model'"
+  ).get().value, { readOnly: true }));
   assert.equal(localStoredModelConfig.encryptedApiKey, null);
 
   const clearModelConfigResponse = await fetch(

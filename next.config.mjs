@@ -25,6 +25,7 @@ const securityHeaders = [
     value: [
       "camera=(self)",
       "microphone=(self)",
+      "speaker-selection=(self)",
       "display-capture=(self)",
       "autoplay=(self)",
       "geolocation=()",
@@ -39,6 +40,7 @@ const securityHeaders = [
 /** @type {import("next").NextConfig} */
 const nextConfig = {
   poweredByHeader: false,
+  devIndicators: false,
   async headers() {
     return [{
       source: "/:path*",

@@ -7,7 +7,6 @@ $ErrorActionPreference = 'Stop'
 $workspace = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $toolsRoot = Join-Path $workspace '.tools'
 $envPath = Join-Path $workspace '.env.local'
-$modelSettingsPath = Join-Path $workspace 'data\settings\model.json'
 
 function Find-CommandPath([string]$Name) {
     $command = Get-Command $Name -ErrorAction SilentlyContinue
@@ -55,15 +54,21 @@ $provider = Get-EnvFileValue 'TRANSCRIPTION_PROVIDER'
 if (-not $provider) { $provider = 'openai' }
 $apiKey = Get-EnvFileValue 'OPENAI_API_KEY'
 $transcriptionApiKey = Get-EnvFileValue 'TRANSCRIPTION_API_KEY'
-$modelSettings = $null
-if (Test-Path -LiteralPath $modelSettingsPath) {
-    try { $modelSettings = Get-Content -Raw -LiteralPath $modelSettingsPath | ConvertFrom-Json } catch {}
+$nodeVersion = if ($nodePath) { (& $nodePath --version).Trim() } else { $null }
+$nodeReady = if ($nodeVersion -match '^v(\d+)\.(\d+)') {
+    ([int]$Matches[1] -gt 22) -or ([int]$Matches[1] -eq 22 -and [int]$Matches[2] -ge 13)
+} else { $false }
+$storedModel = $null
+if ($nodeReady) {
+    try {
+        $settingsStatus = & $nodePath --no-warnings (Join-Path $PSScriptRoot 'settings-status.mjs') $workspace | ConvertFrom-Json
+        $storedModel = $settingsStatus.model
+    } catch {}
 }
-$modelBaseUrl = if ($modelSettings) { [string]$modelSettings.baseUrl } else { Get-EnvFileValue 'OPENAI_BASE_URL' }
-$configuredModelName = if ($modelSettings) { [string]$modelSettings.model } else { Get-EnvFileValue 'OPENAI_MODEL' }
-$encryptedModelKey = if ($modelSettings) { [string]$modelSettings.encryptedApiKey } else { '' }
-$modelApiKeyConfigured = if ($modelSettings) {
-    -not [string]::IsNullOrWhiteSpace($encryptedModelKey)
+$modelBaseUrl = if ($storedModel) { [string]$storedModel.baseUrl } else { Get-EnvFileValue 'OPENAI_BASE_URL' }
+$configuredModelName = if ($storedModel) { [string]$storedModel.name } else { Get-EnvFileValue 'OPENAI_MODEL' }
+$modelApiKeyConfigured = if ($storedModel) {
+    [bool]$storedModel.apiKeyConfigured
 } else {
     -not [string]::IsNullOrWhiteSpace($apiKey) -and $apiKey -ne 'your_api_key'
 }
@@ -107,11 +112,9 @@ try {
     # SAPI may be unavailable on Windows Server Core or stripped-down images.
 }
 
-$nodeVersion = if ($nodePath) { (& $nodePath --version).Trim() } else { $null }
-$nodeMajor = if ($nodeVersion -match '^v(\d+)') { [int]$Matches[1] } else { 0 }
 $result = [ordered]@{
     workspace = $workspace
-    node = [ordered]@{ ready = [bool]$nodePath -and $nodeMajor -ge 22; version = $nodeVersion; path = $nodePath }
+    node = [ordered]@{ ready = $nodeReady; version = $nodeVersion; path = $nodePath }
     npm = [ordered]@{ ready = [bool]$npmPath; path = $npmPath }
     dependencies = [ordered]@{ ready = Test-Path -LiteralPath (Join-Path $workspace 'node_modules\next\package.json') }
     model = [ordered]@{ ready = $modelConfigured; name = $configuredModelName; baseUrl = $modelBaseUrl }
@@ -141,7 +144,7 @@ if ($Json) {
 }
 
 $checks = @(
-    @('Node 22+', $result.node.ready, "$($result.node.version) $($result.node.path)"),
+    @('Node 22.13+', $result.node.ready, "$($result.node.version) $($result.node.path)"),
     @('npm', $result.npm.ready, $result.npm.path),
     @('npm dependencies', $result.dependencies.ready, $(if ($result.dependencies.ready) { 'installed' } else { 'run npm install' })),
     @('AI model config', $result.model.ready, $(if ($result.model.ready) { $result.model.name } else { 'configure in the control console' })),

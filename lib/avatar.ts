@@ -1,5 +1,6 @@
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { dataRoot, getDatabase, hasMigration, runTransaction } from "./database";
 
 export const MAX_AVATAR_BYTES = 50 * 1024 * 1024;
 
@@ -19,9 +20,7 @@ export type EmptyAvatarMetadata = {
   available: false;
 };
 
-const avatarDirectory = process.env.INTERVIEW_DATA_DIR
-  ? path.join(path.resolve(process.env.INTERVIEW_DATA_DIR), "avatar")
-  : path.join(process.cwd(), "data", "avatar");
+const avatarDirectory = path.join(dataRoot, "avatar");
 const mediaPath = path.join(avatarDirectory, "media");
 const metadataPath = path.join(avatarDirectory, "metadata.json");
 
@@ -46,13 +45,45 @@ export function validateAvatar(bytes: Uint8Array, declaredMimeType: string) {
 }
 
 export async function getAvatarMetadata(): Promise<AvatarMetadata | EmptyAvatarMetadata> {
+  await migrateLegacyAvatarMetadata();
   try {
-    const metadata = JSON.parse(await readFile(metadataPath, "utf8")) as AvatarMetadata;
+    const row = getDatabase().prepare(
+      "SELECT payload FROM avatar_metadata WHERE singleton_id = 1"
+    ).get() as { payload: string } | undefined;
+    if (!row) return { available: false };
+    const metadata = JSON.parse(row.payload) as AvatarMetadata;
     await stat(mediaPath);
     return metadata;
   } catch {
     return { available: false };
   }
+}
+
+async function migrateLegacyAvatarMetadata() {
+  if (hasMigration("avatar-json")) return;
+  let metadata: AvatarMetadata | null = null;
+  try {
+    const parsed = JSON.parse(await readFile(metadataPath, "utf8")) as AvatarMetadata;
+    await stat(mediaPath);
+    if (parsed.available === true && typeof parsed.version === "string") metadata = parsed;
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code !== "ENOENT") {
+      console.warn("Legacy avatar metadata was invalid and was not imported.");
+    }
+  }
+  runTransaction(() => {
+    const timestamp = new Date().toISOString();
+    if (metadata) {
+      getDatabase().prepare(`
+        INSERT INTO avatar_metadata(singleton_id, payload, updated_at) VALUES (1, ?, ?)
+        ON CONFLICT(singleton_id) DO NOTHING
+      `).run(JSON.stringify(metadata), timestamp);
+    }
+    getDatabase().prepare(`
+      INSERT INTO app_settings(key, value, updated_at) VALUES (?, 'complete', ?)
+      ON CONFLICT(key) DO UPDATE SET value = 'complete', updated_at = excluded.updated_at
+    `).run("migration:avatar-json", timestamp);
+  });
 }
 
 export async function saveAvatar(file: File): Promise<AvatarMetadata> {
@@ -74,11 +105,12 @@ export async function saveAvatar(file: File): Promise<AvatarMetadata> {
 
   await mkdir(avatarDirectory, { recursive: true });
   const temporaryMedia = path.join(avatarDirectory, `media-${metadata.version}.tmp`);
-  const temporaryMetadata = path.join(avatarDirectory, `metadata-${metadata.version}.tmp`);
   await writeFile(temporaryMedia, bytes, { flag: "wx" });
-  await writeFile(temporaryMetadata, JSON.stringify(metadata, null, 2), { flag: "wx" });
   await rename(temporaryMedia, mediaPath);
-  await rename(temporaryMetadata, metadataPath);
+  getDatabase().prepare(`
+    INSERT INTO avatar_metadata(singleton_id, payload, updated_at) VALUES (1, ?, ?)
+    ON CONFLICT(singleton_id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at
+  `).run(JSON.stringify(metadata), metadata.updatedAt);
   return metadata;
 }
 
@@ -87,8 +119,6 @@ export function getAvatarMediaPath() {
 }
 
 export async function clearAvatar() {
-  await Promise.all([
-    rm(mediaPath, { force: true }),
-    rm(metadataPath, { force: true })
-  ]);
+  getDatabase().prepare("DELETE FROM avatar_metadata WHERE singleton_id = 1").run();
+  await rm(mediaPath, { force: true });
 }

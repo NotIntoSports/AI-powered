@@ -12,6 +12,7 @@ type AvatarMetadata = {
 export default function StagePage() {
   const lastRevision = useRef(-1);
   const lastTestSpeechId = useRef(0);
+  const lastStopSpeechAt = useRef(0);
   const speechToken = useRef(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef("");
@@ -115,10 +116,11 @@ export default function StagePage() {
     let active = true;
     const timer = window.setInterval(async () => {
       try {
-        const [sessionResponse, avatarResponse, testSpeechResponse] = await Promise.all([
+        const [sessionResponse, avatarResponse, testSpeechResponse, stageStatusResponse] = await Promise.all([
           fetch("/api/session", { cache: "no-store" }),
           fetch("/api/avatar", { cache: "no-store" }),
-          fetch("/api/stage-test-speech", { cache: "no-store" })
+          fetch("/api/stage-test-speech", { cache: "no-store" }),
+          fetch("/api/stage-status", { cache: "no-store" })
         ]);
         const next = await sessionResponse.json() as InterviewSession;
         const nextAvatar = await avatarResponse.json() as AvatarMetadata;
@@ -127,9 +129,19 @@ export default function StagePage() {
           text: string;
           createdAt: number;
         } | null;
+        const stageStatus = await stageStatusResponse.json() as { stopSpeechAt?: number };
         if (!active) return;
         setSession(next);
         setAvatarMedia(nextAvatar);
+        if ((stageStatus.stopSpeechAt || 0) > lastStopSpeechAt.current) {
+          lastStopSpeechAt.current = stageStatus.stopSpeechAt || 0;
+          speechToken.current += 1;
+          releaseAudio();
+          window.speechSynthesis.cancel();
+          setSpeaking(false);
+          setTtsState("idle");
+          setCurrentSpeechText("");
+        }
         if (next.revision > lastRevision.current && next.speakingText) {
           lastRevision.current = next.revision;
           const token = speechToken.current + 1;

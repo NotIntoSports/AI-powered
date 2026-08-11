@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getStageStatus, updateStageStatus } from "../../../lib/stage-status";
+import { getStageStatus, requestStageSpeechStop, updateStageStatus } from "../../../lib/stage-status";
 
 const statusSchema = z.object({
   ttsSupported: z.boolean(),
@@ -27,4 +27,8 @@ export async function POST(request: Request) {
   }
   updateStageStatus(parsed.data);
   return NextResponse.json({ ok: true });
+}
+
+export async function PUT() {
+  return NextResponse.json({ ok: true, stopSpeechAt: requestStageSpeechStop() });
 }

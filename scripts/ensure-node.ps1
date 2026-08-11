@@ -6,6 +6,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $minimumMajor = 22
+$minimumMinor = 13
 $packageId = 'OpenJS.NodeJS.LTS'
 
 function Find-NodePath {
@@ -17,22 +18,32 @@ function Find-NodePath {
     ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
 }
 
-function Get-NodeMajor([string]$NodePath) {
-    if (-not $NodePath) { return 0 }
+function Get-NodeVersionInfo([string]$NodePath) {
+    if (-not $NodePath) { return [ordered]@{ major = 0; minor = 0; ready = $false } }
     $version = (& $NodePath --version).Trim()
-    if ($LASTEXITCODE -ne 0 -or $version -notmatch '^v(\d+)') { return 0 }
-    return [int]$Matches[1]
+    if ($LASTEXITCODE -ne 0 -or $version -notmatch '^v(\d+)\.(\d+)') {
+        return [ordered]@{ major = 0; minor = 0; ready = $false }
+    }
+    $major = [int]$Matches[1]
+    $minor = [int]$Matches[2]
+    return [ordered]@{
+        major = $major
+        minor = $minor
+        ready = ($major -gt $minimumMajor) -or ($major -eq $minimumMajor -and $minor -ge $minimumMinor)
+    }
 }
 
 $nodePath = Find-NodePath
-$nodeMajor = Get-NodeMajor $nodePath
+$nodeInfo = Get-NodeVersionInfo $nodePath
 $plan = [ordered]@{
     package = $packageId
     minimumMajor = $minimumMajor
     currentPath = $nodePath
-    currentMajor = $nodeMajor
-    ready = $nodeMajor -ge $minimumMajor
-    action = if (-not $nodePath) { 'install' } elseif ($nodeMajor -lt $minimumMajor) { 'upgrade' } else { 'none' }
+    minimumMinor = $minimumMinor
+    currentMajor = $nodeInfo.major
+    currentMinor = $nodeInfo.minor
+    ready = $nodeInfo.ready
+    action = if (-not $nodePath) { 'install' } elseif (-not $nodeInfo.ready) { 'upgrade' } else { 'none' }
 }
 
 if ($DryRun) {
@@ -47,7 +58,7 @@ if ($plan.ready) {
 
 $winget = Get-Command 'winget.exe' -ErrorAction SilentlyContinue
 if (-not $winget) {
-    throw 'Node.js 22 LTS or newer is required and winget is unavailable. Install the current Node.js LTS from https://nodejs.org/ and rerun.'
+    throw 'Node.js 22.13.0 or newer is required and winget is unavailable. Install the current Node.js LTS from https://nodejs.org/ and rerun.'
 }
 
 if ($plan.action -eq 'install') {
@@ -62,8 +73,8 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $nodePath = Find-NodePath
-$nodeMajor = Get-NodeMajor $nodePath
-if ($nodeMajor -lt $minimumMajor) {
+$nodeInfo = Get-NodeVersionInfo $nodePath
+if (-not $nodeInfo.ready) {
     throw 'Node.js installation completed but a compatible node.exe could not be located. Restart Windows and rerun setup.'
 }
 Write-Host "Node.js is ready: $(& $nodePath --version) ($nodePath)" -ForegroundColor Green
