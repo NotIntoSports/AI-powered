@@ -1,5 +1,5 @@
-appId: com.aiinterviewer.desktop
-productName: AI Interviewer Desktop
+appId: com.aidigitalhuman.desktop
+productName: AI Digital Human
 electronDist: node_modules/electron/dist
 directories:
   output: dist
@@ -10,6 +10,10 @@ files:
 extraResources:
   - from: .desktop-runtime
     to: .desktop-runtime
+  - from: .desktop-runtime/node_modules
+    to: .desktop-runtime/node_modules
+    filter:
+      - "**/*"
   - from: native/AudioBridge/publish
     to: audio-bridge
   - from: resources/prerequisites
@@ -25,11 +29,13 @@ win:
   target:
     - target: nsis
       arch: [x64]
-  executableName: AI-Interviewer
+  executableName: AI-Digital-Human
 nsis:
-  oneClick: false
-  allowToChangeInstallationDirectory: true
+  include: build/installer.nsh
+  oneClick: true
+  perMachine: false
+  runAfterFinish: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: AI Interviewer Desktop
-  artifactName: AI-Interviewer-Desktop-${version}-Windows-x64.${ext}
+  shortcutName: AI Digital Human
+  artifactName: AI-Digital-Human-${version}-Windows-x64.${ext}

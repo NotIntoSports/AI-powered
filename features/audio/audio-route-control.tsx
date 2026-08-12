@@ -37,7 +37,7 @@ export function AudioRouteControl({ onReadyChange }: AudioRouteControlProps) {
       expiryTimerRef.current = window.setTimeout(() => {
         readyRef.current = false;
         setState("idle");
-        setMessage("虚拟音频检测已超过 5 分钟，请在面试前重新检测。");
+        setMessage("虚拟音频检测已超过 5 分钟，请在使用前重新检测。");
         onReadyChange?.(false);
       }, VERIFICATION_TTL_MS);
     }

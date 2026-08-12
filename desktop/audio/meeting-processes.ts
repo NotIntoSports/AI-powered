@@ -18,13 +18,18 @@ export type MeetingProcess = {
   title: string;
 };
 
-export function filterMeetingProcesses(processes: MeetingProcess[]): MeetingProcess[] {
+export function filterMeetingProcesses(processes: unknown[]): MeetingProcess[] {
   return processes
-    .filter((process) =>
-      process.pid > 0 &&
-      process.title.trim().length > 0 &&
-      meetingExecutableNames.has(process.name.toLowerCase())
-    )
+    .flatMap((process) => {
+      if (!process || typeof process !== "object") return [];
+      const value = process as Record<string, unknown>;
+      const pid = typeof value.pid === "number" ? value.pid : Number(value.pid);
+      const name = typeof value.name === "string" ? value.name : "";
+      const title = typeof value.title === "string" ? value.title : "";
+      return Number.isInteger(pid) && pid > 0 && title.trim() && meetingExecutableNames.has(name.toLowerCase())
+        ? [{ pid, name, title }]
+        : [];
+    })
     .sort((left, right) => left.name.localeCompare(right.name) || left.pid - right.pid);
 }
 
@@ -41,6 +46,6 @@ export async function listMeetingProcesses(): Promise<MeetingProcess[]> {
     { windowsHide: true, maxBuffer: 1024 * 1024 }
   );
   if (!stdout.trim()) return [];
-  const raw = JSON.parse(stdout) as MeetingProcess | MeetingProcess[];
+  const raw = JSON.parse(stdout) as unknown;
   return filterMeetingProcesses(Array.isArray(raw) ? raw : [raw]);
 }

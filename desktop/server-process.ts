@@ -1,7 +1,28 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { appendFile, mkdir, writeFile } from "node:fs/promises";
 import net from "node:net";
+import path from "node:path";
 
 import type { OwnedProcess } from "./types";
+
+const MAX_DIAGNOSTIC_LENGTH = 2_000;
+
+export class LocalServerStartError extends Error {
+  readonly logPath: string;
+
+  constructor(message: string, logPath: string) {
+    super(message);
+    this.name = "LocalServerStartError";
+    this.logPath = logPath;
+  }
+}
+
+export function sanitizeServerOutput(value: string): string {
+  return value
+    .replace(/(Authorization\s*:\s*Bearer\s+)[^\s]+/gi, "$1[REDACTED]")
+    .replace(/\b(API[_-]?KEY|TOKEN|SECRET|PASSWORD)\s*([:=])\s*[^\s]+/gi, "$1$2[REDACTED]")
+    .replace(/(https?:\/\/)[^\s/@:]+:[^\s/@]+@/gi, "$1[REDACTED]@");
+}
 
 export function getAvailableLoopbackPort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -52,22 +73,53 @@ export async function startLocalServer(options: {
   executablePath: string;
   serverPath: string;
   cwd: string;
+  logPath?: string;
   timeoutMs?: number;
 }): Promise<OwnedProcess & { baseUrl: string; child: ChildProcess }> {
   const port = await getAvailableLoopbackPort();
   const baseUrl = `http://127.0.0.1:${port}`;
+
+  if (options.logPath) {
+    await mkdir(path.dirname(options.logPath), { recursive: true });
+    await writeFile(options.logPath, "", "utf8");
+  }
+
   const child = spawn(options.executablePath, [options.serverPath], {
     cwd: options.cwd,
     env: buildServerEnvironment(port),
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true
   });
+
+  let diagnostics = "";
+  let pendingLogWrite = Promise.resolve();
+  const recordOutput = (chunk: Buffer | string) => {
+    const sanitized = sanitizeServerOutput(String(chunk));
+    diagnostics = `${diagnostics}${sanitized}`.slice(-MAX_DIAGNOSTIC_LENGTH);
+    if (options.logPath) {
+      pendingLogWrite = pendingLogWrite.then(() => appendFile(options.logPath!, sanitized, "utf8"));
+    }
+  };
+  child.stdout?.on("data", recordOutput);
+  child.stderr?.on("data", recordOutput);
+
+  const exited = new Promise<never>((_resolve, reject) => {
+    child.once("error", reject);
+    child.once("exit", (code, signal) => {
+      reject(new Error(`Local service exited before becoming healthy (code ${code ?? "none"}, signal ${signal ?? "none"})`));
+    });
+  });
   try {
-    await waitForHealth(baseUrl, options.timeoutMs ?? 20_000);
+    await Promise.race([waitForHealth(baseUrl, options.timeoutMs ?? 20_000), exited]);
     return { owned: true, child, baseUrl };
   } catch (error) {
     child.kill();
-    throw error;
+    await pendingLogWrite.catch(() => undefined);
+    const detail = diagnostics.trim() || (error instanceof Error ? error.message : String(error));
+    throw new LocalServerStartError(
+      `Local service failed to start: ${detail}`,
+      options.logPath ?? "not configured"
+    );
   }
 }
 

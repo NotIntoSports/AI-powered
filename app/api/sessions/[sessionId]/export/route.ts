@@ -12,7 +12,7 @@ export async function GET(
   const { sessionId } = await context.params;
   const session = await getArchivedSession(sessionId);
   if (!session) {
-    return NextResponse.json({ code: "NOT_FOUND", message: "面试记录不存在" }, { status: 404 });
+    return NextResponse.json({ code: "NOT_FOUND", message: "对话记录不存在" }, { status: 404 });
   }
   const markdown = new URL(request.url).searchParams.get("format") === "markdown";
   const filename = interviewExportFilename(session, markdown ? "md" : "json");

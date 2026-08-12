@@ -8,7 +8,7 @@ export async function DELETE(
   const { sessionId } = await context.params;
   const deleted = await deleteArchivedSession(sessionId);
   if (!deleted) {
-    return NextResponse.json({ code: "NOT_FOUND", message: "面试记录不存在" }, { status: 404 });
+    return NextResponse.json({ code: "NOT_FOUND", message: "对话记录不存在" }, { status: 404 });
   }
   return NextResponse.json({ deleted: true });
 }

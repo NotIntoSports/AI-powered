@@ -1,14 +1,16 @@
 import path from "node:path";
-import { app, BrowserWindow, ipcMain, session } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, session } from "electron";
 
 import { registerDesktopIpc } from "./ipc";
 import { detectObs, startOwnedObs } from "./obs-process";
-import { startLocalServer, stopOwnedProcess } from "./server-process";
+import { LocalServerStartError, startLocalServer, stopOwnedProcess } from "./server-process";
 import type { DesktopStatus, OwnedProcess } from "./types";
 
 let server: (OwnedProcess & { baseUrl: string }) | null = null;
 let obsProcess: OwnedProcess | null = null;
 let mainWindow: BrowserWindow | null = null;
+
+app.setName("AI Digital Human");
 
 function isAllowedLocalUrl(value: string, baseUrl: string): boolean {
   try {
@@ -27,6 +29,12 @@ export function createMainWindow(baseUrl: string): BrowserWindow {
     minWidth: 1100,
     minHeight: 720,
     show: false,
+    titleBarStyle: "hidden",
+    titleBarOverlay: {
+      color: "#0d1118",
+      symbolColor: "#d7deea",
+      height: 36
+    },
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       nodeIntegration: false,
@@ -34,6 +42,7 @@ export function createMainWindow(baseUrl: string): BrowserWindow {
       sandbox: true
     }
   });
+  window.removeMenu();
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   window.webContents.on("will-navigate", (event, url) => {
     if (!isAllowedLocalUrl(url, baseUrl)) event.preventDefault();
@@ -65,7 +74,8 @@ if (!hasLock) {
     server = await startLocalServer({
       executablePath: process.execPath,
       serverPath: path.join(runtimeRoot, "server.js"),
-      cwd: runtimeRoot
+      cwd: runtimeRoot,
+      logPath: path.join(app.getPath("userData"), "logs", "desktop-startup.log")
     });
     const getStatus = (): DesktopStatus => ({
       ready: true,
@@ -91,6 +101,10 @@ if (!hasLock) {
     );
   }).catch((error) => {
     console.error("Desktop startup failed", error instanceof Error ? error.message : error);
+    const message = error instanceof LocalServerStartError
+      ? `${error.message}\n\n启动日志：${error.logPath}`
+      : error instanceof Error ? error.message : String(error);
+    dialog.showErrorBox("AI 数字人启动失败", message);
     app.quit();
   });
 }

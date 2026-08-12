@@ -71,7 +71,7 @@ export function RtcSettings() {
         <button disabled={working}>{working ? "正在保存…" : "保存 RTC 配置"}</button>
       </form>
       <p className="modelSettingsMessage">{message}</p>
-      <p className="muted">客户端拒绝保存 AppKey。候选人音频将发送到火山引擎生成实时字幕，请先履行告知与同意义务。</p>
+      <p className="muted">客户端拒绝保存 AppKey。对方音频将发送到火山引擎生成实时字幕，请先履行告知与同意义务。</p>
     </article>
   );
 }

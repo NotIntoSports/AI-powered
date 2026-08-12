@@ -1,6 +1,6 @@
-export const OBS_SCENE_NAME = "AI Interviewer";
-export const OBS_INPUT_NAME = "AI Interviewer Stage";
-export const OBS_HUMAN_MIC_NAME = "AI Interviewer Human Mic";
+export const OBS_SCENE_NAME = "AI Digital Human";
+export const OBS_INPUT_NAME = "AI Digital Human Stage";
+export const OBS_HUMAN_MIC_NAME = "AI Digital Human Voice";
 export const OBS_WIDTH = 1280;
 export const OBS_HEIGHT = 720;
 

@@ -26,7 +26,7 @@ export function InterventionControls({ onAiPauseChange }: { onAiPauseChange(paus
   return (
     <article className="card interventionControls">
       <div className="cardHeading"><h2>监听与人工介入</h2><span className={state.humanMicActive ? "ready" : ""}>{state.humanMicActive ? "人工说话中" : state.aiPaused ? "AI 已暂停" : "AI 自动模式"}</span></div>
-      <p>候选人声音由会议软件直接监听，不在客户端重复播放。</p>
+      <p>对方声音由会议软件直接监听，不在客户端重复播放。</p>
       <div className="obsActions">
         <button
           type="button"
@@ -47,7 +47,7 @@ export function InterventionControls({ onAiPauseChange }: { onAiPauseChange(paus
           window.dispatchEvent(new CustomEvent("ai-intervention", { detail: { action: "mute" } }));
         }}>立即静音全部输出</button>
       </div>
-      <p className="muted">按下后 AI 停止自动追问并让出声音；松开后 AI 不会自动恢复。真实麦克风只进入虚拟麦克风，不进入候选人字幕。</p>
+      <p className="muted">按下后 AI 停止自动回应并让出声音；松开后 AI 不会自动恢复。真实麦克风只进入虚拟麦克风，不进入对方字幕。</p>
     </article>
   );
 }

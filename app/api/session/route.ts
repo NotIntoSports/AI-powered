@@ -70,7 +70,7 @@ export async function POST(request: Request) {
       const current = await getSession();
       if (current.status === "running") {
         return NextResponse.json(
-          { code: "SESSION_ALREADY_RUNNING", message: "请先结束当前面试，再开始新面试" },
+          { code: "SESSION_ALREADY_RUNNING", message: "请先结束当前互动，再开始新互动" },
           { status: 409 }
         );
       }
@@ -172,7 +172,7 @@ export async function POST(request: Request) {
       const session = await getSession();
       if (session.status !== "finished") {
         return NextResponse.json(
-          { code: "SESSION_RUNNING", message: "请先结束面试，再生成纪要" },
+          { code: "SESSION_RUNNING", message: "请先结束互动，再生成纪要" },
           { status: 409 }
         );
       }
@@ -192,7 +192,7 @@ export async function POST(request: Request) {
       session.transcript.at(-1)?.role !== "interviewer"
     ) {
       return NextResponse.json(
-        { code: "SESSION_CHANGED", message: "面试轮次已变化，请刷新后重试" },
+        { code: "SESSION_CHANGED", message: "对话轮次已变化，请刷新后重试" },
         { status: 409 }
       );
     }
@@ -248,10 +248,10 @@ export async function POST(request: Request) {
           : missingKey
           ? "请先在控制台配置远程模型密钥，或使用本机无密钥模型"
           : noAnswers
-            ? "没有候选人回答，无法生成纪要"
+            ? "没有对方回答，无法生成纪要"
             : invalidState
               ? message === "SESSION_ALREADY_RUNNING"
-                ? "请先结束当前面试，再开始新面试"
+                ? "请先结束当前互动，再开始新互动"
                 : message === "SESSION_CHANGED"
                 ? "会话已发生变化，请刷新后重试"
                 : "当前会话状态不允许此操作"

@@ -2,10 +2,22 @@
 
 import { useEffect, useState } from "react";
 
-type Status = { obsInstalled: boolean; virtualAudioInstalled: boolean };
+type Status = { obsInstalled: boolean; virtualAudioInstalled: boolean; virtualAudioDriverStaged: boolean };
+type InstallErrorCode = "uac-cancelled" | "resource-missing" | "signature-rejected" | "install-failed" | "unknown";
+type InstallResult =
+  | { installed: true; rebootRequired: boolean }
+  | { installed: false; error: { code: InstallErrorCode; message: string } };
 type SetupBridge = {
   getPrerequisiteStatus(): Promise<Status>;
-  installPrerequisite(component: "obs" | "virtual-audio"): Promise<{ installed: true }>;
+  installPrerequisite(component: "obs" | "virtual-audio"): Promise<InstallResult>;
+};
+
+const installErrorMessages: Record<InstallErrorCode, string> = {
+  "uac-cancelled": "管理员授权已取消。请重新安装并在 Windows 提示中选择“是”。",
+  "resource-missing": "安装包中的虚拟音频文件缺失，请重新下载安装客户端。",
+  "signature-rejected": "Windows 拒绝了驱动签名。请检查系统安全策略，或联系 IT 管理员。",
+  "install-failed": "Windows 驱动安装失败。",
+  unknown: "安装进程异常退出。"
 };
 
 export function PrerequisiteSetup() {
@@ -25,7 +37,18 @@ export function PrerequisiteSetup() {
     if (!bridge) return;
     setWorking(true);
     setMessage(component === "obs" ? "正在安装官方 OBS…" : "正在安装签名虚拟音频驱动…");
-    try { await bridge.installPrerequisite(component); await refresh(); }
+    try {
+      const result = await bridge.installPrerequisite(component);
+      if (!result.installed) {
+        setMessage(`${installErrorMessages[result.error.code]} ${result.error.message}`);
+        return;
+      }
+      if (result.rebootRequired) {
+        setMessage("虚拟音频驱动已加入 Windows，重启电脑后再点击“重新检测”。");
+        return;
+      }
+      await refresh();
+    }
     catch (cause) { setMessage(cause instanceof Error ? cause.message : "安装失败"); }
     finally { setWorking(false); }
   }

@@ -35,7 +35,6 @@ export function registerDesktopIpc(
   ipcMain.handle("desktop:install-prerequisite", async (_event, component: unknown) => {
     if (component !== "obs" && component !== "virtual-audio") throw new Error("INVALID_PREREQUISITE");
     if (!installResources) throw new Error("PREREQUISITES_NOT_PACKAGED");
-    await installPrerequisite({ component, scriptPath: installResources.scriptPath, resourcesDirectory: installResources.directory });
-    return { installed: true as const };
+    return installPrerequisite({ component, scriptPath: installResources.scriptPath, resourcesDirectory: installResources.directory });
   });
 }

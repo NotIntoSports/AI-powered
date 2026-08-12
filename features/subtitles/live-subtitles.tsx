@@ -19,7 +19,7 @@ export function LiveSubtitles() {
     <article className="card liveSubtitles">
       <div className="cardHeading"><h2>实时字幕</h2><span>{lines.length ? "火山 RTC" : "等待语音"}</span></div>
       <div aria-live="polite">
-        {lines.length === 0 ? <p className="muted">选择会议进程并连接 RTC 后，候选人字幕会显示在这里。</p> : lines.map((line) => (
+        {lines.length === 0 ? <p className="muted">选择会议进程并连接 RTC 后，对方字幕会显示在这里。</p> : lines.map((line) => (
           <p key={`${line.userId}-${line.sequence}`}><strong>{line.final ? "已确认" : "识别中"}</strong> {line.text}</p>
         ))}
       </div>

@@ -2,6 +2,14 @@
 
 每项新功能实施前，在此追加一条记录。
 
+## 桌面工作台、设置与记录页面拆分
+
+- 目标：让 Electron 默认页只承担数字人实时互动，把技术配置、设备检测、历史记录和纪要移到独立页面。
+- 采用：复用 Next.js App Router、现有 React 组件和浏览器 `sessionStorage`，不新增路由、状态管理或 UI 依赖。
+- 桌面边界：RTC 会议进程连接、实时字幕和人工介入保留在工作台；AI/RTC 凭据、OBS、数字人素材与输出检测进入设置页；安装组件卡暂不展示。
+- 状态：会话存储只保存设备检测成功时间，不保存密钥、媒体流或对话数据；五分钟过期并在设备变化时级联失效。
+- 兼容：服务端 API、IPC 名称、会话和归档结构保持不变，旧记录无需迁移。
+
 ## 虚拟摄像头输出
 
 - 目标：让数字人画面作为系统摄像头提供给不同线上会议软件。
@@ -95,6 +103,7 @@
   - 浏览器 `navigator.mediaDevices.enumerateDevices()` 在用户授权后检测虚拟麦克风是否出现。
 - 必须保留的人工步骤：安装系统驱动、在 OBS 选择全局监听设备、在会议软件选择麦克风。浏览器和 OBS WebSocket 均不能安全地替用户修改所有第三方会议软件的设备设置。
 - 设备自检：复用浏览器标准 `getUserMedia` 与 `enumerateDevices`，同时识别虚拟录音端和播放端，兼容 VB-CABLE、Virtual Audio Driver 和 Voicemeeter 的明确成对设备；只有两端同时存在并通过真实音量采样才显示线路完整。BlackHole 是 macOS 方案，ToDesk 等远控音频端点不能证明通用会议回传能力，均不用于 Windows 门禁放行。
+- Windows 安装修复：继续使用固定版本且已验证签名的 Virtual-Audio-Driver，不新增安装依赖。INF 路径通过 UTF-8 JSON 临时请求传给提权 PowerShell，再以参数数组调用系统 `pnputil.exe`，避免含空格、中文或 PowerShell 元字符的路径被拆分；安装结果通过临时 JSON 返回，客户端区分 UAC 取消、资源缺失、签名拒绝、系统安装失败及等待重启。现有官方/开源方案已经提供驱动与系统安装工具，自行开发驱动或引入另一套安装框架会增加签名、安全和维护成本，因此不采用。
 
 ## 单人会话持久化与导出
 
@@ -272,3 +281,25 @@
 - 官方约束：火山 RTC 文档要求测试 Token 使用的 AppID、RoomID、UserID 与客户端进房参数完全一致；正式上线则应由业务服务端使用密钥 SDK 动态生成并下发 Token。AppKey 只留在服务端。
 - 采用：试用配置显式保存临时 Token 对应的 RoomID/UserID，并在进房时复用；Token 使用 Windows DPAPI 加密。正式模式仍随机生成单场 RoomID/UserID，再向用户配置的 HTTPS Token 服务请求短期 Token。
 - 字幕前置：RTC 控制台必须开启实时字幕和流式语音识别，并配置语音技术控制台创建的流式语音识别 APP ID、Access Token、Cluster ID；这与 RTC AppID/AppKey 是两套凭据，均不写入客户端源码。
+
+# 2026-08-11：Windows 安装与 standalone 启动修复
+
+- 调查结论：继续使用 Next.js 15 官方 `output: "standalone"` 产物。官方产物的根 `server.js` 与同级追踪依赖已经构成最小运行目录，只需补复制 `public` 和 `.next/static`；递归搜索同名入口会误命中 `.next` 内部路由文件并漏掉 `node_modules`。electron-builder 默认忽略规则还会过滤父目录 extraResources 内的嵌套 `node_modules`，因此将 standalone 的追踪依赖作为独立白名单资源复制，并用打包后可执行文件健康检查约束最终产物。
+- 安装选择：继续使用现有 electron-builder 26.15.3（MIT）与其 NSIS 能力，不引入第二套安装框架。安装改为显式 per-user one-click，并通过 electron-builder 官方 NSIS include 扩展把 `APP_FILENAME` 固定为产品名；NSIS 自动创建 `%LOCALAPPDATA%\\Programs\\AI Interviewer Desktop`，不要求用户选择或预建目录，也不为客户端本体申请管理员权限。
+- 故障诊断：复用 Electron `app.setName`、`dialog` 和 Node 子进程/文件 API，固定用户数据目录产品名，并把本地服务启动输出脱敏后写入 `%APPDATA%\\AI Interviewer Desktop\\logs\\desktop-startup.log`；失败时显示路径，不增加遥测、不上传日志，API Key、Token、密码和 URL 凭据会在落盘前过滤。
+- 兼容与成本：无新增依赖、安装体积和云端费用不变；OBS 与虚拟音频驱动仍作为独立前置组件，仅在用户明确触发安装时提权。用户数据继续位于 `%APPDATA%`，与程序安装和升级目录隔离。
+
+# 2026-08-12：移除桌面端默认菜单栏
+
+- 调研：Electron 43 官方 `BrowserWindow` API 在 Windows 支持 `removeMenu()`、`setMenuBarVisibility()` 和自动隐藏菜单；自动隐藏后用户仍可按 Alt 唤出菜单。
+- 采用：创建主窗口后调用 `removeMenu()`，彻底移除 `File / Edit / View / Window` 默认菜单。应用所需功能均由页面内控件提供，不要求用户配置 Electron 菜单。
+- 兼容与成本：复用现有 Electron API，不新增依赖、安装体积、运行资源、云端费用或数据传输；保留原生标题栏和最小化、最大化、关闭按钮。
+
+# 2026-08-12：桌面标题栏视觉融合
+
+- 调研：Electron 43 官方支持 `titleBarStyle: "hidden"` 与 `titleBarOverlay`，可在 Windows 保留系统窗口按钮和原生窗口行为，同时由应用指定标题区颜色、图标颜色及高度；页面可使用 `titlebar-area-height` 环境变量避让覆盖区域。
+- 采用：将标题区收窄为 36px，使用与应用导航一致的深色背景和高对比浅色窗口按钮；页面仅在 Window Controls Overlay 生效时自动增加顶部安全区，不影响普通浏览器布局。
+- 未选择：不使用完全无边框窗口和自制最小化、最大化、关闭按钮，以免增加 IPC 权限面、缩放适配和 Windows Snap 行为的维护成本。
+- 兼容与成本：复用 Electron 与 Chromium 标准能力，无新增依赖、资源文件、网络请求或用户配置；保留 Windows 拖动、双击最大化、Snap 和系统按钮语义。
+- 视口修正：全屏数字人舞台使用 `100dvh - titlebar-area-height` 作为可用高度，并使用 `width: 100%`，避免标题区与 `100vh` 叠加产生无意义滚动条；普通长内容页面仍保留按需滚动。
+- 首页布局：桌面宽度下改为会话设置、核心对话、会话工具三栏固定工作区，页面本身不滚动；长对话、设置表单和辅助工具仅在各自面板内部按需滚动。窗口窄于 1180px 时恢复自然文档流，避免压缩可用内容。
