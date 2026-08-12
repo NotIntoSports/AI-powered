@@ -150,7 +150,7 @@ export function VirtualCameraPreview({
       setVerified(true);
       verifiedRef.current = true;
       expiryTimerRef.current = window.setTimeout(() => {
-        invalidateVerification("摄像头验证已超过 5 分钟，请在面试前重新检测。");
+        invalidateVerification("摄像头验证已超过 5 分钟，请在使用前重新检测。");
       }, VERIFICATION_TTL_MS);
       setMessage(`已打开 ${obsCamera.label}。下方就是会议软件选择该摄像头后应看到的画面。`);
     } catch (cause) {

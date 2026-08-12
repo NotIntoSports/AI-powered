@@ -1,0 +1,41 @@
+appId: com.aidigitalhuman.desktop
+productName: AI Digital Human
+electronDist: node_modules/electron/dist
+directories:
+  output: dist
+files:
+  - dist-desktop/**/*
+  - package.json
+  - node_modules/zod/**/*
+extraResources:
+  - from: .desktop-runtime
+    to: .desktop-runtime
+  - from: .desktop-runtime/node_modules
+    to: .desktop-runtime/node_modules
+    filter:
+      - "**/*"
+  - from: native/AudioBridge/publish
+    to: audio-bridge
+  - from: resources/prerequisites
+    to: prerequisites
+  - from: scripts/install-prerequisite.ps1
+    to: scripts/install-prerequisite.ps1
+  - from: LICENSE
+    to: licenses/LICENSE
+  - from: THIRD_PARTY_NOTICES.md
+    to: licenses/THIRD_PARTY_NOTICES.md
+asar: true
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  executableName: AI-Digital-Human
+nsis:
+  include: build/installer.nsh
+  oneClick: true
+  perMachine: false
+  runAfterFinish: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: AI Digital Human
+  artifactName: AI-Digital-Human-${version}-Windows-x64.${ext}

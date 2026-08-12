@@ -2,8 +2,8 @@ import type { ReactNode } from "react";
 import "./styles.css";
 
 export const metadata = {
-  title: "AI 面试官控制台",
-  description: "用于已告知候选人的 AI 辅助线上面试"
+  title: "AI 数字人",
+  description: "本地 AI 数字人互动与演示工具"
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

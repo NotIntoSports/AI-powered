@@ -9,14 +9,12 @@ import {
   type EchoGuardState
 } from "../features/audio/echo-guard";
 import { canAutoSubmitTranscription } from "../features/audio/transcription-turn";
-import { HumanTakeoverControl } from "../features/audio/human-takeover-control";
 import type { MicVAD } from "@ricky0123/vad-web/dist/real-time-vad";
+import { InterventionControls } from "../features/intervention/intervention-controls";
+import { LiveSubtitles } from "../features/subtitles/live-subtitles";
+import { RtcBridgeControl } from "../features/rtc/rtc-bridge-control";
 import { getInterviewReadiness } from "../features/readiness/interview-readiness";
-import {
-  getSnapshotReadiness,
-  invalidateDeviceReadiness,
-  loadReadinessSnapshot
-} from "../features/readiness/readiness-snapshot";
+import { getSnapshotReadiness, invalidateDeviceReadiness, loadReadinessSnapshot } from "../features/readiness/readiness-snapshot";
 import { AppNavigation } from "../features/settings/app-navigation";
 
 type Diagnostics = {
@@ -64,7 +62,6 @@ async function sessionAction(payload: object): Promise<InterviewSession> {
   if (!response.ok) throw new Error(data.message || "操作失败");
   return data;
 }
-
 export default function ConsolePage() {
   const [session, setSession] = useState(emptySession);
   const [candidateName, setCandidateName] = useState("");
@@ -111,11 +108,8 @@ export default function ConsolePage() {
   const [automaticFollowup, setAutomaticFollowup] = useState(false);
   const [echoGuardActive, setEchoGuardActive] = useState(false);
   const [candidateSpeaking, setCandidateSpeaking] = useState(false);
-  const [humanTakeoverActive, setHumanTakeoverActive] = useState(false);
   const [error, setError] = useState("");
-  const [snapshotReadiness, setSnapshotReadiness] = useState(() =>
-    getSnapshotReadiness({})
-  );
+  const [snapshotReadiness, setSnapshotReadiness] = useState(() => getSnapshotReadiness({}));
   const readiness = getInterviewReadiness({
     modelConfigured: diagnostics.modelConfigured,
     stageConnected: diagnostics.stageConnected,
@@ -127,7 +121,7 @@ export default function ConsolePage() {
     fetch("/api/session", { cache: "no-store" })
       .then((response) => response.json())
       .then(setSession)
-      .catch(() => setError("无法读取面试会话"));
+      .catch(() => setError("无法读取当前互动会话"));
     setSnapshotReadiness(getSnapshotReadiness(loadReadinessSnapshot()));
   }, []);
 
@@ -135,15 +129,9 @@ export default function ConsolePage() {
     const refresh = () => setSnapshotReadiness(getSnapshotReadiness(loadReadinessSnapshot()));
     const timer = window.setInterval(refresh, 1_000);
     const mediaDevices = navigator.mediaDevices;
-    const handleDeviceChange = () => {
-      invalidateDeviceReadiness();
-      refresh();
-    };
+    const handleDeviceChange = () => { invalidateDeviceReadiness(); refresh(); };
     mediaDevices?.addEventListener?.("devicechange", handleDeviceChange);
-    return () => {
-      window.clearInterval(timer);
-      mediaDevices?.removeEventListener?.("devicechange", handleDeviceChange);
-    };
+    return () => { window.clearInterval(timer); mediaDevices?.removeEventListener?.("devicechange", handleDeviceChange); };
   }, []);
 
   useEffect(() => {
@@ -313,7 +301,7 @@ export default function ConsolePage() {
       currentQuestion?.role !== "interviewer"
     ) return;
     const corrected = window.prompt(
-      "修正最近一条候选人回答。保存后会根据修正内容重新生成当前追问：",
+      "修正最近一条对方回答。保存后会根据修正内容重新生成当前回应：",
       currentAnswer.text
     );
     if (corrected === null || !corrected.trim() || corrected.trim() === currentAnswer.text) return;
@@ -469,7 +457,7 @@ export default function ConsolePage() {
             })) {
               if (current.status === "running") {
                 setAnswer((existing) => [existing.trim(), text].filter(Boolean).join(" "));
-                setError("检测到面试轮次已变化，这段转写已放入输入框，请人工确认后再提交。");
+                setError("检测到对话轮次已变化，这段转写已放入输入框，请人工确认后再提交。");
               }
               return;
             }
@@ -529,25 +517,14 @@ export default function ConsolePage() {
     <main className="console workspacePage">
       <header className="topbar">
         <div>
-          <p className="eyebrow">LIVE INTERVIEW</p>
-          <h1>面试工作台</h1>
+          <p className="eyebrow">LIVE INTERACTION</p>
+          <h1>数字人工作台</h1>
         </div>
         <AppNavigation current="workspace" />
       </header>
 
       {error && <p className="error" role="alert">{error}</p>}
-
-      <section className={`readinessBanner ${readiness.ready ? "ready" : ""}`} aria-live="polite">
-        <div>
-          <strong>{readiness.ready ? "面试环境已就绪" : `开始前还需完成 ${readiness.missing.length} 项设置`}</strong>
-          <span>
-            {readiness.ready
-              ? "画面、声音和模型检查均已通过。"
-              : readiness.missing.slice(0, 3).map((item) => item.label).join("、")}
-          </span>
-        </div>
-        {!readiness.ready && <a className="buttonLink" href="/settings">前往设置完成检测</a>}
-      </section>
+      <section className={`readinessBanner ${readiness.ready ? "ready" : ""}`} aria-live="polite"><div><strong>{readiness.ready ? "数字人环境已就绪" : `开始前还需完成 ${readiness.missing.length} 项设置`}</strong><span>{readiness.ready ? "画面、声音和 AI 检查均已通过。" : readiness.missing.slice(0, 3).map((item) => item.label).join("、")}</span></div>{!readiness.ready && <a className="buttonLink" href="/settings">前往设置完成检测</a>}</section>
 
       <section className="consoleGrid">
         <article className="card setup">
@@ -555,23 +532,23 @@ export default function ConsolePage() {
             <h2>会话设置</h2>
             <span className={`pill ${session.status}`}>{session.status}</span>
           </div>
-          <label>候选人姓名<input value={candidateName} onChange={(e) => setCandidateName(e.target.value)} placeholder="例如：张同学" /></label>
-          <label>应聘岗位<input value={roleName} onChange={(e) => setRoleName(e.target.value)} placeholder="例如：前端开发工程师" /></label>
+          <label>互动对象<input value={candidateName} onChange={(e) => setCandidateName(e.target.value)} placeholder="例如：张同学" /></label>
+          <label>对话主题<input value={roleName} onChange={(e) => setRoleName(e.target.value)} placeholder="例如：项目交流" /></label>
           <label>
-            岗位要求
+            背景资料
             <textarea
               className="compactTextarea"
               value={jobDescription}
               onChange={(e) => setJobDescription(e.target.value)}
-              placeholder="粘贴 JD 或核心职责，AI 会据此追问"
+              placeholder="粘贴相关资料，AI 会据此继续对话"
             />
           </label>
           <label>
-            面试重点
+            对话重点
             <input
               value={interviewFocus}
               onChange={(e) => setInterviewFocus(e.target.value)}
-              placeholder="例如：项目真实性、性能优化"
+              placeholder="例如：项目经历、性能优化"
             />
           </label>
           <label>
@@ -590,24 +567,21 @@ export default function ConsolePage() {
               checked={consentConfirmed}
               onChange={(event) => setConsentConfirmed(event.target.checked)}
             />
-            <span>我已向候选人说明本次面试由 AI 协助、会保存记录，并提供人工复核渠道。</span>
+            <span>我已向对方说明本次互动由 AI 协助、会保存记录，并提供人工复核渠道。</span>
           </label>
-          {readiness.ready ? <button
-            disabled={busy || !consentConfirmed || session.status === "running"}
-            onClick={() => act({ action: "start", candidateName, roleName, jobDescription, interviewFocus, maxQuestions, consentConfirmed })}
-          >{session.status === "running" ? "当前面试进行中" : "开始新面试"}</button> : <a className="buttonLink primary" href="/settings">前往设置完成检测</a>}
+          {readiness.ready ? <button disabled={busy || !consentConfirmed || session.status === "running"} onClick={() => act({ action: "start", candidateName, roleName, jobDescription, interviewFocus, maxQuestions, consentConfirmed })}>{session.status === "running" ? "当前互动进行中" : "开始新互动"}</button> : <a className="buttonLink primary" href="/settings">前往设置完成检测</a>}
           {diagnostics.modelConfigured && session.status !== "running" && (
             <p className="muted">
               输出门禁全部通过后才能开始；开始时还会用 GET /models 做一次无推理连接检查，不产生模型调用费用。
             </p>
           )}
-          <button className="secondary" disabled={busy || session.status !== "running"} onClick={() => act({ action: "finish" })}>结束面试</button>
-          {session.status === "finished" && <a className="textLink" href="/records">查看或生成本场面试纪要 →</a>}
+          <button className="secondary" disabled={busy || session.status !== "running"} onClick={() => act({ action: "finish" })}>结束互动</button>
+          {session.status === "finished" && <a className="textLink" href="/records">查看或生成本次互动纪要 →</a>}
         </article>
-
-        <article className="card transcript">
+        <section className="workspaceMain" aria-label="对话工作区">
+          <article className="card transcript">
           <div className="cardHeading">
-            <h2>面试记录</h2>
+            <h2>对话记录</h2>
             <div className="transcriptMeta">
               <span>
                 {session.transcript.filter((item) =>
@@ -650,48 +624,39 @@ export default function ConsolePage() {
             </div>
           </div>
           <div className="messages">
-            {session.transcript.length === 0 && <p className="muted">开始面试后，对话会显示在这里。</p>}
+            {session.transcript.length === 0 && <p className="muted">开始互动后，对话会显示在这里。</p>}
             {session.transcript.map((item, index) => (
               <div className={`message ${item.role}`} key={`${item.at}-${index}`}>
-                <strong>{item.role === "interviewer" ? "AI 面试官" : "候选人"}</strong>
+                <strong>{item.role === "interviewer" ? "AI 数字人" : "对方"}</strong>
                 <p>{item.text}</p>
               </div>
             ))}
           </div>
-        </article>
+          </article>
 
-        <article className="card controls">
-          <HumanTakeoverControl
-            disabled={session.status !== "running"}
-            onBeforeStart={() => {
-              stopAudioCapture();
-              setAutomaticFollowup(false);
-            }}
-            onActiveChange={setHumanTakeoverActive}
-          />
-          <div className="divider" />
-          <h2>候选人回答</h2>
+          <article className="card controls">
+          <h2>对方回答</h2>
           <p className="muted">可采集会议窗口/整个屏幕的系统音频，转写结果会追加到下方文本框；提交前可以人工校对。</p>
           <label className="autoFollowup">
             <input
               type="checkbox"
               checked={automaticFollowup}
-              disabled={capturingAudio || humanTakeoverActive}
+              disabled={capturingAudio}
               onChange={(event) => setAutomaticFollowup(event.target.checked)}
             />
             <span>
-              <strong>候选人说完后自动追问</strong>
-              <small>本机 VAD 检测约 2.5 秒静音后自动转写并提交；面试中可随时停止听取。</small>
+              <strong>对方说完后自动回应</strong>
+              <small>本机 VAD 检测约 2.5 秒静音后自动转写并提交；互动中可随时停止听取。</small>
             </span>
           </label>
           <div className="captureBar">
             {!capturingAudio ? (
               <button
                 type="button"
-                disabled={!diagnostics.transcriptionReady || humanTakeoverActive}
+                disabled={!diagnostics.transcriptionReady}
                 onClick={startAudioCapture}
               >
-                开始听取候选人
+                开始听取对方
               </button>
             ) : (
               <button type="button" className="danger" onClick={stopAudioCapture}>
@@ -703,7 +668,7 @@ export default function ConsolePage() {
                 {echoGuardActive
                   ? "AI 播报中，已暂停收音"
                   : candidateSpeaking
-                    ? "检测到候选人说话"
+                    ? "检测到对方说话"
                     : capturingAudio
                       ? "正在聆听"
                       : "未采集"}
@@ -719,16 +684,23 @@ export default function ConsolePage() {
             {pendingTranscriptions > 0 && <i>{pendingTranscriptions}</i>}
           </div>
           <form onSubmit={submitAnswer}>
-            <textarea value={answer} onChange={(e) => setAnswer(e.target.value)} placeholder="输入候选人的回答…" />
-            <button disabled={busy || humanTakeoverActive || session.status !== "running"}>{busy ? "正在生成…" : "生成追问"}</button>
+            <textarea value={answer} onChange={(e) => setAnswer(e.target.value)} placeholder="输入对方的回答…" />
+            <button disabled={busy || session.status !== "running"}>{busy ? "正在生成…" : "生成追问"}</button>
           </form>
           <div className="divider" />
           <h2>AI 人工播报</h2>
           <form className="inlineForm" onSubmit={sayManual}>
             <input value={manualText} onChange={(e) => setManualText(e.target.value)} placeholder="让数字人直接说一句话" />
-            <button disabled={busy || humanTakeoverActive || session.status !== "running"}>播报</button>
+            <button disabled={busy || session.status !== "running"}>播报</button>
           </form>
-        </article>
+          </article>
+        </section>
+
+        <aside className="workspaceTools" aria-label="会话工具">
+          <RtcBridgeControl />
+          <LiveSubtitles />
+          <InterventionControls onAiPauseChange={(paused) => setAutomaticFollowup(!paused)} />
+        </aside>
       </section>
     </main>
   );

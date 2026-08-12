@@ -1,16 +1,25 @@
 {
   "name": "authorized-interview-screen-helper",
   "version": "0.1.0",
+  "description": "Windows desktop client for local AI digital human interactions",
+  "author": "AI Digital Human contributors",
   "private": true,
-  "engines": {
-    "node": ">=22.13.0"
-  },
+  "main": "dist-desktop/main.js",
   "scripts": {
     "prepare:vad": "node scripts/copy-vad-assets.mjs",
     "predev": "npm run prepare:vad",
     "dev": "next dev -H 127.0.0.1",
     "prebuild": "npm run prepare:vad",
     "build": "next build",
+    "build:standalone": "node scripts/build-next-standalone.mjs",
+    "build:desktop": "tsc -p tsconfig.desktop.json",
+    "build:audio-bridge": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-audio-bridge.ps1 -RunTests",
+    "prepare:prerequisites": "pwsh.exe -NoProfile -File scripts/fetch-prerequisites.ps1",
+    "package:smoke": "npm run build:standalone && npm run build:desktop && npm run build:audio-bridge && electron-builder --dir --win --x64 && npm run test:packaged-runtime",
+    "make:windows": "npm run build && npm run build:standalone && npm run build:desktop && npm run build:audio-bridge && npm run prepare:prerequisites && electron-builder --win nsis --x64 && npm run test:packaged-runtime",
+    "test:desktop-shell": "node --no-warnings --experimental-strip-types --test tests/desktop/server-process.test.mjs tests/desktop/window-security.test.mjs",
+    "test:packaged-runtime": "node scripts/test-packaged-runtime.mjs",
+    "test:rtc-capabilities": "node scripts/test-rtc-capabilities.mjs",
     "start": "next start -H 127.0.0.1",
     "test:transcription": "node scripts/smoke-transcription.mjs",
     "test:transcription-security": "node --no-warnings --experimental-strip-types scripts/test-transcription-security.mjs",
@@ -21,8 +30,6 @@
     "test:tts-error": "node scripts/test-tts-error.mjs",
     "test:echo-guard": "node scripts/test-echo-guard.mjs",
     "test:windows-stdio": "node scripts/test-windows-stdio.mjs",
-    "test:sqlite": "node --no-warnings scripts/test-sqlite-storage.mjs",
-    "test:sqlite-migration": "node --no-warnings scripts/smoke-sqlite-migration.mjs",
     "test:launchers": "node scripts/test-windows-launchers.mjs",
     "test:node-setup": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test-ensure-node.ps1",
     "test:ollama-setup": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test-setup-ollama.ps1",
@@ -38,7 +45,7 @@
     "test:meeting-handoff": "node --no-warnings --experimental-strip-types scripts/test-meeting-handoff.mjs",
     "test:origin": "node scripts/test-request-origin.mjs",
     "test:security-headers": "node scripts/smoke-security-headers.mjs",
-    "test:session": "node --no-warnings scripts/smoke-session-persistence.mjs",
+    "test:session": "node scripts/smoke-session-persistence.mjs",
     "check:environment": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/check-environment.ps1",
     "setup:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/setup-windows.ps1",
     "setup:ollama": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/setup-ollama.ps1",
@@ -49,6 +56,7 @@
   },
   "dependencies": {
     "@ricky0123/vad-web": "^0.0.30",
+    "@volcengine/rtc": "4.69.0",
     "next": "^15.4.0",
     "obs-websocket-js": "^5.0.8",
     "react": "^19.1.0",
@@ -58,9 +66,13 @@
   "devDependencies": {
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
-    "typescript": "^5.8.0"
+    "electron": "43.3.0",
+    "electron-builder": "26.15.3",
+    "typescript": "5.8.3",
+    "vite": "8.2.1"
   },
   "overrides": {
+    "nanoid": "3.3.17",
     "postcss": "8.5.23",
     "sharp": "0.35.3"
   }

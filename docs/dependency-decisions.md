@@ -2,21 +2,13 @@
 
 每项新功能实施前，在此追加一条记录。
 
-## 工作台、设置与记录页面拆分
+## 桌面工作台、设置与记录页面拆分
 
-- 目标：把技术配置和设备检测从首页移出，让首页只承担单场面试操作，并把历史与纪要集中到独立页面。
-- 调研与采用：复用项目现有 Next.js App Router 文件路由、React 客户端组件和浏览器 `sessionStorage`；App Router 原生通过 `app/<route>/page.tsx` 提供页面路由，当前标签页会话存储适合保存短时设备验证结果。
-- 依赖结论：不新增路由、全局状态或 UI 组件依赖，继续使用现有 Next.js、React、CSS 和浏览器标准 API。
-- 状态边界：会话存储只记录检测项的成功时间，不保存 API Key、设备流或候选人数据；设备验证五分钟过期，设备列表变化或上游状态失效会撤销下游确认。
-- 维护成本：页面复用已有模型、OBS、摄像头、音频和会议确认组件，服务端 API 与会话格式保持不变；新增的纯函数负责快照解析、过期和级联失效，便于独立测试。
-
-## 人工接管音频桥
-
-- 目标：面试中暂停 AI 后，让操作员使用本机真实麦克风直接与候选人通话，同时保持会议软件继续选择既有虚拟麦克风。
-- 调研与采用：复用浏览器标准 `getUserMedia()` 获取默认真实麦克风，使用 Audio Output Devices API 的 `selectAudioOutput()`/`HTMLMediaElement.setSinkId()` 把实时流定向到已配置的虚拟音频播放端；继续复用现有虚拟音频设备识别作为不支持选择器时的回退。
-- 依赖结论：不新增 WebRTC、音频混音或桌面自动化依赖，不修改 Windows 全局默认设备，也不尝试控制第三方会议软件内部设置。
-- 权限与安全：接管必须由用户点击触发并明确选择输出设备；麦克风流只在本机浏览器内转送，不上传、不录制，结束接管、结束面试或组件卸载时立即停止轨道。
-- 限制：需要支持输出设备选择和 `setSinkId()` 的最新版 Edge/Chrome；输出端必须选择虚拟线路播放端（例如 CABLE Input），选到实体扬声器会造成回声，因此界面在授权前明确提示。
+- 目标：让 Electron 默认页只承担数字人实时互动，把技术配置、设备检测、历史记录和纪要移到独立页面。
+- 采用：复用 Next.js App Router、现有 React 组件和浏览器 `sessionStorage`，不新增路由、状态管理或 UI 依赖。
+- 桌面边界：RTC 会议进程连接、实时字幕和人工介入保留在工作台；AI/RTC 凭据、OBS、数字人素材与输出检测进入设置页；安装组件卡暂不展示。
+- 状态：会话存储只保存设备检测成功时间，不保存密钥、媒体流或对话数据；五分钟过期并在设备变化时级联失效。
+- 兼容：服务端 API、IPC 名称、会话和归档结构保持不变，旧记录无需迁移。
 
 ## 虚拟摄像头输出
 
@@ -111,10 +103,9 @@
   - 浏览器 `navigator.mediaDevices.enumerateDevices()` 在用户授权后检测虚拟麦克风是否出现。
 - 必须保留的人工步骤：安装系统驱动、在 OBS 选择全局监听设备、在会议软件选择麦克风。浏览器和 OBS WebSocket 均不能安全地替用户修改所有第三方会议软件的设备设置。
 - 设备自检：复用浏览器标准 `getUserMedia` 与 `enumerateDevices`，同时识别虚拟录音端和播放端，兼容 VB-CABLE、Virtual Audio Driver 和 Voicemeeter 的明确成对设备；只有两端同时存在并通过真实音量采样才显示线路完整。BlackHole 是 macOS 方案，ToDesk 等远控音频端点不能证明通用会议回传能力，均不用于 Windows 门禁放行。
+- Windows 安装修复：继续使用固定版本且已验证签名的 Virtual-Audio-Driver，不新增安装依赖。INF 路径通过 UTF-8 JSON 临时请求传给提权 PowerShell，再以参数数组调用系统 `pnputil.exe`，避免含空格、中文或 PowerShell 元字符的路径被拆分；安装结果通过临时 JSON 返回，客户端区分 UAC 取消、资源缺失、签名拒绝、系统安装失败及等待重启。现有官方/开源方案已经提供驱动与系统安装工具，自行开发驱动或引入另一套安装框架会增加签名、安全和维护成本，因此不采用。
 
 ## 单人会话持久化与导出
-
-> 此处早期 JSON 持久化决策已被下文“内置 SQLite 统一存储”取代；导出格式和会话并发语义继续保留。
 
 - 目标：服务重启后保留当前面试记录，并允许招聘人员下载留档。
 - 采用：Node.js 内置 `fs/promises`、项目现有 Zod 和 JSON；不新增数据库或 ORM。
@@ -169,8 +160,8 @@
 ## 历史归档与证据型面试纪要
 
 - 目标：开始下一场面试后仍能保留过往记录，并为招聘人员生成可审阅纪要。
-- 依赖复用：继续使用现有 Zod、Node 内置 SQLite 和现有 OpenAI-compatible Chat Completions 适配；不新增 ORM、AI SDK 或报表依赖。
-- 归档方式：结束状态和后续纪要更新都会在 SQLite 事务中更新；历史 API 只返回通过 Zod 校验且标识安全的记录。
+- 依赖复用：继续使用 Node.js `fs/promises`、现有 Zod、现有 OpenAI-compatible Chat Completions 适配；不新增数据库、AI SDK 或报表依赖。
+- 归档方式：结束状态和后续纪要更新都会原子写入 `data/interviews/archive/{sessionId}.json`；历史 API 只读取通过 Zod 校验且文件名安全的记录。
 - 纪要边界：
   - 只整理原始回答、明确表现、待追核事项与信息限制；
   - 不生成录用/淘汰建议、候选人排名、总分或敏感属性推断；
@@ -191,8 +182,8 @@
 ## 本机模型配置与密钥保护
 
 - 目标：非开发用户无需手改 `.env.local` 和重启即可配置 OpenAI-compatible 模型，同时避免明文 JSON 存储密钥。
-- 采用：Windows 内置 DPAPI（CurrentUser）、Node `child_process.spawnSync`、现有 Zod 和内置 SQLite；不引入云端密钥库或第三方凭据 SDK。
-- 存储：`data/app.sqlite` 只保存模型地址、模型名和 DPAPI 密文；明文通过 PowerShell 标准输入传递，不出现在命令行参数、日志、GET 响应或前端状态回填中。
+- 采用：Windows 内置 DPAPI（CurrentUser）、Node `child_process.spawnSync`、现有 Zod 和原子 JSON 写入；不引入云端密钥库或第三方凭据 SDK。
+- 存储：`data/settings/model.json` 只保存模型地址、模型名和 DPAPI 密文；明文通过 PowerShell 标准输入传递，不出现在命令行参数、日志、GET 响应或前端状态回填中。
 - 运行时：首次读取后仅在本机 Node 进程内存缓存解密结果；保存后立即生效，不要求重启。原有 `OPENAI_*` 环境变量继续兼容，若存在加密设置则由设置优先。
 - 传输限制：远程模型地址必须使用 HTTPS；仅 `localhost`、`127.0.0.1` 和 `::1` 允许 HTTP，降低误把密钥发送到明文远程连接的风险。
 - 浏览器响应头：复用 Next.js 官方 `headers()` 配置，不引入 Helmet 等重复中间件。控制台和舞台保持静态生成，因此采用官方无 nonce CSP 路径；`script-src` 保留 Next 静态注水所需的 `unsafe-inline`、Silero/ONNX WebAssembly 所需的 `wasm-unsafe-eval`，开发模式才增加 `unsafe-eval`。`connect-src` 仅允许同源与本机 OBS WebSocket；`media-src`/`worker-src` 只增加本机 Blob。另设置 `frame-ancestors 'none'`、`X-Frame-Options: DENY`、`nosniff`、无 Referrer 和最小 Permissions Policy，并关闭 `X-Powered-By`。OBS Browser Source 顶层加载 `/stage`，不依赖 iframe。
@@ -204,9 +195,9 @@
 - 目标：日常运行时不再要求用户打开 OBS 菜单复制 WebSocket 密码。
 - 调研：OBS 28+ 已内置 obs-websocket 5；官方提供 `--websocket_port`、`--websocket_password` 和 `--websocket_ipv4_only` 启动参数。
 - 采用：继续复用 OBS 官方启动参数和现有 `obs-websocket-js`，不读取或修改 OBS 私有配置文件，不新增依赖。
-- 密钥：启动脚本用系统加密随机数生成器创建 256 位随机密码，通过现有 DPAPI 脚本以 CurrentUser 范围加密并保存到 `data/app.sqlite`；明文只进入本次 OBS/Next 进程。控制台受限于回环地址和同源请求的接口读取运行时密码后自动连接、创建舞台并启动虚拟摄像头。
+- 密钥：启动脚本用系统加密随机数生成器创建 256 位随机密码，通过现有 DPAPI 脚本以 CurrentUser 范围保存到 `.tools`；明文只进入本次 OBS/Next 进程。控制台同源接口读取运行时密码后自动连接、创建舞台并启动虚拟摄像头。
 - 安全边界：WebSocket 强制使用 IPv4 并连接 `127.0.0.1:4455`；密码不会写入日志。OBS 官方启动参数会让密码在当前用户可见的进程命令行中短暂存在，这是官方 CLI 自动化接口的固有限制。
-- 已运行 OBS：启动器先警告停止录制或直播，只有用户确认后才调用主窗口正常关闭并等待退出；不强制结束进程。取消或超时则保留原 OBS，控制台在折叠的高级区域保留手工连接。
+- 退化路径：若 OBS 已由用户自行启动，项目不会重启或接管它，控制台保留手工地址和密码输入。
 - 冷启动时序：OBS 图形进程可能晚于 Next.js 页面就绪。控制台使用浏览器原生定时器和现有客户端做最多 20 次、间隔 1.5 秒的可取消重试；组件卸载即停止，不新增重试库或常驻轮询。
 
 ## 面试前输出门禁
@@ -239,18 +230,12 @@
 - 误判控制：模式要求问题直接指向“你/您”、父母家人或家庭背景，不拦截“健康管理系统”“用户年龄段”“残障用户无障碍”等与产品或岗位能力有关的上下文。
 - 限制：本地模式表不是法律合规证明，也不能覆盖所有隐含代理变量；最终面试脚本和人工接管内容仍须由招聘人员复核。
 
-## 损坏会话载荷恢复
+## 损坏会话文件恢复
 
-- 风险：SQLite 中当前会话 JSON 载荷解析或结构校验失败时若直接回到空会话，后续修改会覆盖唯一线索。
-- 采用：在同一事务中把损坏载荷写入 `corrupt_records` 隔离表并删除活动记录，日志只报告来源而不输出候选人内容。
-- 恢复顺序：读取结构有效的归档，按结束或开始时间选择最新一场作为恢复状态；没有有效归档时才返回空会话。隔离载荷不包含在历史列表中。
-
-## 内置 SQLite 统一存储
-
-- 调研：Node.js 自 v22.5.0 提供官方 `node:sqlite`，v22.13.0 起无需 `--experimental-sqlite`；项目最低版本因此提高到 22.13.0。对比 `better-sqlite3` 后选择官方模块，避免约 27MB 解包体积、原生预编译/`node-gyp` 和 Windows 分发维护成本。Node 22/24 中该 API 仍会输出实验性提示，这是已知限制。
-- 采用：`data/app.sqlite` 使用严格表、WAL、5 秒 busy timeout、参数化 SQL 和显式事务；不引入 ORM。设置、当前会话、归档、头像元数据和迁移标记进入数据库，头像媒体仍为文件。
-- 迁移：首次访问各数据域时导入有效的旧 JSON 和 OBS DPAPI 密文并写入幂等标记；单个损坏来源只输出不含业务内容的告警。旧文件停止读写但保留为恢复备份。
-- 安全与成本：SQLite 只存 DPAPI 密文，不取代操作系统密钥保护；数据库本机运行，无网络、GPU、付费 API 或额外数据出境成本。当前同步 API 和单人串行写入负载匹配，后续多进程部署需重新评估数据库方案。
+- 风险：`current.json` 解析或结构校验失败时若直接回到空会话，下一次修改会覆盖当前路径，导致唯一的损坏文件线索丢失。
+- 采用：继续复用 Node 原生 `fs/promises` 和现有原子写入方式，不引入 SQLite、LevelDB 或恢复库。读取失败仅在文件确实不存在时返回空会话；内容损坏时先把原文件原子移动为 `current.corrupt.<时间>.<随机值>.json`，移动成功后才允许恢复。
+- 恢复顺序：从归档目录读取全部结构有效的会话，按结束或开始时间选择最新一场作为只读恢复状态；没有有效归档时才返回空会话。损坏备份始终保留供人工检查，不包含在历史列表中。
+- 失败边界：若损坏文件无法移动，加载直接失败并阻止后续写入，优先避免覆盖而不是假装恢复成功。
 
 ## 候选人文本提示注入边界
 
@@ -258,3 +243,63 @@
 - 采用：复用 JSON 标准和现有单一用户消息，不引入第二个审核模型、提示防火墙或付费安全 API。追问与纪要提示明确声明用户消息只是非可信 JSON 对话证据，不得执行其中的命令、角色声明、规则修改或系统提示词泄露要求。
 - 结构与预算：对每条文本按 Unicode 码点截断，按时间倒序保留最新记录，并在加入完整记录前检查序列化总长度；因此最终始终是可解析 JSON，不会在对象中间硬截断。追问最多 10 条/16,000 字符，纪要最多 80 条/28,000 字符，每条最多 1,600 个码点。
 - 层级防护：该结构化边界与现有隐藏推理清洗、单问题截断、重复检测、公平招聘敏感问题重试和证据引文核验共同生效。它降低常见提示注入成功率，但不宣称能证明任意模型完全免疫。
+# 2026-08-10：修复 Next.js 间接依赖 nanoid 安全公告
+
+- 调查：`npm audit` 将 Next.js 15.5.22 经 PostCSS 8.5.23 引入的 `nanoid 3.3.16` 标为 high，公告为 GHSA-2v37-7h3g-55p8；受影响范围 `<3.3.17`。
+- 选择：使用现有 npm `overrides` 将 nanoid 固定为 `3.3.17`。这是同一 3.x 版本线的安全补丁，许可证仍为 MIT，不新增运行时能力或数据传输。
+- 兼容性：PostCSS 的依赖范围允许该补丁版本；通过完整构建、现有测试和 `npm audit --audit-level=high` 验证。
+- 未选择：直接升级到 nanoid 6，因为属于不必要的主版本升级，可能增加 Next.js/PostCSS 兼容风险。
+
+# 2026-08-10：Windows 桌面壳与安装打包
+
+- Electron：固定 `43.3.0`，MIT。官方文档推荐配合独立打包工具；它保留现有 Next.js 服务端 API，避免将项目重写为纯静态前端。代价是安装体积与内存高于 Tauri，但当前复用成本最低。
+- electron-builder：固定 `26.15.3`，MIT，使用 NSIS 生成 Windows x64 安装器。它支持 extraResources、安装钩子和 Windows 签名，适合打包 OBS/驱动前置组件。
+- 未选择 Electron Forge 7.11.2：虽然是 Electron 官方推荐工具，但本次安装后 `npm audit` 报告 19 个 high 和 1 个 critical，来自构建链中的 `tar`、`tmp` 等依赖；默认无安全修复路径。切换 electron-builder 后审计为 0 漏洞，因此不接受通过跨主版本 overrides 强行覆盖。
+- 安全：Electron 渲染进程关闭 Node integration，开启 context isolation 和 sandbox；安装资源固定 SHA-256 并验证 Authenticode。构建工具只作为 devDependency，不进入网页运行时数据链路。
+- 维护：electron-builder 当前稳定版本仍有发布与 Windows NSIS 支持；构建链存在部分 deprecated 间接包警告，但 `npm audit --audit-level=high` 为 0，后续每次发布重新核验。
+
+# 2026-08-10：音频捕获与火山 RTC 字幕
+
+- 会议音频捕获：采用微软官方 `ActivateAudioInterfaceAsync` Application Loopback 接口模式，按选定会议进程树捕获。官方示例表明可包含指定进程及子进程；目标系统版本不支持时仅在用户确认后降级到 WASAPI 整体输出捕获。
+- 捕获实现依赖：采用 NAudio.Wasapi `3.0.0-preview.20`（MIT）的 `WasapiRecorderBuilder.WithProcessLoopback`，使用本机已有 .NET SDK 构建自包含 x64 sidecar。该 API 要求 Windows 10 2004/build 19041 或更高。当前为 preview，必须固定版本并通过两种会议软件实机测试；若后续稳定版可用，发布前优先升级稳定版。未选择自行移植微软 C++ 示例，因为本机无 MSVC 且 COM 生命周期、格式转换和泄漏风险更高。
+- RTC：优先火山引擎官方 Electron/Windows SDK、自定义音频源和 `startSubtitle` 字幕回调。SDK 版本、许可、计费、数据地域和二进制重分发权仍是接入闸门；没有官方许可文本时不把 SDK 二进制提交到 GitHub 或安装包。
+- 最小验证：官方 npm 包 `@volcengine/rtc 4.69.0`，BSD-3-Clause，仅新增 `eventemitter3` 运行依赖，`npm audit` 为 0。其官方类型定义确认具有 `setExternalAudioTrack`、`setAudioSourceType`、`startSubtitle` 和 `onSubtitleMessageReceived`，可在 Electron 的 Chromium 渲染环境接收由 Web Audio 生成的外部 `MediaStreamTrack`；因此不采用额外的火山 Windows DLL sidecar。
+- 监听：复用会议软件原始播放，不重新播放回环 PCM，避免双声和回声。
+- 人工介入：本机真实麦克风与 AI TTS 通过互斥混音写入虚拟麦克风；人工通道不发送到 RTC 字幕房间。
+- 数据：原始 PCM 默认不落盘，增量字幕只显示，最终字幕才持久化；RTC Token 使用 DPAPI，AppKey 不进入客户端。
+
+# 2026-08-10：人工介入音频混音
+
+- 调研：OBS 32 已内置 obs-websocket；官方协议提供 `CreateInput`、`SetInputAudioMonitorType` 与 `SetInputMute`，OBS 官方源 API 明确“仅监听”会把音频发送到监听设备。现有 `obs-websocket-js` 5.0.8 已覆盖这些请求，无需新增依赖。
+- 采用：一键配置创建 `wasapi_input_capture` 默认麦克风源，AI 舞台和人工麦克风都设为“仅监听”。按住说话时静音 AI、打开人工麦克风；松开后两者都保持静音；只有点击“恢复 AI”才重新打开 AI。紧急静音关闭两路。
+- 输出：OBS 监听设备仍由用户在“设置 → 音频 → 高级 → 监听设备”选择已安装的虚拟音频播放端；会议软件选择对应录音端。obs-websocket 没有受支持的全局监听设备设置请求，因此不修改 OBS 私有配置文件。
+- 许可证与成本：复用 OBS（GPL-2.0）和 obs-websocket-js（MIT），零新增体积、云端费用和密钥流转。应用通过标准 WebSocket 进程集成 OBS，不复制其源码。
+- 限制：默认使用 Windows 当前默认麦克风；发布前必须在真实 OBS、虚拟音频驱动和至少两种会议软件上人工验证，自动化测试只验证调用序列。
+
+# 2026-08-10：火山 RTC 临时 Token 绑定
+
+- 官方约束：火山 RTC 文档要求测试 Token 使用的 AppID、RoomID、UserID 与客户端进房参数完全一致；正式上线则应由业务服务端使用密钥 SDK 动态生成并下发 Token。AppKey 只留在服务端。
+- 采用：试用配置显式保存临时 Token 对应的 RoomID/UserID，并在进房时复用；Token 使用 Windows DPAPI 加密。正式模式仍随机生成单场 RoomID/UserID，再向用户配置的 HTTPS Token 服务请求短期 Token。
+- 字幕前置：RTC 控制台必须开启实时字幕和流式语音识别，并配置语音技术控制台创建的流式语音识别 APP ID、Access Token、Cluster ID；这与 RTC AppID/AppKey 是两套凭据，均不写入客户端源码。
+
+# 2026-08-11：Windows 安装与 standalone 启动修复
+
+- 调查结论：继续使用 Next.js 15 官方 `output: "standalone"` 产物。官方产物的根 `server.js` 与同级追踪依赖已经构成最小运行目录，只需补复制 `public` 和 `.next/static`；递归搜索同名入口会误命中 `.next` 内部路由文件并漏掉 `node_modules`。electron-builder 默认忽略规则还会过滤父目录 extraResources 内的嵌套 `node_modules`，因此将 standalone 的追踪依赖作为独立白名单资源复制，并用打包后可执行文件健康检查约束最终产物。
+- 安装选择：继续使用现有 electron-builder 26.15.3（MIT）与其 NSIS 能力，不引入第二套安装框架。安装改为显式 per-user one-click，并通过 electron-builder 官方 NSIS include 扩展把 `APP_FILENAME` 固定为产品名；NSIS 自动创建 `%LOCALAPPDATA%\\Programs\\AI Interviewer Desktop`，不要求用户选择或预建目录，也不为客户端本体申请管理员权限。
+- 故障诊断：复用 Electron `app.setName`、`dialog` 和 Node 子进程/文件 API，固定用户数据目录产品名，并把本地服务启动输出脱敏后写入 `%APPDATA%\\AI Interviewer Desktop\\logs\\desktop-startup.log`；失败时显示路径，不增加遥测、不上传日志，API Key、Token、密码和 URL 凭据会在落盘前过滤。
+- 兼容与成本：无新增依赖、安装体积和云端费用不变；OBS 与虚拟音频驱动仍作为独立前置组件，仅在用户明确触发安装时提权。用户数据继续位于 `%APPDATA%`，与程序安装和升级目录隔离。
+
+# 2026-08-12：移除桌面端默认菜单栏
+
+- 调研：Electron 43 官方 `BrowserWindow` API 在 Windows 支持 `removeMenu()`、`setMenuBarVisibility()` 和自动隐藏菜单；自动隐藏后用户仍可按 Alt 唤出菜单。
+- 采用：创建主窗口后调用 `removeMenu()`，彻底移除 `File / Edit / View / Window` 默认菜单。应用所需功能均由页面内控件提供，不要求用户配置 Electron 菜单。
+- 兼容与成本：复用现有 Electron API，不新增依赖、安装体积、运行资源、云端费用或数据传输；保留原生标题栏和最小化、最大化、关闭按钮。
+
+# 2026-08-12：桌面标题栏视觉融合
+
+- 调研：Electron 43 官方支持 `titleBarStyle: "hidden"` 与 `titleBarOverlay`，可在 Windows 保留系统窗口按钮和原生窗口行为，同时由应用指定标题区颜色、图标颜色及高度；页面可使用 `titlebar-area-height` 环境变量避让覆盖区域。
+- 采用：将标题区收窄为 36px，使用与应用导航一致的深色背景和高对比浅色窗口按钮；页面仅在 Window Controls Overlay 生效时自动增加顶部安全区，不影响普通浏览器布局。
+- 未选择：不使用完全无边框窗口和自制最小化、最大化、关闭按钮，以免增加 IPC 权限面、缩放适配和 Windows Snap 行为的维护成本。
+- 兼容与成本：复用 Electron 与 Chromium 标准能力，无新增依赖、资源文件、网络请求或用户配置；保留 Windows 拖动、双击最大化、Snap 和系统按钮语义。
+- 视口修正：全屏数字人舞台使用 `100dvh - titlebar-area-height` 作为可用高度，并使用 `width: 100%`，避免标题区与 `100vh` 叠加产生无意义滚动条；普通长内容页面仍保留按需滚动。
+- 首页布局：桌面宽度下改为会话设置、核心对话、会话工具三栏固定工作区，页面本身不滚动；长对话、设置表单和辅助工具仅在各自面板内部按需滚动。窗口窄于 1180px 时恢复自然文档流，避免压缩可用内容。

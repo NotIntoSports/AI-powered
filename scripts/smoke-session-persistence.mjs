@@ -162,7 +162,8 @@ try {
   assert.deepEqual(obsRuntime, {
     managed: true,
     url: "ws://127.0.0.1:4455",
-    password: "managed-obs-smoke-password"
+    password: "managed-obs-smoke-password",
+    stageUrl: ""
   });
   const crossSiteObsRuntime = await fetch(`http://127.0.0.1:${appPort}/api/obs/runtime`, {
     headers: { Origin: "https://attacker.example", "Sec-Fetch-Site": "cross-site" }

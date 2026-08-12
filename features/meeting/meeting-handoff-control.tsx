@@ -67,7 +67,7 @@ export function MeetingHandoffControl({
   return (
     <article className="card meetingHandoff">
       <div className="cardHeading">
-        <h2>候选人指定会议软件 · 入会预览</h2>
+        <h2>当前会议软件 · 入会预览</h2>
         <span className={confirmed ? "ready" : ""}>
           {confirmed ? "最后一跳已确认" : "等待确认"}
         </span>

@@ -1,20 +1,14 @@
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { z } from "zod";
 import { isSecureEndpoint } from "./endpoint-security";
-import {
-  dataRoot,
-  getSetting,
-  hasMigration,
-  markMigrationComplete,
-  setSetting
-} from "./database";
 
 const settingsSchema = z.object({
   baseUrl: z.string().url(),
-  model: z.string().min(1).max(200),
-  encryptedApiKey: z.string().min(1).nullable()
+  model: z.string().max(200),
+  encryptedApiKey: z.string().min(1).nullable(),
+  disabled: z.boolean().default(false)
 });
 
 type StoredSettings = z.infer<typeof settingsSchema>;
@@ -26,10 +20,10 @@ export type ModelRuntimeConfig = {
   source: "settings" | "environment" | "default";
 };
 
-const legacySettingsPaths = [
-  path.join(dataRoot, "settings", "model.json"),
-  path.join(dataRoot, "model.json")
-];
+const dataDirectory = process.env.INTERVIEW_DATA_DIR
+  ? path.resolve(process.env.INTERVIEW_DATA_DIR)
+  : path.join(process.cwd(), "data", "settings");
+const settingsPath = path.join(dataDirectory, "model.json");
 const dpapiScript = path.join(process.cwd(), "scripts", "dpapi-secret.ps1");
 
 const globalConfig = globalThis as typeof globalThis & {
@@ -37,7 +31,7 @@ const globalConfig = globalThis as typeof globalThis & {
   decryptedModelKey?: string;
 };
 
-export function runDpapi(mode: "Protect" | "Unprotect", value: string) {
+function runDpapi(mode: "Protect" | "Unprotect", value: string) {
   if (process.platform !== "win32") {
     throw new Error("DPAPI_UNAVAILABLE");
   }
@@ -56,30 +50,11 @@ export function runDpapi(mode: "Protect" | "Unprotect", value: string) {
 }
 
 async function loadStoredSettings() {
-  const stored = getSetting("model");
-  if (stored) {
-    try {
-      return settingsSchema.parse(JSON.parse(stored));
-    } catch {
-      console.warn("Stored model settings are invalid; ignoring them.");
-      return null;
-    }
+  try {
+    return settingsSchema.parse(JSON.parse(await readFile(settingsPath, "utf8")));
+  } catch {
+    return null;
   }
-  if (hasMigration("model-json")) return null;
-  for (const legacyPath of legacySettingsPaths) {
-    try {
-      const settings = settingsSchema.parse(JSON.parse(await readFile(legacyPath, "utf8")));
-      setSetting("model", JSON.stringify(settings));
-      markMigrationComplete("model-json");
-      return settings;
-    } catch (cause) {
-      if ((cause as NodeJS.ErrnoException).code !== "ENOENT") {
-        console.warn(`Legacy model settings could not be imported from ${path.basename(legacyPath)}.`);
-      }
-    }
-  }
-  markMigrationComplete("model-json");
-  return null;
 }
 
 async function getStoredSettings() {
@@ -90,6 +65,9 @@ async function getStoredSettings() {
 export async function getModelRuntimeConfig(): Promise<ModelRuntimeConfig> {
   const stored = await getStoredSettings();
   if (stored) {
+    if (stored.disabled) {
+      return { apiKey: "", baseUrl: stored.baseUrl, model: "", source: "settings" };
+    }
     let apiKey = "";
     if (stored.encryptedApiKey) {
       globalConfig.decryptedModelKey ??= runDpapi("Unprotect", stored.encryptedApiKey);
@@ -106,7 +84,7 @@ export async function getModelRuntimeConfig(): Promise<ModelRuntimeConfig> {
   return {
     apiKey,
     baseUrl: (process.env.OPENAI_BASE_URL || "https://api.openai.com/v1").replace(/\/$/, ""),
-    model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
+    model: process.env.OPENAI_MODEL || "",
     source: apiKey ? "environment" : "default"
   };
 }
@@ -128,9 +106,13 @@ export async function saveModelRuntimeConfig(input: {
   const settings = settingsSchema.parse({
     baseUrl: input.baseUrl.replace(/\/$/, ""),
     model: input.model,
-    encryptedApiKey
+    encryptedApiKey,
+    disabled: false
   });
-  setSetting("model", JSON.stringify(settings));
+  await mkdir(dataDirectory, { recursive: true });
+  const temporaryPath = `${settingsPath}.${process.pid}.tmp`;
+  await writeFile(temporaryPath, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
+  await rename(temporaryPath, settingsPath);
   globalConfig.decryptedModelKey = input.apiKey ||
     (localEndpoint ? undefined : currentRuntime.apiKey || undefined);
   globalConfig.modelSettingsPromise = Promise.resolve(settings);
@@ -140,10 +122,14 @@ export async function saveModelRuntimeConfig(input: {
 export async function clearModelRuntimeConfig() {
   const settings = settingsSchema.parse({
     baseUrl: "https://api.openai.com/v1",
-    model: "gpt-4.1-mini",
-    encryptedApiKey: null
+    model: "",
+    encryptedApiKey: null,
+    disabled: true
   });
-  setSetting("model", JSON.stringify(settings));
+  await mkdir(dataDirectory, { recursive: true });
+  const temporaryPath = `${settingsPath}.${process.pid}.tmp`;
+  await writeFile(temporaryPath, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
+  await rename(temporaryPath, settingsPath);
   globalConfig.decryptedModelKey = undefined;
   globalConfig.modelSettingsPromise = Promise.resolve(settings);
 }
@@ -162,5 +148,5 @@ export function isLocalModelEndpoint(value: string) {
 }
 
 export function isModelRuntimeConfigured(config: ModelRuntimeConfig) {
-  return Boolean(config.apiKey) || isLocalModelEndpoint(config.baseUrl);
+  return Boolean(config.model) && (Boolean(config.apiKey) || isLocalModelEndpoint(config.baseUrl));
 }
