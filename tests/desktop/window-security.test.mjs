@@ -17,6 +17,10 @@ test("Electron window uses hardened renderer settings", async () => {
   assert.match(source, /height:\s*36/);
   assert.match(source, /desktop-startup\.log/);
   assert.match(source, /dialog\.showErrorBox/);
+  assert.match(source, /setPermissionCheckHandler/);
+  assert.match(source, /setPermissionRequestHandler/);
+  assert.match(source, /permission === ["']media["']/);
+  assert.match(source, /isAllowedLocalUrl\(requestingUrl, baseUrl\)/);
 });
 
 test("preload exposes only the desktop status method", async () => {

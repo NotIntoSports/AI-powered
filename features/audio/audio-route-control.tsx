@@ -9,6 +9,7 @@ type RouteState = "idle" | "checking" | "ready" | "missing" | "denied";
 type AudioRouteControlProps = {
   onReadyChange?: (ready: boolean) => void;
 };
+type PermissionBridge = { openMicrophoneSettings(): Promise<{ opened: boolean }> };
 
 const VERIFICATION_TTL_MS = 5 * 60_000;
 
@@ -202,12 +203,17 @@ export function AudioRouteControl({ onReadyChange }: AudioRouteControlProps) {
       if (cause instanceof Error && cause.message === "DEVICE_CHECK_CANCELLED") return;
       if (cause instanceof DOMException && (cause.name === "NotAllowedError" || cause.name === "SecurityError")) {
         updateState("denied");
-        setMessage("未获得麦克风设备读取权限；请允许本页面使用麦克风后重试。");
+        setMessage("Windows 已阻止麦克风访问。请打开隐私设置，开启麦克风访问和桌面应用访问后重试。");
       } else {
         updateState("missing");
         setMessage(cause instanceof Error ? cause.message : "无法读取音频设备。");
       }
     }
+  }
+
+  async function openMicrophoneSettings() {
+    const bridge = (window as typeof window & { aiInterviewerDesktop?: PermissionBridge }).aiInterviewerDesktop;
+    if (bridge) await bridge.openMicrophoneSettings();
   }
 
   return (
@@ -224,24 +230,14 @@ export function AudioRouteControl({ onReadyChange }: AudioRouteControlProps) {
       </div>
       <div className="audioRouteActions">
         <button disabled={state === "checking"} onClick={checkDevices}>
-          {state === "checking" ? "正在检测…" : "检测虚拟麦克风"}
+          {state === "checking" ? "正在授权并检测…" : "一键授权并检测"}
         </button>
-        <a
-          href="https://github.com/VirtualDrivers/Virtual-Audio-Driver/releases"
-          target="_blank"
-          rel="noreferrer"
-        >
-          开源驱动（MIT）
-        </a>
-        <a href="https://vb-audio.com/Cable/" target="_blank" rel="noreferrer">
-          成熟兜底（VB-CABLE）
-        </a>
+        {state === "denied" && <button className="secondary" onClick={() => void openMicrophoneSettings()}>打开 Windows 麦克风权限</button>}
       </div>
       <ol>
-        <li>安装虚拟音频驱动并按安装提示重启。</li>
-        <li>OBS 设置 → 音频 → 高级，将“监听设备”选为虚拟线路的播放端（如 CABLE Input）。</li>
-        <li>会议软件把麦克风选为虚拟线路的录音端（如 CABLE Output）。</li>
-        <li>点击“播放测试语音”，确认会议软件的麦克风音量条有波动。</li>
+        <li>客户端安装器已内置签名虚拟声卡，无需另行下载。</li>
+        <li>会议软件把麦克风选为安装器创建的虚拟线路录音端。</li>
+        <li>点击测试并确认会议软件的麦克风音量条有波动。</li>
       </ol>
       {(inputs.length > 0 || outputs.length > 0) && (
         <details>
@@ -253,7 +249,7 @@ export function AudioRouteControl({ onReadyChange }: AudioRouteControlProps) {
         </details>
       )}
       <p className="muted">
-        开源驱动仍处于较早阶段；企业机器若不允许安装驱动，请让 IT 安装批准的虚拟音频设备。
+        若显示“等待重启”，请重启 Windows 后再检测；签名或系统策略阻止时请联系管理员。
       </p>
     </article>
   );

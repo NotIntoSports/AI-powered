@@ -1,15 +1,16 @@
-import type { BrowserWindow, IpcMain } from "electron";
+import { shell, type BrowserWindow, type IpcMain } from "electron";
 import { AudioCaptureProcess } from "./audio/capture-process";
 import { listMeetingProcesses } from "./audio/meeting-processes";
 import { getPrerequisiteStatus, installPrerequisite } from "./prerequisites/windows-install";
-import type { DesktopStatus } from "./types";
+import type { DesktopStatus, ManagedObsState } from "./types";
 
 export function registerDesktopIpc(
   ipcMain: IpcMain,
   getStatus: () => DesktopStatus,
   getWindow: () => BrowserWindow | null,
-  audioBridgePath: string
-  ,installResources?: { scriptPath: string; directory: string }
+  audioBridgePath: string,
+  installResources?: { scriptPath: string; directory: string },
+  obsManager?: { ensure(): Promise<ManagedObsState>; reset(): Promise<ManagedObsState> }
 ): void {
   ipcMain.handle("desktop:get-status", () => getStatus());
   const capture = new AudioCaptureProcess();
@@ -37,4 +38,15 @@ export function registerDesktopIpc(
     if (!installResources) throw new Error("PREREQUISITES_NOT_PACKAGED");
     return installPrerequisite({ component, scriptPath: installResources.scriptPath, resourcesDirectory: installResources.directory });
   });
+  ipcMain.handle("desktop:ensure-managed-obs", () => {
+    if (!obsManager) throw new Error("OBS_MANAGER_UNAVAILABLE");
+    return obsManager.ensure();
+  });
+  ipcMain.handle("desktop:reset-managed-obs-config", () => {
+    if (!obsManager) throw new Error("OBS_MANAGER_UNAVAILABLE");
+    return obsManager.reset();
+  });
+  ipcMain.handle("desktop:open-microphone-settings", async () => ({
+    opened: (await shell.openExternal("ms-settings:privacy-microphone")) === undefined
+  }));
 }

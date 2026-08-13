@@ -13,10 +13,12 @@ function Get-Sha256([string]$Path) {
   } finally { $stream.Dispose() }
 }
 if ($Component -eq "obs") {
-  $installer = Join-Path $ResourcesDirectory "OBS-Studio-32.2.1-Windows-x64-Installer.exe"
-  if ((Get-Sha256 $installer) -ne "BBB95E52B96AD9B7CCD5ABD13121379D29774D6CC5FDBEF82FFA249E8A24A289") { throw "OBS hash invalid" }
-  $process = Start-Process -FilePath $installer -ArgumentList "/S" -Verb RunAs -Wait -PassThru
-  if ($process.ExitCode -ne 0) { throw "OBS installer failed: $($process.ExitCode)" }
+  $portable = Join-Path $ResourcesDirectory "obs-portable\bin\64bit\obs64.exe"
+  if (-not (Test-Path -LiteralPath $portable)) { throw "PREREQUISITE_RESOURCE_MISSING: managed OBS" }
+  $signature = Get-AuthenticodeSignature -LiteralPath $portable
+  if ($signature.Status -ne "Valid" -or $signature.SignerCertificate.Subject -notlike "*OBS Project*") {
+    throw "PREREQUISITE_SIGNATURE_REJECTED: managed OBS"
+  }
   exit 0
 }
 

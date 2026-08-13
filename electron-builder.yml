@@ -33,7 +33,9 @@ win:
 nsis:
   include: build/installer.nsh
   oneClick: true
-  perMachine: false
+  perMachine: true
+  allowElevation: true
+  deleteAppDataOnUninstall: false
   runAfterFinish: true
   createDesktopShortcut: true
   createStartMenuShortcut: true

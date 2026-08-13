@@ -17,7 +17,10 @@ const bridge: DesktopBridge = Object.freeze({
     return () => ipcRenderer.removeListener("desktop:audio-event", handler);
   },
   getPrerequisiteStatus: () => ipcRenderer.invoke("desktop:get-prerequisite-status"),
-  installPrerequisite: (component: "obs" | "virtual-audio") => ipcRenderer.invoke("desktop:install-prerequisite", component)
+  installPrerequisite: (component: "obs" | "virtual-audio") => ipcRenderer.invoke("desktop:install-prerequisite", component),
+  ensureManagedObs: () => ipcRenderer.invoke("desktop:ensure-managed-obs"),
+  resetManagedObsConfig: () => ipcRenderer.invoke("desktop:reset-managed-obs-config"),
+  openMicrophoneSettings: () => ipcRenderer.invoke("desktop:open-microphone-settings")
 });
 
 contextBridge.exposeInMainWorld("aiInterviewerDesktop", bridge);

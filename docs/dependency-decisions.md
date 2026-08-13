@@ -303,3 +303,26 @@
 - 兼容与成本：复用 Electron 与 Chromium 标准能力，无新增依赖、资源文件、网络请求或用户配置；保留 Windows 拖动、双击最大化、Snap 和系统按钮语义。
 - 视口修正：全屏数字人舞台使用 `100dvh - titlebar-area-height` 作为可用高度，并使用 `width: 100%`，避免标题区与 `100vh` 叠加产生无意义滚动条；普通长内容页面仍保留按需滚动。
 - 首页布局：桌面宽度下改为会话设置、核心对话、会话工具三栏固定工作区，页面本身不滚动；长对话、设置表单和辅助工具仅在各自面板内部按需滚动。窗口窄于 1180px 时恢复自然文档流，避免压缩可用内容。
+
+# 2026-08-13：RTC 与实时字幕改由后端配置
+
+- 采用：桌面设置页不再展示 RTC AppID、鉴权模式、Token 服务地址、临时 Token、房间、用户和字幕语言配置；设置项重新连续编号。
+- 运行边界：实时字幕和会议音频功能继续使用现有服务端 `/api/rtc/token` 与 `lib/rtc-settings.ts` 配置链路，客户端只消费后端签发的短期连接信息。
+- 安全与成本：不新增依赖、网络服务或数据流；减少终端用户接触基础设施配置和敏感鉴权信息的机会。后端配置接口暂时保留，以兼容已有部署与管理流程，但不再从桌面 UI 暴露。
+
+# 2026-08-13：OBS 自动安装连接与麦克风授权
+
+- OBS：复用现有固定 OBS 32.2.1 安装资源、SHA-256 校验、官方签名校验和 UAC 安装流程，不新增安装依赖。桌面端检测到缺失时提供“一键安装并连接”；安装完成后立即探测并以本次运行随机 WebSocket 密码启动 OBS，自动配置舞台和虚拟摄像头。
+- 麦克风：Electron 43 官方要求同时实现 `setPermissionCheckHandler` 与 `setPermissionRequestHandler`。仅允许当前随机回环地址的应用页面请求 `media` 权限，其余来源和权限继续拒绝；页面按钮在一次用户操作中发起授权并执行设备与信号检测。
+- Windows 边界：不修改注册表、组策略或全局隐私开关。若用户或管理员已关闭桌面应用麦克风访问，应用通过微软官方 `ms-settings:privacy-microphone` URI 打开系统设置，由用户确认授权。
+- 设置顺序：系统诊断移动到第一项，优先展示阻断状态；OBS、音频和会议确认仍按依赖顺序排列。
+- 重试上限：OBS 自动连接固定最多 5 次、间隔 1.5 秒；耗尽后停止所有自动尝试并恢复操作按钮，只在用户再次点击时启动新一轮，避免长期后台重连。
+
+# 2026-08-13：一体化便携 OBS 与虚拟声卡
+
+- OBS 发行物：继续固定官方 OBS Studio 32.2.1（GPL-2.0-or-later），由安装器 EXE 改为官方 Windows x64 ZIP。GitHub 官方发布 API 给出的 ZIP 大小为 187,817,017 字节，SHA-256 为 `db64a2934f8261f85b1410b84be011207a0afda5400d008289f1f1e211bcc7de`；构建阶段同时验证其中 `obs64.exe` 的 OBS Project Authenticode 签名。
+- 隔离方式：采用 OBS 官方 `--portable`，并固定 `--only-bundled-plugins`、`--disable-updater`、`--disable-missing-files-check`、`--minimize-to-tray`。安装包内的 OBS 只作为已校验模板，首次运行复制到客户端用户数据目录的可写运行目录，避免读取 `%APPDATA%\\obs-studio`，也避免在 Program Files 中写便携配置。
+- 生命周期：复用现有 `obs-websocket-js 5.0.8`（MIT）进行认证、场景配置和 Virtual Camera 控制；客户端只启动自己运行目录内的 OBS。外部 `obs64.exe` 存在时仅提示关闭，不终止、不修改用户配置。启动最多 5 次、间隔 1.5 秒，并按进程、端口、认证、场景、虚拟摄像头分类失败。
+- 系统组件：继续复用 Virtual Audio Driver 25.7.14（MIT/MS-PL）签名发布物和 Windows 自带 `pnputil`，不自行开发音频驱动；OBS Virtual Camera 使用官方内置模块注册。NSIS 改为一次整机 UAC 安装，任一系统组件失败即终止安装。
+- 安全与数据：WebSocket 密码每次运行随机生成，只经 context-isolated IPC 交给本地页面内存，不写日志或配置；专用 OBS 仅访问随机回环地址舞台。无新增云端服务、API 成本或候选人数据流。
+- 体积与限制：安装包增加约 188 MB（压缩前还包括解压后的 OBS 文件与驱动资源）。Windows 驱动签名策略、UAC 和重启要求无法由应用绕过；Virtual Camera 和虚拟声卡最终状态仍需 Windows 10 2004+/Windows 11 x64 实机安装测试。

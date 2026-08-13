@@ -13,10 +13,9 @@ function Get-Sha256([string]$Path) {
 
 $items = @(
   @{
-    Name = "OBS-Studio-32.2.1-Windows-x64-Installer.exe"
-    Url = "https://github.com/obsproject/obs-studio/releases/download/32.2.1/OBS-Studio-32.2.1-Windows-x64-Installer.exe"
-    Sha256 = "BBB95E52B96AD9B7CCD5ABD13121379D29774D6CC5FDBEF82FFA249E8A24A289"
-    Publisher = "OBS Project"
+    Name = "OBS-Studio-32.2.1-Windows-x64.zip"
+    Url = "https://github.com/obsproject/obs-studio/releases/download/32.2.1/OBS-Studio-32.2.1-Windows-x64.zip"
+    Sha256 = "DB64A2934F8261F85B1410B84BE011207A0AFDA5400D008289F1F1E211BCC7DE"
   },
   @{
     Name = "Virtual.Audio.Driver.Signed.-.25.7.14.zip"
@@ -40,6 +39,17 @@ foreach ($item in $items) {
     }
   }
 }
+
+$obsRoot = Join-Path $destination "obs-portable"
+if (Test-Path -LiteralPath $obsRoot) { Remove-Item -LiteralPath $obsRoot -Recurse -Force }
+Expand-Archive -LiteralPath (Join-Path $destination $items[0].Name) -DestinationPath $obsRoot
+$obsExecutable = Join-Path $obsRoot "bin\64bit\obs64.exe"
+if (-not (Test-Path -LiteralPath $obsExecutable)) { throw "OBS portable executable is missing" }
+$obsSignature = Get-AuthenticodeSignature -LiteralPath $obsExecutable
+if ($obsSignature.Status -ne "Valid" -or $obsSignature.SignerCertificate.Subject -notlike "*OBS Project*") {
+  throw "OBS portable signature verification failed"
+}
+[System.IO.File]::WriteAllText((Join-Path $obsRoot "portable_mode.txt"), "", [System.Text.UTF8Encoding]::new($false))
 
 $driverRoot = Join-Path $destination "virtual-audio-driver"
 if (Test-Path -LiteralPath $driverRoot) { Remove-Item -LiteralPath $driverRoot -Recurse -Force }

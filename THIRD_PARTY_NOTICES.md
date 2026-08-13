@@ -15,6 +15,6 @@ The source repository and Windows distribution use third-party components. Their
 | Microsoft Windows classic samples | MIT | https://github.com/microsoft/Windows-classic-samples |
 | Volcengine RTC Web SDK | BSD-3-Clause | https://www.npmjs.com/package/@volcengine/rtc |
 
-OBS Studio is a separate program. If an OBS installer is redistributed with a release, that release must also provide the corresponding GPL notices and source offer required for the exact OBS version.
+OBS Studio 32.2.1 is redistributed as a separate portable program. Its corresponding source archive is available from the official release at https://github.com/obsproject/obs-studio/releases/tag/32.2.1 and must remain available with the distribution's GPL notices/source offer.
 
 The Volcengine RTC Web SDK source package is distributed under BSD-3-Clause. Use of the hosted RTC and subtitle services remains subject to Volcengine service terms, privacy terms, account configuration, and charges.

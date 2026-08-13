@@ -13,7 +13,17 @@ export interface DesktopBridge {
   onAudioEvent(listener: (event: unknown) => void): () => void;
   getPrerequisiteStatus(): Promise<{ obsInstalled: boolean; virtualAudioInstalled: boolean; virtualAudioDriverStaged: boolean }>;
   installPrerequisite(component: "obs" | "virtual-audio"): Promise<PrerequisiteInstallResult>;
+  ensureManagedObs(): Promise<ManagedObsState>;
+  resetManagedObsConfig(): Promise<ManagedObsState>;
+  openMicrophoneSettings(): Promise<{ opened: boolean }>;
 }
+
+export type ManagedObsState =
+  | { status: "not-installed" }
+  | { status: "blocked-by-external-obs"; processes: number[] }
+  | { status: "starting"; attempt: number; maxAttempts: 5 }
+  | { status: "ready"; port: number; virtualCameraActive: boolean; url: string; password: string; stageUrl: string }
+  | { status: "failed"; stage: "process" | "port" | "auth" | "scene" | "virtual-camera"; code: string };
 
 export type PrerequisiteInstallErrorCode =
   | "uac-cancelled"

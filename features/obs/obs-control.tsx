@@ -5,7 +5,6 @@ import { OBSWebSocket } from "obs-websocket-js";
 import {
   configureObs,
   getVirtualCameraStatus,
-  retryUntilSuccess,
   setInterventionRouting,
   startVirtualCamera,
   stopVirtualCamera
@@ -17,6 +16,19 @@ type ObsControlProps = {
   onStatusChange?: (status: { connected: boolean; virtualCameraActive: boolean }) => void;
 };
 
+type ObsDesktopBridge = {
+  getPrerequisiteStatus(): Promise<{ obsInstalled: boolean }>;
+  installPrerequisite(component: "obs"): Promise<{ installed: boolean; error?: { message: string } }>;
+  ensureManagedObs(): Promise<ManagedObsRuntime>;
+  resetManagedObsConfig(): Promise<ManagedObsRuntime>;
+};
+type ManagedObsRuntime =
+  | { status: "not-installed" }
+  | { status: "blocked-by-external-obs"; processes: number[] }
+  | { status: "starting"; attempt: number; maxAttempts: 5 }
+  | { status: "ready"; port: number; virtualCameraActive: boolean; url: string; password: string; stageUrl: string }
+  | { status: "failed"; stage: "process" | "port" | "auth" | "scene" | "virtual-camera"; code: string };
+
 export function ObsControl({ onStatusChange }: ObsControlProps) {
   const clientRef = useRef<OBSWebSocket | null>(null);
   const passwordRef = useRef("");
@@ -26,6 +38,7 @@ export function ObsControl({ onStatusChange }: ObsControlProps) {
   const [version, setVersion] = useState("");
   const [virtualCameraActive, setVirtualCameraActive] = useState(false);
   const [working, setWorking] = useState(false);
+  const [obsInstalled, setObsInstalled] = useState<boolean | null>(null);
   const [message, setMessage] = useState("正在检查由启动脚本管理的 OBS…");
 
   useEffect(() => {
@@ -37,35 +50,38 @@ export function ObsControl({ onStatusChange }: ObsControlProps) {
 
   useEffect(() => {
     let active = true;
-    void fetch("/api/obs/runtime", { cache: "no-store" })
-      .then(async (response) => {
-        if (!response.ok) throw new Error("OBS_RUNTIME_UNAVAILABLE");
-        return response.json() as Promise<{
-          managed: boolean;
-          url: string;
-          password: string;
-          stageUrl: string;
-        }>;
-      })
+    const bridge = (window as typeof window & { aiInterviewerDesktop?: ObsDesktopBridge }).aiInterviewerDesktop;
+    const runtimeRequest = bridge
+      ? bridge.getPrerequisiteStatus().then(async (status) => {
+          if (!active) throw new Error("CANCELLED");
+          setObsInstalled(status.obsInstalled);
+          return bridge.ensureManagedObs();
+        })
+      : Promise.resolve<ManagedObsRuntime>({ status: "not-installed" });
+    void runtimeRequest
       .then(async (runtime) => {
         if (!active) return;
-        if (runtime.managed && runtime.password) {
-          setUrl(runtime.url);
-          const connected = await retryUntilSuccess(
-            () => connect(runtime.url, runtime.password, true, runtime.stageUrl),
-            {
-              attempts: 20,
-              delayMs: 1_500,
-              isCancelled: () => !active,
-              onRetry: (attempt) => setMessage(`OBS 正在启动，自动连接重试 ${attempt}/20…`)
-            }
-          );
-          if (active && !connected) {
-            setMessage("OBS 在 30 秒内未就绪，请确认它已启动；也可以手动连接。");
-          }
+        if (runtime.status === "not-installed") {
+          setObsInstalled(false);
+          setMessage("专用 OBS 资源缺失，请重新安装客户端。");
           return;
         }
-        setMessage("当前 OBS 未由启动器管理。请关闭 OBS 后重新运行 Start-AI-Interviewer.cmd，即可免填密码自动连接。");
+        if (runtime.status === "blocked-by-external-obs") {
+          setMessage("检测到你自己的 OBS 正在运行。请先关闭，关闭后点击“重新自动连接”。");
+          return;
+        }
+        if (runtime.status === "failed") {
+          setConnection("error");
+          setMessage(`专用 OBS 启动失败（${runtime.stage}/${runtime.code}），已停止重试。`);
+          return;
+        }
+        if (runtime.status === "ready") {
+          setUrl(runtime.url);
+          await connect(runtime.url, runtime.password, false, runtime.stageUrl);
+          setVirtualCameraActive(runtime.virtualCameraActive);
+          setMessage("专用 OBS、数字人场景和虚拟摄像头已自动就绪。");
+          return;
+        }
       })
       .catch(() => {
         if (active) setMessage("无法读取 OBS 启动状态，请手动连接。");
@@ -74,6 +90,35 @@ export function ObsControl({ onStatusChange }: ObsControlProps) {
       active = false;
     };
   }, []);
+
+  async function installAndConnect() {
+    const bridge = (window as typeof window & { aiInterviewerDesktop?: ObsDesktopBridge }).aiInterviewerDesktop;
+    if (!bridge) { setMessage("请使用 Windows 桌面客户端执行一键安装。"); return; }
+    setWorking(true);
+    setMessage("正在安装官方 OBS，Windows 将显示管理员授权窗口…");
+    try {
+      const result = await bridge.installPrerequisite("obs");
+      if (!result.installed) throw new Error(result.error?.message || "OBS 安装失败");
+      setObsInstalled(true);
+      const runtime = await bridge.ensureManagedObs();
+      if (runtime.status !== "ready") throw new Error(`专用 OBS 未就绪：${runtime.status}`);
+      await connect(runtime.url, runtime.password, false, runtime.stageUrl);
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : "OBS 安装或连接失败");
+    } finally { setWorking(false); }
+  }
+
+  async function reconnectManagedObs() {
+    const bridge = (window as typeof window & { aiInterviewerDesktop?: ObsDesktopBridge }).aiInterviewerDesktop;
+    if (!bridge) return;
+    setWorking(true);
+    try {
+      const runtime = await bridge.ensureManagedObs();
+      if (runtime.status === "blocked-by-external-obs") { setMessage("请先关闭你自己的 OBS，再重试。"); return; }
+      if (runtime.status !== "ready") { setConnection("error"); setMessage(`专用 OBS 未就绪：${runtime.status}`); return; }
+      await connect(runtime.url, runtime.password, false, runtime.stageUrl);
+    } finally { setWorking(false); }
+  }
 
   useEffect(() => {
     if (connection !== "connected") return;
@@ -215,26 +260,23 @@ export function ObsControl({ onStatusChange }: ObsControlProps) {
       </div>
 
       {!connected && (
-        <details className="obsManualConnection">
-          <summary>高级手动连接</summary>
-          <div className="obsCredentials">
-            <label>
-              WebSocket 地址
-              <input value={url} onChange={(event) => setUrl(event.target.value)} />
-            </label>
-            <label>
-              WebSocket 密码
-              <input
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                autoComplete="off"
-                placeholder="未设置密码可留空"
-              />
-            </label>
-            <button disabled={connection === "connecting"} onClick={() => void connect()}>连接 OBS</button>
-          </div>
-        </details>
+        <div className="obsActions">
+          <button disabled={working || connection === "connecting"} onClick={() => void reconnectManagedObs()}>{working ? "正在连接…" : "重新自动连接"}</button>
+        </div>
+      )}
+
+      {!connected && (
+        <button className="ghost" disabled={working} onClick={async () => {
+          const bridge = (window as typeof window & { aiInterviewerDesktop?: ObsDesktopBridge }).aiInterviewerDesktop;
+          if (!bridge) return;
+          setWorking(true);
+          setMessage("正在重置客户端专用 OBS 配置…");
+          try {
+            const runtime = await bridge.resetManagedObsConfig();
+            if (runtime.status === "ready") await connect(runtime.url, runtime.password, false, runtime.stageUrl);
+            else setMessage(`重置后仍未就绪：${runtime.status}`);
+          } finally { setWorking(false); }
+        }}>重置专用 OBS 配置并重启</button>
       )}
 
       {connected && (
@@ -253,7 +295,7 @@ export function ObsControl({ onStatusChange }: ObsControlProps) {
         <i className={virtualCameraActive ? "active" : ""} />
         <p>{message}</p>
       </div>
-      <p className="muted">会议软件中选择“OBS Virtual Camera”。自动启动密码经 DPAPI 加密后保存在本机 SQLite；高级手动输入的密码只保留在当前页面内存中。</p>
+      <p className="muted">会议软件中选择“OBS Virtual Camera”。自动连接使用本次客户端运行生成的随机密码，不写入页面或日志；高级手动输入的密码只保留在当前页面内存中。</p>
     </article>
   );
 }

@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
-import { detectObs } from "../obs-process";
+import { existsSync } from "node:fs";
+import path from "node:path";
 import type { PrerequisiteInstallResult } from "../types";
 import { classifyPrerequisiteInstallError } from "./install-error";
 
@@ -11,11 +12,12 @@ function runPnpUtil(args: string[]) {
   });
 }
 
-export function getPrerequisiteStatus(): PrerequisiteStatus {
+export function getPrerequisiteStatus(resourcesDirectory = process.resourcesPath): PrerequisiteStatus {
   const devices = runPnpUtil(["/enum-devices", "/class", "Media"]);
   const drivers = runPnpUtil(["/enum-drivers"]);
   return {
-    obsInstalled: detectObs() !== null,
+    obsInstalled: existsSync(path.join(resourcesDirectory, "prerequisites", "obs-portable", "bin", "64bit", "obs64.exe")) ||
+      existsSync(path.join(resourcesDirectory, "obs-portable", "bin", "64bit", "obs64.exe")),
     virtualAudioInstalled: devices.status === 0 && /Virtual Audio (Cable|Device|Driver)|Virtual Mic Driver/i.test(devices.stdout),
     virtualAudioDriverStaged: drivers.status === 0 && /MikeTheTech|VirtualAudioDriver/i.test(drivers.stdout)
   };

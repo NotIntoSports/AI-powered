@@ -2,10 +2,9 @@ export const PREREQUISITES = Object.freeze({
   obs: {
     id: "obs",
     version: "32.2.1",
-    fileName: "OBS-Studio-32.2.1-Windows-x64-Installer.exe",
-    url: "https://github.com/obsproject/obs-studio/releases/download/32.2.1/OBS-Studio-32.2.1-Windows-x64-Installer.exe",
-    sha256: "bbb95e52b96ad9b7ccd5abd13121379d29774d6cc5fdbef82ffa249e8a24a289",
-    publisherPattern: "OBS Project"
+    fileName: "OBS-Studio-32.2.1-Windows-x64.zip",
+    url: "https://github.com/obsproject/obs-studio/releases/download/32.2.1/OBS-Studio-32.2.1-Windows-x64.zip",
+    sha256: "db64a2934f8261f85b1410b84be011207a0afda5400d008289f1f1e211bcc7de"
   },
   virtualAudio: {
     id: "virtual-audio",

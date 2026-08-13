@@ -2,12 +2,12 @@ import path from "node:path";
 import { app, BrowserWindow, dialog, ipcMain, session } from "electron";
 
 import { registerDesktopIpc } from "./ipc";
-import { detectObs, startOwnedObs } from "./obs-process";
+import { ManagedObsController } from "./managed-obs";
 import { LocalServerStartError, startLocalServer, stopOwnedProcess } from "./server-process";
 import type { DesktopStatus, OwnedProcess } from "./types";
 
 let server: (OwnedProcess & { baseUrl: string }) | null = null;
-let obsProcess: OwnedProcess | null = null;
+let obsManager: ManagedObsController | null = null;
 let mainWindow: BrowserWindow | null = null;
 
 app.setName("AI Digital Human");
@@ -20,6 +20,10 @@ function isAllowedLocalUrl(value: string, baseUrl: string): boolean {
   } catch {
     return false;
   }
+}
+
+export function isAllowedMediaPermission(permission: string, requestingUrl: string, baseUrl: string): boolean {
+  return permission === "media" && isAllowedLocalUrl(requestingUrl, baseUrl);
 }
 
 export function createMainWindow(baseUrl: string): BrowserWindow {
@@ -63,11 +67,6 @@ if (!hasLock) {
   });
 
   app.whenReady().then(async () => {
-    session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
-      callback(false);
-    });
-    const obsInstallation = detectObs();
-    if (obsInstallation) obsProcess = startOwnedObs(obsInstallation);
     const runtimeRoot = app.isPackaged
       ? path.join(process.resourcesPath, ".desktop-runtime")
       : path.join(process.cwd(), ".desktop-runtime");
@@ -77,6 +76,21 @@ if (!hasLock) {
       cwd: runtimeRoot,
       logPath: path.join(app.getPath("userData"), "logs", "desktop-startup.log")
     });
+    const baseUrl = server.baseUrl;
+    session.defaultSession.setPermissionCheckHandler((_webContents, permission, requestingOrigin, details) =>
+      isAllowedMediaPermission(permission, details.requestingUrl || requestingOrigin, baseUrl)
+    );
+    session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback, details) => {
+      callback(isAllowedMediaPermission(permission, details.requestingUrl, baseUrl));
+    });
+    const obsTemplateRoot = app.isPackaged
+      ? path.join(process.resourcesPath, "prerequisites", "obs-portable")
+      : path.join(process.cwd(), "resources", "prerequisites", "obs-portable");
+    obsManager = new ManagedObsController(
+      obsTemplateRoot,
+      path.join(app.getPath("userData"), "runtime", "obs", "32.2.1"),
+      `${baseUrl}/stage`
+    );
     const getStatus = (): DesktopStatus => ({
       ready: true,
       baseUrl: server?.baseUrl ?? null,
@@ -97,7 +111,8 @@ if (!hasLock) {
         directory: app.isPackaged
           ? path.join(process.resourcesPath, "prerequisites")
           : path.join(process.cwd(), "resources", "prerequisites")
-      }
+      },
+      obsManager
     );
   }).catch((error) => {
     console.error("Desktop startup failed", error instanceof Error ? error.message : error);
@@ -112,5 +127,5 @@ if (!hasLock) {
 app.on("window-all-closed", () => app.quit());
 app.on("before-quit", () => {
   void stopOwnedProcess(server);
-  void stopOwnedProcess(obsProcess);
+  void obsManager?.stop();
 });
