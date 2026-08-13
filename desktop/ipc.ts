@@ -3,6 +3,16 @@ import { AudioCaptureProcess } from "./audio/capture-process";
 import { listMeetingProcesses } from "./audio/meeting-processes";
 import { getPrerequisiteStatus, installPrerequisite } from "./prerequisites/windows-install";
 import type { DesktopStatus, ManagedObsState } from "./types";
+import type { InterventionAction } from "./obs-scene";
+
+type ManagedObsIpcController = {
+  ensure(): Promise<ManagedObsState>;
+  getState(): Promise<ManagedObsState>;
+  setVirtualCamera(active: boolean): Promise<ManagedObsState>;
+  setInterventionRouting(action: InterventionAction): Promise<ManagedObsState>;
+  stop(): Promise<ManagedObsState>;
+  reset(): Promise<ManagedObsState>;
+};
 
 export function registerDesktopIpc(
   ipcMain: IpcMain,
@@ -10,7 +20,7 @@ export function registerDesktopIpc(
   getWindow: () => BrowserWindow | null,
   audioBridgePath: string,
   installResources?: { scriptPath: string; directory: string },
-  obsManager?: { ensure(): Promise<ManagedObsState>; reset(): Promise<ManagedObsState> }
+  obsManager?: ManagedObsIpcController
 ): void {
   ipcMain.handle("desktop:get-status", () => getStatus());
   const capture = new AudioCaptureProcess();
@@ -41,6 +51,26 @@ export function registerDesktopIpc(
   ipcMain.handle("desktop:ensure-managed-obs", () => {
     if (!obsManager) throw new Error("OBS_MANAGER_UNAVAILABLE");
     return obsManager.ensure();
+  });
+  ipcMain.handle("desktop:get-managed-obs-state", () => {
+    if (!obsManager) throw new Error("OBS_MANAGER_UNAVAILABLE");
+    return obsManager.getState();
+  });
+  ipcMain.handle("desktop:set-managed-obs-virtual-camera", (_event, active: unknown) => {
+    if (!obsManager) throw new Error("OBS_MANAGER_UNAVAILABLE");
+    if (typeof active !== "boolean") throw new Error("INVALID_OBS_VIRTUAL_CAMERA_STATE");
+    return obsManager.setVirtualCamera(active);
+  });
+  ipcMain.handle("desktop:set-managed-obs-intervention-routing", (_event, action: unknown) => {
+    if (!obsManager) throw new Error("OBS_MANAGER_UNAVAILABLE");
+    if (action !== "begin" && action !== "end" && action !== "resume" && action !== "mute") {
+      throw new Error("INVALID_OBS_INTERVENTION_ACTION");
+    }
+    return obsManager.setInterventionRouting(action);
+  });
+  ipcMain.handle("desktop:stop-managed-obs", () => {
+    if (!obsManager) throw new Error("OBS_MANAGER_UNAVAILABLE");
+    return obsManager.stop();
   });
   ipcMain.handle("desktop:reset-managed-obs-config", () => {
     if (!obsManager) throw new Error("OBS_MANAGER_UNAVAILABLE");

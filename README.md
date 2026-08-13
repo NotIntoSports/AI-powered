@@ -12,7 +12,7 @@
 - 已问问题会进入提示词并在本地做近重复检测；重复时最多重试模型一次，
   仍重复则使用不同角度的本地兜底问题。
 - OBS Virtual Camera 将舞台作为摄像头提供给腾讯会议、飞书、钉钉、Zoom、Teams 等软件。
-- 控制台通过 OBS 内置 WebSocket 一键创建场景、浏览器源并启停虚拟摄像头。
+- Windows 客户端内置官方 OBS 32.2.1，并由 Electron 主进程通过 OBS WebSocket 一键创建场景、浏览器源并启停虚拟摄像头。
 - 控制台提供服务、模型、舞台、系统语音和画面素材五项自动自检。
 - 可从任意会议窗口或整个屏幕采集系统音频，分段转写为候选人回答。
 - Windows 客户端使用火山引擎 RTC 获取实时字幕，模型和 RTC 凭据由使用者在本机填写。
@@ -68,10 +68,10 @@ npm run start:whisper
 
 ## OBS 设置
 
-1. 安装并启动 OBS Studio。
-2. 关闭已自行打开的 OBS，然后双击 `Start-AI-Interviewer.cmd`；若 OBS 正在运行，启动器会在明确确认后正常关闭并重新启动它。
-3. 启动器会自动设置并安全保存 WebSocket 密码，控制台无需填写即可连接。
-4. 自动连接会创建或更新 `AI Interviewer` 场景和浏览器源，
+1. 安装 Windows 客户端；OBS Studio 32.2.1 已随安装包提供，无需另装 OBS。
+2. 正式安装器会请求管理员授权注册 `OBS Virtual Camera`。直接运行 `dist\win-unpacked` 预览版时，若页面显示“需要授权”，点击“管理员授权注册并连接”。
+3. 关闭用户自行打开的 OBS，再在客户端点击自动连接；客户端只启动和管理自身专用运行目录中的 OBS，不会结束用户的 OBS。
+4. 自动连接会创建或更新 `AI Digital Human` 场景和浏览器源，
    设置 1280×720 并启动 Virtual Camera。
 5. 在线上会议中将摄像头选择为 `OBS Virtual Camera`。
 6. 在控制台“会议摄像头最终预览”点击检测，授权摄像头后确认能看到数字人画面；
@@ -94,7 +94,7 @@ npm run start:whisper
 - `Check-AI-Interviewer.cmd`：只检查环境，不安装；
 - `Start-AI-Interviewer.cmd`：日常启动并打开控制台。
 
-最小安装会安装项目依赖和 OBS、跳过 Whisper，可先人工输入候选人回答；完整安装额外配置
+源码启动的最小安装会安装项目依赖和系统 OBS、跳过 Whisper，可先人工输入候选人回答；完整安装额外配置
 本地 whisper.cpp；本机离线安装再额外安装 Ollama 并下载约 3.4GB 的 `qwen3.5:4b`，
 完成后模型设置会自动指向本机。所有安装都必须先由用户在菜单中主动选择，且都不会自动
 安装虚拟音频驱动。若电脑没有 Node.js 22.13.0+，安装器会在选定档位后通过 winget 的
@@ -117,9 +117,12 @@ Release 完成本地转写配置。若已经自行安装某项，可直接运行
 npm run start:windows
 ```
 
-该命令会按配置启动 whisper-server、OBS、Next.js，并打开控制台。由脚本启动的 OBS
-会使用 DPAPI 保护的随机本机密码，密文保存在 `data/app.sqlite`，控制台自动连接、创建舞台并启动虚拟摄像头，无需再
-进入 OBS 菜单复制密码。若 OBS 已提前启动，启动器会提示确认正常重启；取消或正常关闭失败时不会强制结束 OBS，可在折叠的高级区域手动连接。日志保存在
+该命令会按配置启动 whisper-server、系统 OBS、Next.js，并打开控制台。这是源码脚本流程；
+打包后的 Windows 客户端使用内置的专用 OBS，密码由 Electron `safeStorage` 以当前用户 DPAPI
+保护主副本，并同步到专用 OBS 配置。密码不会进入 OBS 命令行、渲染页面、IPC 或日志。
+OBS 上游必须读取明文配置，因此专用运行目录的 `obs-websocket\config.json` 中仍有明文密码；
+该目录仅归当前 Windows 用户所有。详情见 [Windows 客户端使用说明](docs/windows-client.md)。
+若源码流程中的系统 OBS 已提前启动，启动器会提示确认正常重启；取消或正常关闭失败时不会强制结束 OBS。日志保存在
 `.tools/logs`。虚拟音频驱动涉及系统设备和重启，仍需按控制台指引由用户或 IT 明确安装。
 启动器会等待 `/api/health` 返回本项目的固定服务标识后才打开浏览器；端口上的其他 HTTP
 服务即使返回 200 也不会被误当成本项目。

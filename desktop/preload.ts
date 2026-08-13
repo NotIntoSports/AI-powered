@@ -19,6 +19,11 @@ const bridge: DesktopBridge = Object.freeze({
   getPrerequisiteStatus: () => ipcRenderer.invoke("desktop:get-prerequisite-status"),
   installPrerequisite: (component: "obs" | "virtual-audio") => ipcRenderer.invoke("desktop:install-prerequisite", component),
   ensureManagedObs: () => ipcRenderer.invoke("desktop:ensure-managed-obs"),
+  getManagedObsState: () => ipcRenderer.invoke("desktop:get-managed-obs-state"),
+  setManagedObsVirtualCamera: (active: boolean) => ipcRenderer.invoke("desktop:set-managed-obs-virtual-camera", active),
+  setManagedObsInterventionRouting: (action: "begin" | "end" | "resume" | "mute") =>
+    ipcRenderer.invoke("desktop:set-managed-obs-intervention-routing", action),
+  stopManagedObs: () => ipcRenderer.invoke("desktop:stop-managed-obs"),
   resetManagedObsConfig: () => ipcRenderer.invoke("desktop:reset-managed-obs-config"),
   openMicrophoneSettings: () => ipcRenderer.invoke("desktop:open-microphone-settings")
 });

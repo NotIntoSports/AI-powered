@@ -1,8 +1,10 @@
 import path from "node:path";
-import { app, BrowserWindow, dialog, ipcMain, session } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, safeStorage, session } from "electron";
 
 import { registerDesktopIpc } from "./ipc";
 import { ManagedObsController } from "./managed-obs";
+import { ManagedObsSecretStore } from "./obs-secret-store";
+import { getPrerequisiteStatus } from "./prerequisites/windows-install";
 import { LocalServerStartError, startLocalServer, stopOwnedProcess } from "./server-process";
 import type { DesktopStatus, OwnedProcess } from "./types";
 
@@ -83,14 +85,21 @@ if (!hasLock) {
     session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback, details) => {
       callback(isAllowedMediaPermission(permission, details.requestingUrl, baseUrl));
     });
-    const obsTemplateRoot = app.isPackaged
-      ? path.join(process.resourcesPath, "prerequisites", "obs-portable")
-      : path.join(process.cwd(), "resources", "prerequisites", "obs-portable");
-    obsManager = new ManagedObsController(
-      obsTemplateRoot,
-      path.join(app.getPath("userData"), "runtime", "obs", "32.2.1"),
-      `${baseUrl}/stage`
-    );
+    const prerequisitesDirectory = app.isPackaged
+      ? path.join(process.resourcesPath, "prerequisites")
+      : path.join(process.cwd(), "resources", "prerequisites");
+    const obsTemplateRoot = path.join(prerequisitesDirectory, "obs-portable");
+    obsManager = new ManagedObsController({
+      templateRoot: obsTemplateRoot,
+      runtimeRoot: path.join(app.getPath("userData"), "runtime", "obs", "32.2.1"),
+      stageUrl: `${baseUrl}/stage`,
+      secretStore: new ManagedObsSecretStore(
+        path.join(app.getPath("userData"), "secrets", "managed-obs-password.bin"),
+        safeStorage
+      ),
+      packagedVersion: "32.2.1",
+      isVirtualCameraRegistered: () => getPrerequisiteStatus(prerequisitesDirectory).virtualCameraRegistered
+    });
     const getStatus = (): DesktopStatus => ({
       ready: true,
       baseUrl: server?.baseUrl ?? null,
@@ -108,9 +117,7 @@ if (!hasLock) {
         scriptPath: app.isPackaged
           ? path.join(process.resourcesPath, "scripts", "install-prerequisite.ps1")
           : path.join(process.cwd(), "scripts", "install-prerequisite.ps1"),
-        directory: app.isPackaged
-          ? path.join(process.resourcesPath, "prerequisites")
-          : path.join(process.cwd(), "resources", "prerequisites")
+        directory: prerequisitesDirectory
       },
       obsManager
     );
@@ -125,7 +132,13 @@ if (!hasLock) {
 }
 
 app.on("window-all-closed", () => app.quit());
-app.on("before-quit", () => {
-  void stopOwnedProcess(server);
-  void obsManager?.stop();
+let shutdownStarted = false;
+app.on("before-quit", (event) => {
+  if (shutdownStarted) return;
+  event.preventDefault();
+  shutdownStarted = true;
+  void Promise.all([
+    stopOwnedProcess(server),
+    obsManager?.stop() ?? Promise.resolve()
+  ]).finally(() => app.quit());
 });

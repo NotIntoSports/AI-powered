@@ -11,9 +11,10 @@ test("desktop settings do not expose RTC or subtitle configuration", async () =>
   assert.ok(source.indexOf('title="系统诊断"') < source.indexOf('title="AI 模型"'));
 });
 
-test("OBS automatic connection has a small fixed retry limit", async () => {
+test("OBS automatic connection uses a bounded 30 second cold-start window", async () => {
   const source = await readFile(new URL("../../desktop/managed-obs.ts", import.meta.url), "utf8");
-  assert.match(source, /MAX_ATTEMPTS\s*=\s*5/);
-  assert.match(source, /await wait\(1_500\)/);
+  assert.match(source, /MANAGED_OBS_STARTUP_TIMEOUT_MS\s*=\s*30_000/);
+  assert.match(source, /PORT_POLL_INTERVAL_MS\s*=\s*500/);
+  assert.match(source, /Date\.now\(\) \+ MANAGED_OBS_STARTUP_TIMEOUT_MS/);
   assert.match(source, /OBS_PORT_NOT_READY/);
 });

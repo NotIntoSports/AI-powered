@@ -4,28 +4,27 @@
 !macroend
 
 !macro customInstall
-  DetailPrint "Installing OBS Virtual Camera and signed virtual audio driver..."
-  nsExec::ExecToStack '"$SYSDIR\regsvr32.exe" /i /s "$INSTDIR\resources\prerequisites\obs-portable\data\obs-plugins\win-dshow\obs-virtualcam-module64.dll"'
+  DetailPrint "Verifying and registering OBS Virtual Camera..."
+  nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\resources\scripts\install-prerequisite.ps1" -Component obs -ResourcesDirectory "$INSTDIR\resources\prerequisites" -Operation install'
   Pop $0
+  Pop $1
   ${If} $0 != 0
+    DetailPrint "$1"
     MessageBox MB_ICONSTOP "OBS Virtual Camera registration failed (code $0)."
     Abort
   ${EndIf}
-  nsExec::ExecToStack '"$WINDIR\SysWOW64\regsvr32.exe" /i /s "$INSTDIR\resources\prerequisites\obs-portable\data\obs-plugins\win-dshow\obs-virtualcam-module32.dll"'
+
+  DetailPrint "Installing the signed virtual audio driver..."
+  nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\resources\scripts\install-prerequisite.ps1" -Component virtual-audio -ResourcesDirectory "$INSTDIR\resources\prerequisites" -Operation install'
   Pop $0
+  Pop $1
   ${If} $0 != 0
-    MessageBox MB_ICONSTOP "OBS Virtual Camera 32-bit registration failed (code $0)."
-    Abort
-  ${EndIf}
-  nsExec::ExecToStack '"$SYSDIR\pnputil.exe" /add-driver "$INSTDIR\resources\prerequisites\virtual-audio-driver\*.inf" /subdirs /install'
-  Pop $0
-  ${If} $0 != 0
+    DetailPrint "$1"
     MessageBox MB_ICONSTOP "Virtual audio driver installation failed (code $0)."
     Abort
   ${EndIf}
 !macroend
 
 !macro customUnInstall
-  nsExec::ExecToLog '"$SYSDIR\regsvr32.exe" /u /s "$INSTDIR\resources\prerequisites\obs-portable\data\obs-plugins\win-dshow\obs-virtualcam-module64.dll"'
-  nsExec::ExecToLog '"$WINDIR\SysWOW64\regsvr32.exe" /u /s "$INSTDIR\resources\prerequisites\obs-portable\data\obs-plugins\win-dshow\obs-virtualcam-module32.dll"'
+  nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\resources\scripts\install-prerequisite.ps1" -Component obs -ResourcesDirectory "$INSTDIR\resources\prerequisites" -Operation uninstall'
 !macroend

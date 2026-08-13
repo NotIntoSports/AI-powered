@@ -9,23 +9,22 @@ test("detects only the managed portable OBS executable", () => {
   assert.equal(result?.executablePath, "C:\\AI\\runtime\\obs\\bin\\64bit\\obs64.exe");
 });
 
-test("managed OBS arguments isolate configuration and disable interactive prompts", () => {
-  const args = buildManagedObsArgs(4455, "test-password");
+test("managed OBS arguments isolate configuration without exposing credentials", () => {
+  const args = buildManagedObsArgs();
   for (const expected of ["--portable", "--multi", "--only-bundled-plugins", "--disable-updater", "--disable-missing-files-check", "--minimize-to-tray", "--websocket_ipv4_only"]) assert.ok(args.includes(expected));
-  assert.deepEqual(args.slice(-4), ["--websocket_port", "4455", "--websocket_password", "test-password"]);
+  assert.equal(args.some((argument) => /password/i.test(argument)), false);
+  assert.equal(args.includes("--websocket_port"), false);
 });
 
-test("marks only a spawned OBS process as owned", () => {
-  const child = { kill: () => true };
+test("marks only a spawned OBS process as owned and keeps secrets out of argv", () => {
+  const child = { kill: () => true, pid: 42 };
   let spawnedArgs = [];
   const result = startOwnedObs(
     { executablePath: "C:\\OBS\\bin\\64bit\\obs64.exe" },
-    "test-password",
-    4455,
     (_executable, args) => { spawnedArgs = args; return child; }
   );
   assert.equal(result.owned, true);
   assert.equal(result.child, child);
-  assert.ok(spawnedArgs.includes("--websocket_password"));
-  assert.ok(spawnedArgs.includes("test-password"));
+  assert.equal(spawnedArgs.some((argument) => /password/i.test(argument)), false);
+  assert.equal(spawnedArgs.includes("--websocket_port"), false);
 });

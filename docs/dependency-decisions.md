@@ -85,7 +85,7 @@
 - 采用：[obs-websocket-js](https://github.com/obs-websocket-community-projects/obs-websocket-js)。
 - 许可证：MIT。
 - 原因：OBS 28+ 已内置 obs-websocket v5；该客户端由 OBS WebSocket 社区维护，通过 npm 发布，并提供与协议请求对应的 TypeScript 类型。
-- 接入边界：浏览器直接连接用户本机 `ws://127.0.0.1:4455`，密码只保存在当前页面内存中，不发送到本项目服务端或写入磁盘。
+- 接入边界：源码浏览器流程仍可手工连接用户的 OBS；打包客户端由 Electron 主进程连接专用 `ws://127.0.0.1:4455`，渲染页面只调用受限 IPC，不接收密码或连接地址。持久密码策略见下方“OBS WebSocket 零配置启动”。
 - 自动操作：读取 OBS 版本、创建或更新 `AI Interviewer` 场景、创建或更新 `/stage` 浏览器源、切换 Program Scene、启动/停止 Virtual Camera。
 - 不自行实现：虚拟摄像头驱动和 OBS 场景文件格式。
 - 音频限制：OBS Virtual Camera 只提供视频设备，不能作为麦克风；会议软件的音频输入仍需独立的虚拟音频设备或系统已有的 Loopback/Stereo Mix。
@@ -193,12 +193,11 @@
 ## OBS WebSocket 零配置启动
 
 - 目标：日常运行时不再要求用户打开 OBS 菜单复制 WebSocket 密码。
-- 调研：OBS 28+ 已内置 obs-websocket 5；官方提供 `--websocket_port`、`--websocket_password` 和 `--websocket_ipv4_only` 启动参数。
-- 采用：继续复用 OBS 官方启动参数和现有 `obs-websocket-js`，不读取或修改 OBS 私有配置文件，不新增依赖。
-- 密钥：启动脚本用系统加密随机数生成器创建 256 位随机密码，通过现有 DPAPI 脚本以 CurrentUser 范围保存到 `.tools`；明文只进入本次 OBS/Next 进程。控制台同源接口读取运行时密码后自动连接、创建舞台并启动虚拟摄像头。
-- 安全边界：WebSocket 强制使用 IPv4 并连接 `127.0.0.1:4455`；密码不会写入日志。OBS 官方启动参数会让密码在当前用户可见的进程命令行中短暂存在，这是官方 CLI 自动化接口的固有限制。
-- 退化路径：若 OBS 已由用户自行启动，项目不会重启或接管它，控制台保留手工地址和密码输入。
-- 冷启动时序：OBS 图形进程可能晚于 Next.js 页面就绪。控制台使用浏览器原生定时器和现有客户端做最多 20 次、间隔 1.5 秒的可取消重试；组件卸载即停止，不新增重试库或常驻轮询。
+- 调研：OBS 28+ 已内置 obs-websocket 5。官方提供端口和密码命令行覆盖参数，但没有启用服务器的覆盖参数；而且把密码放入参数会被 OBS 记录到启动日志。obs-websocket 的持久配置包含 `server_enabled`、`server_port`、`auth_required` 与 `server_password`，密码上游设计为明文以便服务启动时读取。
+- 采用：打包客户端继续复用官方 OBS 32.2.1、现有 `obs-websocket-js 5.0.8` 和 Electron `safeStorage`，不新增依赖。启动前原子写入专用便携目录的 obs-websocket 配置，强制启用服务器、4455 端口、鉴权并关闭提示；命令行仅保留官方 `--websocket_ipv4_only` 等无秘密参数。
+- 密钥：首次运行生成 256 位随机长期密码。加密主副本保存在用户数据目录 `secrets/managed-obs-password.bin`，Windows 下由 `safeStorage` 的 CurrentUser DPAPI 保护；同一密码按 OBS 上游要求同步到专用运行目录的明文配置。它不进入命令行、渲染页面、IPC、应用日志或 OBS 启动日志。
+- 安全边界：客户端只连接 `127.0.0.1:4455`，强制鉴权且不创建防火墙例外；OBS 32.2.1 上游只有 IPv4/双栈选择，尚无仅绑定回环地址的正式配置，因此 WebSocket 可能同时监听本机 IPv4 网卡。专用配置与 `%APPDATA%\\obs-studio` 隔离，只归当前 Windows 用户；同一用户下的恶意本机进程仍属于信任边界，不能把 DPAPI 或文件权限描述为同用户进程隔离。
+- 生命周期：连接、场景、Virtual Camera 和人工麦克风路由都留在 Electron 主进程。渲染层只收到版本、摄像头状态和稳定错误码；冷启动最多等待 30 秒。只终止可执行路径精确匹配专用运行目录的遗留进程，用户自己的 OBS 仅提示关闭。
 
 ## 面试前输出门禁
 
@@ -312,17 +311,17 @@
 
 # 2026-08-13：OBS 自动安装连接与麦克风授权
 
-- OBS：复用现有固定 OBS 32.2.1 安装资源、SHA-256 校验、官方签名校验和 UAC 安装流程，不新增安装依赖。桌面端检测到缺失时提供“一键安装并连接”；安装完成后立即探测并以本次运行随机 WebSocket 密码启动 OBS，自动配置舞台和虚拟摄像头。
+- OBS：复用现有固定 OBS 32.2.1 便携资源、SHA-256 校验、官方签名校验和 UAC 组件注册流程，不新增安装依赖。桌面端分别检测 OBS 是否随包存在及 Virtual Camera 是否已注册；缺少系统注册时提供“管理员授权注册并连接”，完成后以持久随机 WebSocket 密码启动专用 OBS，自动配置舞台和虚拟摄像头。
 - 麦克风：Electron 43 官方要求同时实现 `setPermissionCheckHandler` 与 `setPermissionRequestHandler`。仅允许当前随机回环地址的应用页面请求 `media` 权限，其余来源和权限继续拒绝；页面按钮在一次用户操作中发起授权并执行设备与信号检测。
 - Windows 边界：不修改注册表、组策略或全局隐私开关。若用户或管理员已关闭桌面应用麦克风访问，应用通过微软官方 `ms-settings:privacy-microphone` URI 打开系统设置，由用户确认授权。
 - 设置顺序：系统诊断移动到第一项，优先展示阻断状态；OBS、音频和会议确认仍按依赖顺序排列。
-- 重试上限：OBS 自动连接固定最多 5 次、间隔 1.5 秒；耗尽后停止所有自动尝试并恢复操作按钮，只在用户再次点击时启动新一轮，避免长期后台重连。
+- 重试上限：OBS 自动连接按 500 毫秒间隔轮询，冷启动总时限固定为 30 秒；耗尽后停止自动尝试并恢复操作按钮，只在用户再次点击时启动新一轮，避免长期后台重连。
 
 # 2026-08-13：一体化便携 OBS 与虚拟声卡
 
 - OBS 发行物：继续固定官方 OBS Studio 32.2.1（GPL-2.0-or-later），由安装器 EXE 改为官方 Windows x64 ZIP。GitHub 官方发布 API 给出的 ZIP 大小为 187,817,017 字节，SHA-256 为 `db64a2934f8261f85b1410b84be011207a0afda5400d008289f1f1e211bcc7de`；构建阶段同时验证其中 `obs64.exe` 的 OBS Project Authenticode 签名。
 - 隔离方式：采用 OBS 官方 `--portable`，并固定 `--only-bundled-plugins`、`--disable-updater`、`--disable-missing-files-check`、`--minimize-to-tray`。安装包内的 OBS 只作为已校验模板，首次运行复制到客户端用户数据目录的可写运行目录，避免读取 `%APPDATA%\\obs-studio`，也避免在 Program Files 中写便携配置。
-- 生命周期：复用现有 `obs-websocket-js 5.0.8`（MIT）进行认证、场景配置和 Virtual Camera 控制；客户端只启动自己运行目录内的 OBS。外部 `obs64.exe` 存在时仅提示关闭，不终止、不修改用户配置。启动最多 5 次、间隔 1.5 秒，并按进程、端口、认证、场景、虚拟摄像头分类失败。
-- 系统组件：继续复用 Virtual Audio Driver 25.7.14（MIT/MS-PL）签名发布物和 Windows 自带 `pnputil`，不自行开发音频驱动；OBS Virtual Camera 使用官方内置模块注册。NSIS 改为一次整机 UAC 安装，任一系统组件失败即终止安装。
-- 安全与数据：WebSocket 密码每次运行随机生成，只经 context-isolated IPC 交给本地页面内存，不写日志或配置；专用 OBS 仅访问随机回环地址舞台。无新增云端服务、API 成本或候选人数据流。
+- 生命周期：复用现有 `obs-websocket-js 5.0.8`（MIT）在 Electron 主进程进行认证、场景配置、Virtual Camera 和麦克风路由控制；客户端只启动自己运行目录内的 OBS。外部 `obs64.exe` 存在时仅提示关闭，不终止、不修改用户配置。冷启动最多等待 30 秒，并按配置、进程、端口、认证、场景、虚拟摄像头分类失败。
+- 系统组件：继续复用 Virtual Audio Driver 25.7.14（MIT/MS-PL）签名发布物和 Windows 自带 `pnputil`，不自行开发音频驱动；OBS Virtual Camera 使用官方内置模块。预览版与 NSIS 安装器复用同一 PowerShell 注册逻辑：提权前后都验证 32/64 位模块固定 SHA-256 与 `OBS Project, LLC` Authenticode 签名，再使用相应位数 `regsvr32`，最后核对两个注册表视图；UAC 取消、签名/哈希错误和注册失败返回稳定错误码。
+- 安全与数据：WebSocket 长期随机密码的主副本用 Electron `safeStorage`/CurrentUser DPAPI 加密，并按 OBS 上游要求存在专用配置的明文字段；不经命令行、渲染 IPC 或日志。专用 OBS 仅访问随机回环地址舞台。无新增云端服务、API 成本或候选人数据流，也不创建防火墙例外。
 - 体积与限制：安装包增加约 188 MB（压缩前还包括解压后的 OBS 文件与驱动资源）。Windows 驱动签名策略、UAC 和重启要求无法由应用绕过；Virtual Camera 和虚拟声卡最终状态仍需 Windows 10 2004+/Windows 11 x64 实机安装测试。
