@@ -3,14 +3,14 @@
 package audit
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"io"
 	"net"
-	"reflect"
 	"strings"
 	"time"
 
@@ -22,6 +22,7 @@ var (
 	ErrInvalidEvent      = errors.New("invalid audit event")
 	ErrInvalidMetadata   = errors.New("invalid audit metadata")
 	ErrSensitiveMetadata = errors.New("audit metadata contains a sensitive key")
+	ErrStore             = errors.New("audit store unavailable")
 )
 
 type Action string
@@ -74,19 +75,13 @@ func (s *Store) Append(ctx context.Context, event Event) error {
 	if event.SourceIP != "" && net.ParseIP(event.SourceIP) == nil {
 		return ErrInvalidEvent
 	}
-	if containsSensitiveMetadataKey(event.Metadata, make(map[visit]bool)) {
-		return ErrSensitiveMetadata
-	}
-	if event.Metadata == nil {
-		event.Metadata = map[string]any{}
-	}
-	encodedMetadata, err := json.Marshal(event.Metadata)
+	encodedMetadata, err := encodeAndValidateMetadata(event.Metadata)
 	if err != nil {
-		return ErrInvalidMetadata
+		return err
 	}
 	id, err := randomAuditID()
 	if err != nil {
-		return errors.New("generate audit event ID")
+		return ErrStore
 	}
 	createdAt := event.CreatedAt.UTC().Truncate(time.Microsecond)
 	if event.CreatedAt.IsZero() {
@@ -111,96 +106,50 @@ func (s *Store) Append(ctx context.Context, event Event) error {
 		createdAt,
 	)
 	if err != nil {
-		return fmt.Errorf("append audit event: %w", err)
+		return ErrStore
 	}
 	return nil
 }
 
-type visit struct {
-	typ reflect.Type
-	ptr uintptr
-}
-
-func containsSensitiveMetadataKey(value any, seen map[visit]bool) bool {
-	return containsSensitiveValue(reflect.ValueOf(value), seen)
-}
-
-func containsSensitiveValue(value reflect.Value, seen map[visit]bool) bool {
-	if !value.IsValid() {
-		return false
+func encodeAndValidateMetadata(metadata map[string]any) ([]byte, error) {
+	if metadata == nil {
+		metadata = map[string]any{}
 	}
-	for value.Kind() == reflect.Interface || value.Kind() == reflect.Pointer {
-		if value.IsNil() {
-			return false
-		}
-		if value.Kind() == reflect.Pointer {
-			current := visit{typ: value.Type(), ptr: value.Pointer()}
-			if seen[current] {
-				return false
-			}
-			seen[current] = true
-		}
-		value = value.Elem()
+	encoded, err := json.Marshal(metadata)
+	if err != nil {
+		return nil, ErrInvalidMetadata
 	}
 
-	switch value.Kind() {
-	case reflect.Map:
-		if value.IsNil() {
-			return false
-		}
-		current := visit{typ: value.Type(), ptr: value.Pointer()}
-		if seen[current] {
-			return false
-		}
-		seen[current] = true
-		iterator := value.MapRange()
-		for iterator.Next() {
-			key := iterator.Key()
-			if key.Kind() == reflect.String && sensitiveMetadataKey(key.String()) {
-				return true
-			}
-			if containsSensitiveValue(iterator.Value(), seen) {
-				return true
-			}
-		}
-	case reflect.Slice:
-		if value.IsNil() {
-			return false
-		}
-		current := visit{typ: value.Type(), ptr: value.Pointer()}
-		if seen[current] {
-			return false
-		}
-		seen[current] = true
-		for index := 0; index < value.Len(); index++ {
-			if containsSensitiveValue(value.Index(index), seen) {
+	decoder := json.NewDecoder(bytes.NewReader(encoded))
+	decoder.UseNumber()
+	var decoded any
+	if err := decoder.Decode(&decoded); err != nil {
+		return nil, ErrInvalidMetadata
+	}
+	if _, ok := decoded.(map[string]any); !ok {
+		return nil, ErrInvalidMetadata
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return nil, ErrInvalidMetadata
+	}
+	if containsSensitiveJSONKey(decoded) {
+		return nil, ErrSensitiveMetadata
+	}
+	return encoded, nil
+}
+
+func containsSensitiveJSONKey(value any) bool {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, nested := range typed {
+			if sensitiveMetadataKey(key) || containsSensitiveJSONKey(nested) {
 				return true
 			}
 		}
-	case reflect.Array:
-		for index := 0; index < value.Len(); index++ {
-			if containsSensitiveValue(value.Index(index), seen) {
-				return true
-			}
-		}
-	case reflect.Struct:
-		typeOfValue := value.Type()
-		for index := 0; index < value.NumField(); index++ {
-			field := typeOfValue.Field(index)
-			if !field.IsExported() {
-				continue
-			}
-			name := field.Name
-			if tag := field.Tag.Get("json"); tag != "" {
-				tagName := strings.Split(tag, ",")[0]
-				if tagName == "-" {
-					continue
-				}
-				if tagName != "" {
-					name = tagName
-				}
-			}
-			if sensitiveMetadataKey(name) || containsSensitiveValue(value.Field(index), seen) {
+	case []any:
+		for _, nested := range typed {
+			if containsSensitiveJSONKey(nested) {
 				return true
 			}
 		}

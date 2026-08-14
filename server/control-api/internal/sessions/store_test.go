@@ -5,16 +5,20 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/ai-interviewer/ai-powered/control-api/internal/database"
 	"github.com/ai-interviewer/ai-powered/control-api/internal/users"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -126,6 +130,13 @@ func TestAuthenticateRequiresEnabledOwnedDevice(t *testing.T) {
 	if _, _, err := store.Authenticate(ctx, raw, PurposeDesktop); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := pool.Exec(ctx, `delete from devices where id = $1`, deviceID); err == nil {
+		t.Fatal("deleted a device while a session was still bound to it")
+	}
+	var deviceStillExists bool
+	if err := pool.QueryRow(ctx, `select exists(select 1 from devices where id = $1)`, deviceID).Scan(&deviceStillExists); err != nil || !deviceStillExists {
+		t.Fatalf("deviceStillExists=%v err=%v", deviceStillExists, err)
+	}
 	if _, err := pool.Exec(ctx, `update devices set disabled_at = $2 where id = $1`, deviceID, now); err != nil {
 		t.Fatal(err)
 	}
@@ -220,6 +231,46 @@ func TestStoresComposeInsideTransactionForPasswordAndStatusRevocation(t *testing
 			t.Fatalf("session %s revokedAt=%v err=%v", sessionID, revokedAt, err)
 		}
 	}
+}
+
+func TestAuthenticateTranslatesDatabaseFailureToStableError(t *testing.T) {
+	store := NewStore(failingSessionDB{err: errors.New("SQLSTATE 99999 from user_sessions query")})
+	raw := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+	_, _, err := store.Authenticate(context.Background(), raw, PurposeDesktop)
+	if !errors.Is(err, ErrStore) {
+		t.Fatalf("error = %v, want ErrStore", err)
+	}
+	if strings.Contains(err.Error(), "SQLSTATE") {
+		t.Fatalf("database details leaked: %v", err)
+	}
+}
+
+type failingSessionDB struct {
+	err error
+}
+
+func (db failingSessionDB) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
+	return pgconn.CommandTag{}, db.err
+}
+
+func (db failingSessionDB) Query(context.Context, string, ...any) (pgx.Rows, error) {
+	return nil, db.err
+}
+
+func (db failingSessionDB) QueryRow(context.Context, string, ...any) pgx.Row {
+	return failingSessionRow{err: db.err}
+}
+
+func (db failingSessionDB) Begin(context.Context) (pgx.Tx, error) {
+	return nil, db.err
+}
+
+type failingSessionRow struct {
+	err error
+}
+
+func (row failingSessionRow) Scan(...any) error {
+	return row.err
 }
 
 func createSessionTestUser(t *testing.T, store *users.Store, username string) users.User {

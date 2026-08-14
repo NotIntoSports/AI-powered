@@ -5,7 +5,27 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/stdlib"
+	"github.com/pressly/goose/v3"
 )
+
+func TestIdentityMigrationPreservesDeviceBindingAndDownOrder(t *testing.T) {
+	migration, err := migrations.ReadFile("migrations/00001_identity.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := string(migration)
+	if !strings.Contains(sql, "device_id text references devices(id) on delete restrict") {
+		t.Fatal("device-bound sessions must prevent physical device deletion")
+	}
+	downMarker := strings.Index(sql, "-- +goose Down")
+	dropSessions := strings.Index(sql, "drop table user_sessions;")
+	dropDevices := strings.Index(sql, "drop table devices;")
+	if downMarker < 0 || dropSessions < downMarker || dropDevices < downMarker || dropSessions > dropDevices {
+		t.Fatal("down migration must drop user_sessions before devices")
+	}
+}
 
 func TestMigrateCreatesIdentityTables(t *testing.T) {
 	testPool := openTestPool(t)
@@ -93,6 +113,29 @@ func TestMigratePreventsAuditLogMutation(t *testing.T) {
 	}
 	if _, err := testPool.Exec(ctx, `delete from audit_logs where id = $1`, "audit-1"); err == nil {
 		t.Fatal("audit_logs accepted DELETE")
+	}
+}
+
+func TestIdentityMigrationDownDropsRestrictedDeviceTables(t *testing.T) {
+	testPool := openTestPool(t)
+	ctx := context.Background()
+	if err := Migrate(ctx, testPool.Pool); err != nil {
+		t.Fatal(err)
+	}
+
+	db := stdlib.OpenDBFromPool(testPool.Pool)
+	defer db.Close()
+	if err := goose.DownToContext(ctx, db, "migrations", 0); err != nil {
+		t.Fatalf("migrate down: %v", err)
+	}
+	for _, table := range []string{"user_sessions", "devices", "users"} {
+		var exists bool
+		if err := testPool.QueryRow(ctx, `select to_regclass($1 || '.' || $2) is not null`, testPool.schema, table).Scan(&exists); err != nil {
+			t.Fatalf("check table %s: %v", table, err)
+		}
+		if exists {
+			t.Fatalf("table %s remains after down migration", table)
+		}
 	}
 }
 

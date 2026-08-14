@@ -9,10 +9,14 @@ import (
 	"os"
 	"reflect"
 	"regexp"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/ai-interviewer/ai-powered/control-api/internal/database"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -160,6 +164,69 @@ func TestSetStatusProtectsLastActiveAdmin(t *testing.T) {
 	}
 }
 
+func TestSetStatusStartsTransactionAndAcquiresAdvisoryLock(t *testing.T) {
+	db := &advisoryUserDB{tx: &advisoryUserTx{}}
+	if err := NewStore(db).SetStatus(context.Background(), "operator-id", StatusDisabled); err != nil {
+		t.Fatal(err)
+	}
+	if db.beginCalls != 1 {
+		t.Fatalf("Begin calls = %d, want 1", db.beginCalls)
+	}
+	if len(db.tx.statements) == 0 || !strings.Contains(db.tx.statements[0], "pg_advisory_xact_lock") {
+		t.Fatalf("first transaction statement = %q, want advisory lock", firstStatement(db.tx.statements))
+	}
+}
+
+func TestConcurrentAdminStatusTransitionsPreserveOneActiveAdmin(t *testing.T) {
+	pool := openUserTestPool(t)
+	store := NewStore(pool)
+	first := createTestUser(t, store, "concurrent-admin-one", RoleAdmin)
+	second := createTestUser(t, store, "concurrent-admin-two", RoleAdmin)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	var ready sync.WaitGroup
+	ready.Add(2)
+	for _, id := range []string{first.ID, second.ID} {
+		go func(userID string) {
+			ready.Done()
+			<-start
+			results <- store.SetStatus(ctx, userID, StatusDisabled)
+		}(id)
+	}
+	ready.Wait()
+	close(start)
+
+	var succeeded, lastAdmin int
+	for range 2 {
+		select {
+		case err := <-results:
+			switch {
+			case err == nil:
+				succeeded++
+			case errors.Is(err, ErrLastAdmin):
+				lastAdmin++
+			default:
+				t.Fatalf("concurrent SetStatus error = %v", err)
+			}
+		case <-ctx.Done():
+			t.Fatalf("concurrent SetStatus timed out: %v", ctx.Err())
+		}
+	}
+	if succeeded != 1 || lastAdmin != 1 {
+		t.Fatalf("succeeded=%d lastAdmin=%d, want 1 and 1", succeeded, lastAdmin)
+	}
+	var activeAdmins int
+	if err := pool.QueryRow(context.Background(), `select count(*) from users where role = 'admin' and status = 'active'`).Scan(&activeAdmins); err != nil {
+		t.Fatal(err)
+	}
+	if activeAdmins != 1 {
+		t.Fatalf("active admins = %d, want 1", activeAdmins)
+	}
+}
+
 func TestReplacePasswordAndMissingUserReturnStableErrors(t *testing.T) {
 	pool := openUserTestPool(t)
 	store := NewStore(pool)
@@ -183,6 +250,120 @@ func TestReplacePasswordAndMissingUserReturnStableErrors(t *testing.T) {
 	if _, err := store.GetByNormalizedUsername(ctx, "missing"); !errors.Is(err, ErrUserNotFound) {
 		t.Fatalf("GetByNormalizedUsername missing error = %v", err)
 	}
+}
+
+func TestCreateTranslatesDatabaseFailureToStableError(t *testing.T) {
+	store := NewStore(failingUserDB{err: errors.New("SQLSTATE 99999 from users query")})
+	_, err := store.Create(context.Background(), CreateInput{
+		Username:     "stable-error-user",
+		PasswordHash: "encoded-password-hash",
+		Role:         RoleOperator,
+	})
+	if !errors.Is(err, ErrStore) {
+		t.Fatalf("error = %v, want ErrStore", err)
+	}
+	if strings.Contains(err.Error(), "SQLSTATE") {
+		t.Fatalf("database details leaked: %v", err)
+	}
+}
+
+type failingUserDB struct {
+	err error
+}
+
+func (db failingUserDB) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
+	return pgconn.CommandTag{}, db.err
+}
+
+func (db failingUserDB) Query(context.Context, string, ...any) (pgx.Rows, error) {
+	return nil, db.err
+}
+
+func (db failingUserDB) QueryRow(context.Context, string, ...any) pgx.Row {
+	return failingUserRow{err: db.err}
+}
+
+func (db failingUserDB) Begin(context.Context) (pgx.Tx, error) {
+	return nil, db.err
+}
+
+type failingUserRow struct {
+	err error
+}
+
+func (row failingUserRow) Scan(...any) error {
+	return row.err
+}
+
+type advisoryUserDB struct {
+	tx         *advisoryUserTx
+	beginCalls int
+}
+
+func (db *advisoryUserDB) Begin(context.Context) (pgx.Tx, error) {
+	db.beginCalls++
+	return db.tx, nil
+}
+
+func (*advisoryUserDB) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
+	return pgconn.CommandTag{}, errors.New("query executed outside transaction")
+}
+
+func (*advisoryUserDB) Query(context.Context, string, ...any) (pgx.Rows, error) {
+	return nil, errors.New("query executed outside transaction")
+}
+
+func (*advisoryUserDB) QueryRow(context.Context, string, ...any) pgx.Row {
+	return failingUserRow{err: errors.New("query executed outside transaction")}
+}
+
+type advisoryUserTx struct {
+	statements []string
+}
+
+func (tx *advisoryUserTx) Begin(context.Context) (pgx.Tx, error) { return tx, nil }
+func (*advisoryUserTx) Commit(context.Context) error             { return nil }
+func (*advisoryUserTx) Rollback(context.Context) error           { return nil }
+func (*advisoryUserTx) CopyFrom(context.Context, pgx.Identifier, []string, pgx.CopyFromSource) (int64, error) {
+	return 0, errors.New("unexpected CopyFrom")
+}
+func (*advisoryUserTx) SendBatch(context.Context, *pgx.Batch) pgx.BatchResults { return nil }
+func (*advisoryUserTx) LargeObjects() pgx.LargeObjects                         { return pgx.LargeObjects{} }
+func (*advisoryUserTx) Prepare(context.Context, string, string) (*pgconn.StatementDescription, error) {
+	return nil, errors.New("unexpected Prepare")
+}
+func (tx *advisoryUserTx) Exec(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
+	tx.statements = append(tx.statements, sql)
+	return pgconn.NewCommandTag("UPDATE 1"), nil
+}
+func (*advisoryUserTx) Query(context.Context, string, ...any) (pgx.Rows, error) {
+	return nil, errors.New("unexpected Query")
+}
+func (tx *advisoryUserTx) QueryRow(_ context.Context, sql string, _ ...any) pgx.Row {
+	tx.statements = append(tx.statements, sql)
+	return userStatusRow{role: RoleOperator, status: StatusActive}
+}
+func (*advisoryUserTx) Conn() *pgx.Conn { return nil }
+
+type userStatusRow struct {
+	role   Role
+	status Status
+}
+
+func (row userStatusRow) Scan(dest ...any) error {
+	if len(dest) != 2 {
+		return errors.New("unexpected scan")
+	}
+	*(dest[0].(*Role)) = row.role
+	*(dest[1].(*Status)) = row.status
+	return nil
+}
+
+func firstStatement(statements []string) string {
+	if len(statements) == 0 {
+		return ""
+	}
+	return statements[0]
 }
 
 func createTestUser(t *testing.T, store *Store, username string, role Role) User {

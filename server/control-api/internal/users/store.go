@@ -7,7 +7,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 	"unicode"
@@ -26,6 +25,15 @@ var (
 	ErrUsernameTaken   = errors.New("username is already taken")
 	ErrUserNotFound    = errors.New("user not found")
 	ErrLastAdmin       = errors.New("last active administrator is required")
+	ErrStore           = errors.New("user store unavailable")
+)
+
+const (
+	// PostgreSQL's two-key advisory lock namespace is shared by every user
+	// status transition. The fixed CAPI/1 key gives every caller the same lock
+	// order before it reads the active-administrator set.
+	userStatusLockNamespace int32 = 0x43415049
+	userStatusLockObject    int32 = 1
 )
 
 type Role string
@@ -86,7 +94,7 @@ func (s *Store) Create(ctx context.Context, input CreateInput) (User, error) {
 
 	id, err := randomID()
 	if err != nil {
-		return User{}, errors.New("generate user ID")
+		return User{}, ErrStore
 	}
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	user := User{}
@@ -112,7 +120,7 @@ func (s *Store) Create(ctx context.Context, input CreateInput) (User, error) {
 	if errors.As(err, &postgresError) && postgresError.Code == "23505" && postgresError.ConstraintName == "users_username_normalized_key" {
 		return User{}, ErrUsernameTaken
 	}
-	return User{}, fmt.Errorf("create user: %w", err)
+	return User{}, ErrStore
 }
 
 func (s *Store) GetByNormalizedUsername(ctx context.Context, normalized string) (UserWithPassword, error) {
@@ -140,7 +148,7 @@ func (s *Store) GetByNormalizedUsername(ctx context.Context, normalized string) 
 		return UserWithPassword{}, ErrUserNotFound
 	}
 	if err != nil {
-		return UserWithPassword{}, fmt.Errorf("get user: %w", err)
+		return UserWithPassword{}, ErrStore
 	}
 	return user, nil
 }
@@ -152,7 +160,7 @@ func (s *Store) List(ctx context.Context) ([]User, error) {
 		order by created_at, id
 	`)
 	if err != nil {
-		return nil, fmt.Errorf("list users: %w", err)
+		return nil, ErrStore
 	}
 	defer rows.Close()
 
@@ -168,12 +176,12 @@ func (s *Store) List(ctx context.Context) ([]User, error) {
 			&user.UpdatedAt,
 			&user.LastLoginAt,
 		); err != nil {
-			return nil, fmt.Errorf("scan user: %w", err)
+			return nil, ErrStore
 		}
 		users = append(users, user)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list users: %w", err)
+		return nil, ErrStore
 	}
 	return users, nil
 }
@@ -183,52 +191,60 @@ func (s *Store) SetStatus(ctx context.Context, id string, status Status) error {
 		return ErrInvalidStatus
 	}
 
-	now := time.Now().UTC().Truncate(time.Microsecond)
-	var updatedID string
-	err := s.db.QueryRow(ctx, `
-		with target as materialized (
-			select id, role, status
+	err := pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock($1, $2)`, userStatusLockNamespace, userStatusLockObject); err != nil {
+			return ErrStore
+		}
+
+		var role Role
+		var current Status
+		err := tx.QueryRow(ctx, `
+			select role, status
 			from users
 			where id = $1
 			for update
-		), active_admins as materialized (
-			select id
-			from users
-			where role = 'admin' and status = 'active'
-			for update
-		)
-		update users as u
-		set status = $2, updated_at = $3
-		from target
-		where u.id = target.id
-		  and not (
-			target.role = 'admin'
-			and target.status = 'active'
-			and $2 <> 'active'
-			and (select count(*) from active_admins) = 1
-		  )
-		returning u.id
-	`, id, status, now).Scan(&updatedID)
+		`, id).Scan(&role, &current)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrUserNotFound
+		}
+		if err != nil {
+			return ErrStore
+		}
+
+		if role == RoleAdmin && current == StatusActive && status != StatusActive {
+			var activeAdmins int
+			if err := tx.QueryRow(ctx, `
+				select count(*)
+				from users
+				where role = 'admin' and status = 'active'
+			`).Scan(&activeAdmins); err != nil {
+				return ErrStore
+			}
+			if activeAdmins <= 1 {
+				return ErrLastAdmin
+			}
+		}
+
+		command, err := tx.Exec(ctx, `
+			update users
+			set status = $2, updated_at = $3
+			where id = $1
+		`, id, status, time.Now().UTC().Truncate(time.Microsecond))
+		if err != nil || command.RowsAffected() != 1 {
+			return ErrStore
+		}
+		return nil
+	})
 	if err == nil {
 		return nil
 	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return fmt.Errorf("set user status: %w", err)
-	}
-
-	var role Role
-	var current Status
-	err = s.db.QueryRow(ctx, `select role, status from users where id = $1`, id).Scan(&role, &current)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, ErrUserNotFound) {
 		return ErrUserNotFound
 	}
-	if err != nil {
-		return fmt.Errorf("check user status: %w", err)
-	}
-	if role == RoleAdmin && current == StatusActive && status != StatusActive {
+	if errors.Is(err, ErrLastAdmin) {
 		return ErrLastAdmin
 	}
-	return errors.New("user status was not changed")
+	return ErrStore
 }
 
 func (s *Store) ReplacePassword(ctx context.Context, id, encoded string) error {
@@ -241,7 +257,7 @@ func (s *Store) ReplacePassword(ctx context.Context, id, encoded string) error {
 		where id = $1
 	`, id, encoded, time.Now().UTC().Truncate(time.Microsecond))
 	if err != nil {
-		return fmt.Errorf("replace user password: %w", err)
+		return ErrStore
 	}
 	if command.RowsAffected() == 0 {
 		return ErrUserNotFound

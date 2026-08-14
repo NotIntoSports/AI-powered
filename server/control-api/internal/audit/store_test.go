@@ -9,11 +9,14 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/ai-interviewer/ai-powered/control-api/internal/database"
 	"github.com/ai-interviewer/ai-powered/control-api/internal/users"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -98,6 +101,26 @@ func TestAppendRejectsNestedSensitiveMetadataKey(t *testing.T) {
 	}
 }
 
+func TestAppendRejectsSensitiveKeyInsideRawMessage(t *testing.T) {
+	store := NewStore(nil)
+	err := store.Append(context.Background(), validAuditEvent(map[string]any{
+		"safe": json.RawMessage(`{"token":"must-not-persist"}`),
+	}))
+	if !errors.Is(err, ErrSensitiveMetadata) {
+		t.Fatalf("error = %v, want ErrSensitiveMetadata", err)
+	}
+}
+
+func TestAppendRejectsSensitiveKeyFromCustomMarshaler(t *testing.T) {
+	store := NewStore(nil)
+	err := store.Append(context.Background(), validAuditEvent(map[string]any{
+		"safe": sensitiveAuditMarshaler{},
+	}))
+	if !errors.Is(err, ErrSensitiveMetadata) {
+		t.Fatalf("error = %v, want ErrSensitiveMetadata", err)
+	}
+}
+
 func TestAppendAllowsNonMatchingMetadataKeys(t *testing.T) {
 	pool := openAuditTestPool(t)
 	store := NewStore(pool)
@@ -124,6 +147,45 @@ func TestAppendRejectsUnknownActionAndUnencodableMetadata(t *testing.T) {
 	}
 }
 
+func TestAppendTranslatesDatabaseFailureToStableError(t *testing.T) {
+	store := NewStore(failingAuditDB{err: errors.New("SQLSTATE 99999 from audit_logs insert")})
+	err := store.Append(context.Background(), validAuditEvent(map[string]any{"role": "operator"}))
+	if !errors.Is(err, ErrStore) {
+		t.Fatalf("error = %v, want ErrStore", err)
+	}
+	if strings.Contains(err.Error(), "SQLSTATE") {
+		t.Fatalf("database details leaked: %v", err)
+	}
+}
+
+type failingAuditDB struct {
+	err error
+}
+
+func (db failingAuditDB) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
+	return pgconn.CommandTag{}, db.err
+}
+
+func (db failingAuditDB) Query(context.Context, string, ...any) (pgx.Rows, error) {
+	return nil, db.err
+}
+
+func (db failingAuditDB) QueryRow(context.Context, string, ...any) pgx.Row {
+	return failingAuditRow{err: db.err}
+}
+
+func (db failingAuditDB) Begin(context.Context) (pgx.Tx, error) {
+	return nil, db.err
+}
+
+type failingAuditRow struct {
+	err error
+}
+
+func (row failingAuditRow) Scan(...any) error {
+	return row.err
+}
+
 func validAuditEvent(metadata map[string]any) Event {
 	return Event{
 		Action:     ActionLoginFailed,
@@ -132,6 +194,12 @@ func validAuditEvent(metadata map[string]any) Event {
 		RequestID:  "request-validation",
 		Metadata:   metadata,
 	}
+}
+
+type sensitiveAuditMarshaler struct{}
+
+func (sensitiveAuditMarshaler) MarshalJSON() ([]byte, error) {
+	return []byte(`{"Authorization":"must-not-persist"}`), nil
 }
 
 func openAuditTestPool(t *testing.T) *pgxpool.Pool {

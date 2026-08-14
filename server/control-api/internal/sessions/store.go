@@ -10,7 +10,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/ai-interviewer/ai-powered/control-api/internal/database"
@@ -22,6 +21,7 @@ var (
 	ErrInvalidPurpose  = errors.New("invalid session purpose")
 	ErrInvalidTTL      = errors.New("invalid session TTL")
 	ErrUnauthenticated = errors.New("unauthenticated")
+	ErrStore           = errors.New("session store unavailable")
 )
 
 const (
@@ -75,7 +75,7 @@ func (s *Store) Create(ctx context.Context, input CreateInput) (string, Session,
 				select 1 from users where id = $1 and status = 'active'
 			)
 		`, input.UserID).Scan(&allowed); err != nil {
-			return "", Session{}, fmt.Errorf("check session user: %w", err)
+			return "", Session{}, ErrStore
 		}
 	} else {
 		if err := s.db.QueryRow(ctx, `
@@ -87,7 +87,7 @@ func (s *Store) Create(ctx context.Context, input CreateInput) (string, Session,
 				  and d.id = $2 and d.disabled_at is null
 			)
 		`, input.UserID, input.DeviceID).Scan(&allowed); err != nil {
-			return "", Session{}, fmt.Errorf("check session device: %w", err)
+			return "", Session{}, ErrStore
 		}
 	}
 	if !allowed {
@@ -96,13 +96,13 @@ func (s *Store) Create(ctx context.Context, input CreateInput) (string, Session,
 
 	rawTokenBytes := make([]byte, tokenSize)
 	if _, err := rand.Read(rawTokenBytes); err != nil {
-		return "", Session{}, errors.New("generate session token")
+		return "", Session{}, ErrStore
 	}
 	rawToken := rawTokenEncoding.EncodeToString(rawTokenBytes)
 	digest := sha256.Sum256([]byte(rawToken))
 	id, err := randomSessionID()
 	if err != nil {
-		return "", Session{}, errors.New("generate session ID")
+		return "", Session{}, ErrStore
 	}
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	session := Session{}
@@ -127,7 +127,7 @@ func (s *Store) Create(ctx context.Context, input CreateInput) (string, Session,
 		&session.RevokedAt,
 	)
 	if err != nil {
-		return "", Session{}, fmt.Errorf("create session: %w", err)
+		return "", Session{}, ErrStore
 	}
 	return rawToken, session, nil
 }
@@ -183,7 +183,7 @@ func (s *Store) Authenticate(ctx context.Context, rawToken, purpose string) (use
 		return users.User{}, Session{}, ErrUnauthenticated
 	}
 	if err != nil {
-		return users.User{}, Session{}, fmt.Errorf("authenticate session: %w", err)
+		return users.User{}, Session{}, ErrStore
 	}
 
 	now := time.Now().UTC().Truncate(time.Microsecond)
@@ -207,7 +207,7 @@ func (s *Store) Authenticate(ctx context.Context, rawToken, purpose string) (use
 	if err == nil {
 		session.LastUsedAt = &updatedLastUsed
 	} else if !errors.Is(err, pgx.ErrNoRows) {
-		return users.User{}, Session{}, fmt.Errorf("update session last use: %w", err)
+		return users.User{}, Session{}, ErrStore
 	}
 	return user, session, nil
 }
@@ -223,7 +223,7 @@ func (s *Store) RevokeToken(ctx context.Context, rawToken string) error {
 		where token_digest = $1
 	`, digest, time.Now().UTC().Truncate(time.Microsecond))
 	if err != nil {
-		return fmt.Errorf("revoke session token: %w", err)
+		return ErrStore
 	}
 	if command.RowsAffected() == 0 {
 		return ErrUnauthenticated
@@ -238,7 +238,7 @@ func (s *Store) RevokeUser(ctx context.Context, userID string) error {
 		where user_id = $1 and revoked_at is null
 	`, userID, time.Now().UTC().Truncate(time.Microsecond))
 	if err != nil {
-		return fmt.Errorf("revoke user sessions: %w", err)
+		return ErrStore
 	}
 	return nil
 }
