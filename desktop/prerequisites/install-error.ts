@@ -4,6 +4,7 @@ const ERROR_CODE_MAP: Array<[RegExp, PrerequisiteInstallErrorCode]> = [
   [/PREREQUISITE_UAC_CANCELLED/, "uac-cancelled"],
   [/PREREQUISITE_RESOURCE_MISSING/, "resource-missing"],
   [/PREREQUISITE_SIGNATURE_REJECTED/, "signature-rejected"],
+  [/PREREQUISITE_MODULE_LOAD_FAILED/, "module-load-failed"],
   [/PREREQUISITE_HASH_MISMATCH/, "hash-mismatch"],
   [/PREREQUISITE_REGISTRATION_FAILED/, "registration-failed"],
   [/PREREQUISITE_INSTALL_FAILED/, "install-failed"]

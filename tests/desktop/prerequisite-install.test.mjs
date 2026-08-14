@@ -20,7 +20,12 @@ executeWindowsInstall(
   "windows-install.ts",
   path.dirname(new URL("../../desktop/prerequisites/windows-install.ts", import.meta.url).pathname)
 );
-const { isObsVirtualCameraRegistered, OBS_VIRTUAL_CAMERA_CLSID, registryValueReferencesModule } = windowsInstallModule.exports;
+const {
+  buildWindowsPowerShellEnvironment,
+  isObsVirtualCameraRegistered,
+  OBS_VIRTUAL_CAMERA_CLSID,
+  registryValueReferencesModule
+} = windowsInstallModule.exports;
 
 test("classifies prerequisite installation failures without exposing unbounded output", () => {
   assert.equal(classifyPrerequisiteInstallError("PREREQUISITE_UAC_CANCELLED: cancelled").code, "uac-cancelled");
@@ -29,6 +34,7 @@ test("classifies prerequisite installation failures without exposing unbounded o
   assert.equal(classifyPrerequisiteInstallError("PREREQUISITE_HASH_MISMATCH: obs-virtualcam-module64.dll").code, "hash-mismatch");
   assert.equal(classifyPrerequisiteInstallError("PREREQUISITE_REGISTRATION_FAILED: regsvr32 returned 3").code, "registration-failed");
   assert.equal(classifyPrerequisiteInstallError("PREREQUISITE_INSTALL_FAILED: pnputil failed").code, "install-failed");
+  assert.equal(classifyPrerequisiteInstallError("PREREQUISITE_MODULE_LOAD_FAILED: security module").code, "module-load-failed");
   assert.equal(classifyPrerequisiteInstallError("unexpected").code, "unknown");
   assert.equal(classifyPrerequisiteInstallError(`PREREQUISITE_INSTALL_FAILED: ${"x".repeat(800)}`).message.length, 500);
 });
@@ -46,6 +52,22 @@ test("driver installer transports the INF path through immutable encoded JSON in
   assert.doesNotMatch(source, /-ArgumentList @\("\/add-driver", \$inf\.FullName/);
   assert.match(source, /FromBase64String\("__REQUEST_JSON__"\)/);
   assert.doesNotMatch(source, /Get-Content -Raw -LiteralPath \$requestPath/);
+});
+
+test("removes PowerShell 7 modules from the Windows PowerShell installer environment", () => {
+  const environment = buildWindowsPowerShellEnvironment({
+    SystemRoot: String.raw`C:\Windows`,
+    PSModulePath: [
+      String.raw`C:\Users\tester\Documents\PowerShell\Modules`,
+      String.raw`C:\Program Files\PowerShell\7\Modules`,
+      String.raw`C:\Program Files\WindowsPowerShell\Modules`,
+      String.raw`C:\Windows\System32\WindowsPowerShell\v1.0\Modules`
+    ].join(";")
+  });
+  assert.doesNotMatch(environment.PSModulePath, /\\PowerShell\\7\\Modules/i);
+  assert.doesNotMatch(environment.PSModulePath, /Documents\\PowerShell\\Modules/i);
+  assert.match(environment.PSModulePath, /Program Files\\WindowsPowerShell\\Modules/i);
+  assert.match(environment.PSModulePath, /Windows\\System32\\WindowsPowerShell\\v1\.0\\Modules/i);
 });
 
 test("OBS Virtual Camera status requires the exact bundled module in both registry views", () => {
@@ -100,4 +122,6 @@ test("OBS registration script pins official modules and uses idempotent 32/64 re
   assert.match(source, /PREREQUISITE_SIGNATURE_REJECTED/);
   assert.match(source, /PREREQUISITE_HASH_MISMATCH/);
   assert.match(source, /PREREQUISITE_REGISTRATION_FAILED/);
+  assert.match(source, /PREREQUISITE_MODULE_LOAD_FAILED/);
+  assert.match(source, /Import-Module -Name \$modulePath/);
 });

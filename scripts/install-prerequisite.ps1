@@ -10,6 +10,15 @@ $ObsVirtualCameraClsid = "{A3FCE0F5-3493-419F-958A-ABA1250EC20B}"
 $ObsVirtualCamera32Sha256 = "77C6EDF05247C6EAEB8532D99080C4E3F224DD079FDB6180F3480AEF21854271"
 $ObsVirtualCamera64Sha256 = "8978F6383AE7105498D9CBB6FFA9F4EC6C0D18657E3999431E2C851CE4C62ED1"
 
+function Import-SecurityModule {
+  $modulePath = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\Modules\Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1"
+  try {
+    Import-Module -Name $modulePath -ErrorAction Stop
+  } catch {
+    throw "PREREQUISITE_MODULE_LOAD_FAILED: Microsoft.PowerShell.Security could not be loaded"
+  }
+}
+
 function Get-Sha256([string]$Path) {
   $stream = [System.IO.File]::OpenRead($Path)
   try {
@@ -79,6 +88,15 @@ $request = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("__REQUES
 $obsVirtualCameraClsid = "{A3FCE0F5-3493-419F-958A-ABA1250EC20B}"
 $obsVirtualCamera32Sha256 = "77C6EDF05247C6EAEB8532D99080C4E3F224DD079FDB6180F3480AEF21854271"
 $obsVirtualCamera64Sha256 = "8978F6383AE7105498D9CBB6FFA9F4EC6C0D18657E3999431E2C851CE4C62ED1"
+
+function Import-WorkerSecurityModule {
+  $modulePath = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\Modules\Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1"
+  try {
+    Import-Module -Name $modulePath -ErrorAction Stop
+  } catch {
+    throw "PREREQUISITE_MODULE_LOAD_FAILED: Microsoft.PowerShell.Security could not be loaded"
+  }
+}
 
 function Write-WorkerResult([bool]$Success, [string]$ErrorCode, [string]$Detail) {
   $payload = @{ success = $Success; errorCode = $ErrorCode; detail = $Detail } | ConvertTo-Json -Compress
@@ -158,6 +176,7 @@ function Invoke-Regsvr32([Microsoft.Win32.RegistryView]$View, [string]$ModulePat
 }
 
 try {
+  Import-WorkerSecurityModule
   if ($request.component -eq "obs") {
     Assert-WorkerObsModule $request.module32 $obsVirtualCamera32Sha256
     Assert-WorkerObsModule $request.module64 $obsVirtualCamera64Sha256
@@ -255,6 +274,7 @@ try {
 }
 
 if ($Component -eq "obs") {
+  Import-SecurityModule
   $portable = Join-Path $ResourcesDirectory "obs-portable"
   $moduleDirectory = Join-Path $portable "data\obs-plugins\win-dshow"
   $module32 = Join-Path $moduleDirectory "obs-virtualcam-module32.dll"
@@ -288,6 +308,7 @@ if ($Component -eq "obs") {
 }
 
 if ($Operation -ne "install") { throw "PREREQUISITE_INSTALL_FAILED: virtual audio uninstall is not supported" }
+Import-SecurityModule
 $driverDirectory = Join-Path $ResourcesDirectory "virtual-audio-driver"
 $inf = Get-ChildItem -LiteralPath $driverDirectory -Recurse -Filter "VirtualAudioDriver.inf" | Select-Object -First 1
 if (-not $inf) { throw "PREREQUISITE_RESOURCE_MISSING: VirtualAudioDriver.inf" }

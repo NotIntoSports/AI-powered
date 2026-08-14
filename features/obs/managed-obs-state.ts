@@ -78,6 +78,7 @@ const installErrorMessages: Record<string, string> = {
   "uac-cancelled": "管理员授权已取消。需要重新授权后才能注册系统组件。",
   "resource-missing": "安装包中的组件文件缺失，请重新下载并安装客户端。",
   "signature-rejected": "组件的官方数字签名验证未通过，已停止注册。",
+  "module-load-failed": "Windows PowerShell 安全验证模块无法加载。请重启客户端后重试。",
   "hash-mismatch": "组件完整性校验未通过，已停止注册。",
   "verification-failed": "组件安全验证未通过，已停止注册。",
   "registration-failed": "Windows 未能注册 OBS 虚拟摄像头。请重新授权后重试。",

@@ -49,6 +49,7 @@ test("managed OBS failures always become actionable Chinese messages", async () 
   );
   assert.match(formatPrerequisiteInstallError({ code: "uac-cancelled" }), /管理员授权已取消/);
   assert.match(formatPrerequisiteInstallError({ code: "signature-rejected" }), /数字签名/);
+  assert.match(formatPrerequisiteInstallError({ code: "module-load-failed" }), /PowerShell/);
   assert.match(formatPrerequisiteInstallError({ code: "registration-failed" }), /注册/);
   assert.equal(managedObsBadgeLabel("idle"), "未连接");
   assert.equal(managedObsBadgeLabel("starting"), "正在启动");

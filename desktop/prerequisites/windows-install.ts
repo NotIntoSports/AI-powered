@@ -9,6 +9,27 @@ export const OBS_VIRTUAL_CAMERA_CLSID = "{A3FCE0F5-3493-419F-958A-ABA1250EC20B}"
 type CommandResult = { status: number | null; stdout: string };
 type RegistryQuery = (view: "32" | "64") => CommandResult;
 
+export function buildWindowsPowerShellEnvironment(
+  baseEnvironment: NodeJS.ProcessEnv = process.env
+): NodeJS.ProcessEnv {
+  const systemRoot = baseEnvironment.SystemRoot || baseEnvironment.WINDIR || "C:\\Windows";
+  const compatibleModulePaths = (baseEnvironment.PSModulePath ?? "")
+    .split(path.delimiter)
+    .map((entry) => entry.trim())
+    .filter((entry) => /(?:^|\\)WindowsPowerShell(?:\\|$)/i.test(entry));
+  const builtInModulePath = path.win32.join(
+    systemRoot,
+    "System32",
+    "WindowsPowerShell",
+    "v1.0",
+    "Modules"
+  );
+  if (!compatibleModulePaths.some((entry) => path.win32.normalize(entry).toLowerCase() === builtInModulePath.toLowerCase())) {
+    compatibleModulePaths.push(builtInModulePath);
+  }
+  return { ...baseEnvironment, PSModulePath: compatibleModulePaths.join(path.delimiter) };
+}
+
 function runPnpUtil(args: string[]) {
   return spawnSync("pnputil.exe", args, {
     encoding: "utf8", windowsHide: true, maxBuffer: 4 * 1024 * 1024
@@ -89,7 +110,11 @@ export function installPrerequisite(options: {
       "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", options.scriptPath,
       "-Component", options.component,
       "-ResourcesDirectory", options.resourcesDirectory
-    ], { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    ], {
+      env: buildWindowsPowerShellEnvironment(),
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"]
+    });
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => { stdout += chunk; });

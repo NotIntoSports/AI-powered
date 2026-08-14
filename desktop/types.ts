@@ -41,6 +41,7 @@ export type PrerequisiteInstallErrorCode =
   | "uac-cancelled"
   | "resource-missing"
   | "signature-rejected"
+  | "module-load-failed"
   | "hash-mismatch"
   | "registration-failed"
   | "install-failed"
