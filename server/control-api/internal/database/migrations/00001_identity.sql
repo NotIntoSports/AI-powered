@@ -58,11 +58,13 @@ create table audit_logs (
 create index audit_logs_actor_user_id_idx on audit_logs (actor_user_id);
 create index audit_logs_created_at_idx on audit_logs (created_at);
 
+-- +goose StatementBegin
 create function prevent_audit_log_mutation() returns trigger as $$
 begin
   raise exception 'audit logs are immutable';
 end;
 $$ language plpgsql;
+-- +goose StatementEnd
 
 create trigger audit_logs_immutable
 before update or delete on audit_logs

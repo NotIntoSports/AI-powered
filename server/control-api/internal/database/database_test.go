@@ -2,13 +2,77 @@ package database
 
 import (
 	"context"
+	"database/sql"
+	"database/sql/driver"
+	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
 )
+
+var registerMigrationBoundaryDriver sync.Once
+
+type migrationBoundaryDriver struct{}
+
+func (migrationBoundaryDriver) Open(string) (driver.Conn, error) {
+	return migrationBoundaryConn{}, nil
+}
+
+type migrationBoundaryConn struct{}
+
+func (migrationBoundaryConn) Prepare(string) (driver.Stmt, error) {
+	return nil, errors.New("prepared statements are not supported")
+}
+
+func (migrationBoundaryConn) Close() error { return nil }
+
+func (migrationBoundaryConn) Begin() (driver.Tx, error) { return migrationBoundaryTx{}, nil }
+
+func (migrationBoundaryConn) BeginTx(context.Context, driver.TxOptions) (driver.Tx, error) {
+	return migrationBoundaryTx{}, nil
+}
+
+func (migrationBoundaryConn) ExecContext(_ context.Context, query string, _ []driver.NamedValue) (driver.Result, error) {
+	if strings.Count(query, "$$")%2 != 0 {
+		return nil, errors.New("unterminated dollar-quoted string")
+	}
+	return driver.RowsAffected(1), nil
+}
+
+type migrationBoundaryTx struct{}
+
+func (migrationBoundaryTx) Commit() error   { return nil }
+func (migrationBoundaryTx) Rollback() error { return nil }
+
+func TestIdentityMigrationKeepsPLpgSQLFunctionAsSingleStatement(t *testing.T) {
+	registerMigrationBoundaryDriver.Do(func() {
+		sql.Register("migration-boundary", migrationBoundaryDriver{})
+	})
+	db, err := sql.Open("migration-boundary", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+
+	if err := goose.SetDialect("postgres"); err != nil {
+		t.Fatal(err)
+	}
+	goose.SetBaseFS(migrations)
+	migrationList, err := goose.CollectMigrations("migrations", 0, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(migrationList) != 1 {
+		t.Fatalf("migration count = %d, want 1", len(migrationList))
+	}
+	if err := migrationList[0].UpContext(context.Background(), db); err != nil {
+		t.Fatalf("execute migration through Goose parser: %v", err)
+	}
+}
 
 func TestIdentityMigrationPreservesHistoricalDeviceBindingAndDownOrder(t *testing.T) {
 	versionOne, err := migrations.ReadFile("migrations/00001_identity.sql")
