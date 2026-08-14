@@ -36,7 +36,10 @@ func main() {
 	}
 
 	server := &http.Server{
-		Addr: cfg.ListenAddress,
+		Addr:              cfg.ListenAddress,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		IdleTimeout:       60 * time.Second,
 		Handler: httpapi.NewRouter(httpapi.Dependencies{
 			Authentication:    authentication,
 			UserAdmin:         identity.NewService(pool),

@@ -299,7 +299,7 @@ func TestRequireSessionEnforcesPurpose(t *testing.T) {
 }
 
 func TestLoginUnknownUserPerformsDummyVerificationAndCommitsMinimalFailureAudit(t *testing.T) {
-	db := &unknownUserAuthDB{}
+	db := &loginAuthDB{}
 	verifyCalls := 0
 	authentication := newDatabaseAuthenticationWithVerifier(
 		db,
@@ -307,6 +307,9 @@ func TestLoginUnknownUserPerformsDummyVerificationAndCommitsMinimalFailureAudit(
 		"dummy-encoded-hash",
 		func(encoded, plain string) (bool, bool, error) {
 			verifyCalls++
+			if db.begins != 0 {
+				t.Fatal("password verification ran inside a transaction")
+			}
 			if encoded != "dummy-encoded-hash" || plain != "wrong password value" {
 				t.Fatalf("dummy verification encoded=%q plain=%q", encoded, plain)
 			}
@@ -328,8 +331,11 @@ func TestLoginUnknownUserPerformsDummyVerificationAndCommitsMinimalFailureAudit(
 	if verifyCalls != 1 {
 		t.Fatalf("verify calls=%d, want 1", verifyCalls)
 	}
-	if db.commits != 1 || db.rollbacks != 0 {
-		t.Fatalf("commits=%d rollbacks=%d", db.commits, db.rollbacks)
+	if db.begins != 1 || db.commits != 1 || db.rollbacks != 0 {
+		t.Fatalf("begins=%d commits=%d rollbacks=%d", db.begins, db.commits, db.rollbacks)
+	}
+	if db.sawSessionSQL {
+		t.Fatal("unknown user created a session")
 	}
 	if db.auditRequestID != "request-login-failed" || db.auditSourceIP != "192.0.2.30" {
 		t.Fatalf("audit request=%q source=%q", db.auditRequestID, db.auditSourceIP)
@@ -339,6 +345,148 @@ func TestLoginUnknownUserPerformsDummyVerificationAndCommitsMinimalFailureAudit(
 	}
 	if strings.Contains(strings.ToLower(db.auditMetadata), "password") {
 		t.Fatal("failure audit contains password material")
+	}
+}
+
+func TestLoginDisabledUserVerifiesStoredHashAndReturnsInvalidCredentials(t *testing.T) {
+	db := &loginAuthDB{lookup: &users.UserWithPassword{
+		User:         users.User{ID: "user-disabled", Username: "disabled", Role: users.RoleOperator, Status: users.StatusDisabled},
+		PasswordHash: "stored-encoded-hash",
+	}}
+	verifyCalls := 0
+	authentication := newDatabaseAuthenticationWithVerifier(
+		db,
+		testSessionTTL,
+		"dummy-encoded-hash",
+		func(encoded, plain string) (bool, bool, error) {
+			verifyCalls++
+			if db.begins != 0 {
+				t.Fatal("password verification ran inside a transaction")
+			}
+			if encoded != "stored-encoded-hash" || encoded == "dummy-encoded-hash" {
+				t.Fatalf("disabled user verification encoded=%q", encoded)
+			}
+			if plain != "correct horse battery staple" {
+				t.Fatalf("unexpected password material in verify")
+			}
+			return true, false, nil
+		},
+	)
+
+	_, err := authentication.Login(context.Background(), LoginAttempt{
+		Username:  "disabled",
+		Password:  "correct horse battery staple",
+		Purpose:   sessions.PurposeBrowser,
+		RequestID: "request-disabled",
+		SourceIP:  "192.0.2.31",
+	})
+
+	if !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("error=%v", err)
+	}
+	if verifyCalls != 1 {
+		t.Fatalf("verify calls=%d, want 1", verifyCalls)
+	}
+	if db.begins != 1 || db.commits != 1 || db.rollbacks != 0 {
+		t.Fatalf("begins=%d commits=%d rollbacks=%d", db.begins, db.commits, db.rollbacks)
+	}
+	if db.sawSessionSQL {
+		t.Fatal("disabled user created a session")
+	}
+	if db.auditMetadata != `{"username":"disabled"}` {
+		t.Fatalf("audit metadata=%s", db.auditMetadata)
+	}
+}
+
+func TestLoginWrongPasswordVerifiesStoredHashAndReturnsInvalidCredentials(t *testing.T) {
+	db := &loginAuthDB{lookup: &users.UserWithPassword{
+		User:         users.User{ID: "user-1", Username: "admin", Role: users.RoleAdmin, Status: users.StatusActive},
+		PasswordHash: "stored-encoded-hash",
+	}}
+	verifyCalls := 0
+	authentication := newDatabaseAuthenticationWithVerifier(
+		db,
+		testSessionTTL,
+		"dummy-encoded-hash",
+		func(encoded, _ string) (bool, bool, error) {
+			verifyCalls++
+			if db.begins != 0 {
+				t.Fatal("password verification ran inside a transaction")
+			}
+			if encoded != "stored-encoded-hash" {
+				t.Fatalf("wrong-password verification encoded=%q", encoded)
+			}
+			return false, false, nil
+		},
+	)
+
+	_, err := authentication.Login(context.Background(), LoginAttempt{
+		Username:  "admin",
+		Password:  "wrong password value",
+		Purpose:   sessions.PurposeBrowser,
+		RequestID: "request-wrong-password",
+		SourceIP:  "192.0.2.33",
+	})
+
+	if !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("error=%v", err)
+	}
+	if verifyCalls != 1 {
+		t.Fatalf("verify calls=%d, want 1", verifyCalls)
+	}
+	if db.begins != 1 || db.commits != 1 || db.sawSessionSQL {
+		t.Fatalf("begins=%d commits=%d session=%v", db.begins, db.commits, db.sawSessionSQL)
+	}
+}
+
+func TestLoginRejectsUserDisabledBetweenLookupAndCommit(t *testing.T) {
+	disabled := users.StatusDisabled
+	db := &loginAuthDB{
+		lookup: &users.UserWithPassword{
+			User:         users.User{ID: "user-1", Username: "admin", Role: users.RoleAdmin, Status: users.StatusActive},
+			PasswordHash: "stored-encoded-hash",
+		},
+		recheckStatus: &disabled,
+	}
+	verifyCalls := 0
+	authentication := newDatabaseAuthenticationWithVerifier(
+		db,
+		testSessionTTL,
+		"dummy-encoded-hash",
+		func(encoded, plain string) (bool, bool, error) {
+			verifyCalls++
+			if db.begins != 0 {
+				t.Fatal("password verification ran inside a transaction")
+			}
+			if encoded != "stored-encoded-hash" {
+				t.Fatalf("verification encoded=%q", encoded)
+			}
+			return true, false, nil
+		},
+	)
+
+	_, err := authentication.Login(context.Background(), LoginAttempt{
+		Username:  "admin",
+		Password:  "correct horse battery staple",
+		Purpose:   sessions.PurposeBrowser,
+		RequestID: "request-disabled-after-lookup",
+		SourceIP:  "192.0.2.32",
+	})
+
+	if !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("error=%v", err)
+	}
+	if verifyCalls != 1 {
+		t.Fatalf("verify calls=%d, want 1", verifyCalls)
+	}
+	if db.begins != 1 || db.commits != 1 || db.rollbacks != 0 {
+		t.Fatalf("begins=%d commits=%d rollbacks=%d", db.begins, db.commits, db.rollbacks)
+	}
+	if db.sawSessionSQL {
+		t.Fatal("disabled-after-lookup user created a session")
+	}
+	if db.auditMetadata != `{"username":"admin"}` {
+		t.Fatalf("audit metadata=%s", db.auditMetadata)
 	}
 }
 
@@ -415,40 +563,55 @@ func TestDatabaseAuthenticationPostgresLoginAndLogoutAreAtomic(t *testing.T) {
 	}
 }
 
-type unknownUserAuthDB struct {
+type loginAuthDB struct {
+	lookup         *users.UserWithPassword
+	recheckStatus  *users.Status
+	begins         int
 	commits        int
 	rollbacks      int
 	auditRequestID string
 	auditSourceIP  string
 	auditMetadata  string
+	sawSessionSQL  bool
 }
 
-func (db *unknownUserAuthDB) Begin(context.Context) (pgx.Tx, error) {
-	return &unknownUserAuthTx{parent: db}, nil
+func (db *loginAuthDB) Begin(context.Context) (pgx.Tx, error) {
+	db.begins++
+	return &loginAuthTx{parent: db}, nil
 }
 
-func (*unknownUserAuthDB) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
+func (*loginAuthDB) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
 	return pgconn.CommandTag{}, errors.New("query executed outside transaction")
 }
 
-func (*unknownUserAuthDB) Query(context.Context, string, ...any) (pgx.Rows, error) {
+func (*loginAuthDB) Query(context.Context, string, ...any) (pgx.Rows, error) {
 	return nil, errors.New("query executed outside transaction")
 }
 
-func (*unknownUserAuthDB) QueryRow(context.Context, string, ...any) pgx.Row {
-	return authTestRow{err: errors.New("query executed outside transaction")}
+func (db *loginAuthDB) QueryRow(_ context.Context, sql string, _ ...any) pgx.Row {
+	if !strings.Contains(sql, "username_normalized") {
+		return authTestRow{err: errors.New("query executed outside transaction")}
+	}
+	if db.lookup == nil {
+		return authTestRow{err: pgx.ErrNoRows}
+	}
+	user := *db.lookup
+	return authScanRow{values: []any{
+		user.ID, user.Username, user.Role, user.Status,
+		user.CreatedAt, user.UpdatedAt, user.LastLoginAt, user.PasswordHash,
+	}}
 }
 
-type unknownUserAuthTx struct {
-	parent *unknownUserAuthDB
+type loginAuthTx struct {
+	parent *loginAuthDB
 	closed bool
 }
 
-func (*unknownUserAuthTx) Begin(context.Context) (pgx.Tx, error) {
+func (*loginAuthTx) Begin(context.Context) (pgx.Tx, error) {
 	return nil, errors.New("unexpected nested transaction")
 }
 
-func (tx *unknownUserAuthTx) Commit(context.Context) error {
+func (tx *loginAuthTx) Commit(context.Context) error {
 	if tx.closed {
 		return pgx.ErrTxClosed
 	}
@@ -457,7 +620,7 @@ func (tx *unknownUserAuthTx) Commit(context.Context) error {
 	return nil
 }
 
-func (tx *unknownUserAuthTx) Rollback(context.Context) error {
+func (tx *loginAuthTx) Rollback(context.Context) error {
 	if tx.closed {
 		return pgx.ErrTxClosed
 	}
@@ -466,18 +629,18 @@ func (tx *unknownUserAuthTx) Rollback(context.Context) error {
 	return nil
 }
 
-func (*unknownUserAuthTx) CopyFrom(context.Context, pgx.Identifier, []string, pgx.CopyFromSource) (int64, error) {
+func (*loginAuthTx) CopyFrom(context.Context, pgx.Identifier, []string, pgx.CopyFromSource) (int64, error) {
 	return 0, errors.New("unexpected CopyFrom")
 }
 
-func (*unknownUserAuthTx) SendBatch(context.Context, *pgx.Batch) pgx.BatchResults { return nil }
-func (*unknownUserAuthTx) LargeObjects() pgx.LargeObjects                         { return pgx.LargeObjects{} }
+func (*loginAuthTx) SendBatch(context.Context, *pgx.Batch) pgx.BatchResults { return nil }
+func (*loginAuthTx) LargeObjects() pgx.LargeObjects                         { return pgx.LargeObjects{} }
 
-func (*unknownUserAuthTx) Prepare(context.Context, string, string) (*pgconn.StatementDescription, error) {
+func (*loginAuthTx) Prepare(context.Context, string, string) (*pgconn.StatementDescription, error) {
 	return nil, errors.New("unexpected Prepare")
 }
 
-func (tx *unknownUserAuthTx) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+func (tx *loginAuthTx) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
 	if !strings.Contains(sql, "insert into audit_logs") {
 		return pgconn.CommandTag{}, errors.New("unexpected Exec")
 	}
@@ -487,19 +650,71 @@ func (tx *unknownUserAuthTx) Exec(_ context.Context, sql string, args ...any) (p
 	return pgconn.NewCommandTag("INSERT 0 1"), nil
 }
 
-func (*unknownUserAuthTx) Query(context.Context, string, ...any) (pgx.Rows, error) {
+func (*loginAuthTx) Query(context.Context, string, ...any) (pgx.Rows, error) {
 	return nil, errors.New("unexpected Query")
 }
 
-func (*unknownUserAuthTx) QueryRow(context.Context, string, ...any) pgx.Row {
+func (tx *loginAuthTx) QueryRow(_ context.Context, sql string, _ ...any) pgx.Row {
+	if strings.Contains(sql, "insert into user_sessions") || strings.Contains(sql, "select exists") {
+		tx.parent.sawSessionSQL = true
+		return authTestRow{err: errors.New("unexpected session query")}
+	}
+	if strings.Contains(sql, "from users") && strings.Contains(sql, "where id = $1") {
+		if tx.parent.lookup == nil {
+			return authTestRow{err: pgx.ErrNoRows}
+		}
+		user := tx.parent.lookup.User
+		if tx.parent.recheckStatus != nil {
+			user.Status = *tx.parent.recheckStatus
+		}
+		return authScanRow{values: []any{
+			user.ID, user.Username, user.Role, user.Status,
+			user.CreatedAt, user.UpdatedAt, user.LastLoginAt,
+		}}
+	}
 	return authTestRow{err: pgx.ErrNoRows}
 }
 
-func (*unknownUserAuthTx) Conn() *pgx.Conn { return nil }
+func (*loginAuthTx) Conn() *pgx.Conn { return nil }
 
 type authTestRow struct{ err error }
 
 func (row authTestRow) Scan(...any) error { return row.err }
+
+type authScanRow struct {
+	values []any
+	err    error
+}
+
+func (row authScanRow) Scan(dest ...any) error {
+	if row.err != nil {
+		return row.err
+	}
+	if len(dest) != len(row.values) {
+		return fmt.Errorf("scan dest=%d values=%d", len(dest), len(row.values))
+	}
+	for index, value := range row.values {
+		switch target := dest[index].(type) {
+		case *string:
+			*target = value.(string)
+		case *users.Role:
+			*target = value.(users.Role)
+		case *users.Status:
+			*target = value.(users.Status)
+		case *time.Time:
+			*target = value.(time.Time)
+		case **time.Time:
+			if value == nil {
+				*target = nil
+			} else {
+				*target = value.(*time.Time)
+			}
+		default:
+			return fmt.Errorf("unexpected scan destination type %T", dest[index])
+		}
+	}
+	return nil
+}
 
 var httpAPISchemaPattern = regexp.MustCompile(`^control_api_http_test_[a-f0-9]{32}$`)
 

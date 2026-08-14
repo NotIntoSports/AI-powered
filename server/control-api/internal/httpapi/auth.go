@@ -92,34 +92,52 @@ func newDatabaseAuthenticationWithVerifier(db database.DBTX, ttl time.Duration, 
 
 func (authentication *databaseAuthentication) Login(ctx context.Context, attempt LoginAttempt) (LoginResult, error) {
 	normalizedUsername := strings.ToLower(strings.TrimSpace(attempt.Username))
-	invalidCredentials := false
-	result := LoginResult{}
 
-	err := pgx.BeginFunc(ctx, authentication.db, func(tx pgx.Tx) error {
-		storedUser, lookupError := users.NewStore(tx).GetByNormalizedUsername(ctx, normalizedUsername)
-		found := lookupError == nil
-		encodedPassword := authentication.dummyHash
-		if found {
-			encodedPassword = storedUser.PasswordHash
+	storedUser, lookupError := users.NewStore(authentication.db).GetByNormalizedUsername(ctx, normalizedUsername)
+	found := lookupError == nil
+	if lookupError != nil && !errors.Is(lookupError, users.ErrUserNotFound) {
+		return LoginResult{}, ErrAuthenticationService
+	}
+
+	encodedPassword := authentication.dummyHash
+	if found {
+		encodedPassword = storedUser.PasswordHash
+	}
+	matches, verificationError := authentication.verifyCredential(encodedPassword, attempt.Password)
+	if verificationError != nil {
+		return LoginResult{}, verificationError
+	}
+	if !found || !matches || storedUser.Status != users.StatusActive {
+		if err := authentication.recordLoginFailure(ctx, attempt, normalizedUsername); err != nil {
+			return LoginResult{}, err
 		}
+		return LoginResult{}, ErrInvalidCredentials
+	}
 
-		matches, verificationError := authentication.verifyCredential(encodedPassword, attempt.Password)
-		if lookupError != nil && !errors.Is(lookupError, users.ErrUserNotFound) {
+	result := LoginResult{}
+	invalidCredentials := false
+	err := pgx.BeginFunc(ctx, authentication.db, func(tx pgx.Tx) error {
+		current, err := users.NewStore(tx).Get(ctx, storedUser.ID)
+		if err != nil {
+			if errors.Is(err, users.ErrUserNotFound) {
+				if auditError := appendLoginFailure(ctx, tx, attempt, normalizedUsername); auditError != nil {
+					return auditError
+				}
+				invalidCredentials = true
+				return nil
+			}
 			return ErrAuthenticationService
 		}
-		if verificationError != nil {
-			return verificationError
-		}
-		if !found || !matches || storedUser.Status != users.StatusActive {
-			if err := appendLoginFailure(ctx, tx, attempt, normalizedUsername); err != nil {
-				return err
+		if current.Status != users.StatusActive {
+			if auditError := appendLoginFailure(ctx, tx, attempt, normalizedUsername); auditError != nil {
+				return auditError
 			}
 			invalidCredentials = true
 			return nil
 		}
 
 		rawToken, session, err := sessions.NewStore(tx).Create(ctx, sessions.CreateInput{
-			UserID:   storedUser.ID,
+			UserID:   current.ID,
 			Purpose:  attempt.Purpose,
 			DeviceID: attempt.DeviceID,
 			TTL:      authentication.ttl,
@@ -140,15 +158,18 @@ func (authentication *databaseAuthentication) Login(ctx context.Context, attempt
 			update users
 			set last_login_at = $2, updated_at = $2
 			where id = $1 and status = 'active'
-		`, storedUser.ID, now)
-		if err != nil || command.RowsAffected() != 1 {
+		`, current.ID, now)
+		if err != nil {
 			return ErrAuthenticationService
 		}
+		if command.RowsAffected() != 1 {
+			return ErrInvalidCredentials
+		}
 		if err := audit.NewStore(tx).Append(ctx, audit.Event{
-			ActorUserID: storedUser.ID,
+			ActorUserID: current.ID,
 			Action:      audit.ActionLoginSucceeded,
 			TargetType:  "user",
-			TargetID:    storedUser.ID,
+			TargetID:    current.ID,
 			Result:      audit.ResultSuccess,
 			RequestID:   nonemptyRequestID(attempt.RequestID),
 			SourceIP:    attempt.SourceIP,
@@ -157,9 +178,9 @@ func (authentication *databaseAuthentication) Login(ctx context.Context, attempt
 			return ErrAuthenticationService
 		}
 
-		storedUser.LastLoginAt = &now
-		storedUser.UpdatedAt = now
-		result = LoginResult{User: storedUser.User, AccessToken: rawToken, ExpiresAt: session.ExpiresAt}
+		current.LastLoginAt = &now
+		current.UpdatedAt = now
+		result = LoginResult{User: current, AccessToken: rawToken, ExpiresAt: session.ExpiresAt}
 		return nil
 	})
 	if err != nil {
@@ -218,6 +239,16 @@ func (authentication *databaseAuthentication) verifyCredential(encodedPassword, 
 		return false, nil
 	}
 	return false, ErrAuthenticationService
+}
+
+func (authentication *databaseAuthentication) recordLoginFailure(ctx context.Context, attempt LoginAttempt, normalizedUsername string) error {
+	err := pgx.BeginFunc(ctx, authentication.db, func(tx pgx.Tx) error {
+		return appendLoginFailure(ctx, tx, attempt, normalizedUsername)
+	})
+	if err != nil {
+		return mapAuthenticationError(err)
+	}
+	return nil
 }
 
 func appendLoginFailure(ctx context.Context, tx pgx.Tx, attempt LoginAttempt, normalizedUsername string) error {

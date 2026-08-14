@@ -115,6 +115,20 @@ func TestCreateUserAllowsAdministratorRole(t *testing.T) {
 	}
 }
 
+func TestCreateUserHashesPasswordBeforeOpeningTransaction(t *testing.T) {
+	db := newMemoryDB()
+	admin := users.User{ID: "admin-actor", Username: "owner", Role: users.RoleAdmin, Status: users.StatusActive}
+	seedMemoryUser(db, admin)
+
+	_, err := NewService(db).CreateUser(context.Background(), admin, "second-admin", "short", users.RoleAdmin)
+	if !errors.Is(err, password.ErrInvalidPassword) {
+		t.Fatalf("error = %v, want ErrInvalidPassword", err)
+	}
+	if db.beginCalls != 0 {
+		t.Fatalf("password hash opened a transaction: begin=%d", db.beginCalls)
+	}
+}
+
 func TestSetUserStatusDisablesAndRevokesSessions(t *testing.T) {
 	db := newMemoryDB()
 	admin := users.User{ID: "admin-actor", Username: "owner", Role: users.RoleAdmin, Status: users.StatusActive}

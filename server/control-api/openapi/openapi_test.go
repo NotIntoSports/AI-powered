@@ -63,6 +63,29 @@ func TestAdminUserErrorsAreDocumented(t *testing.T) {
 	}
 }
 
+func TestAdminMutationsDocumentInvalidInputAndTooLarge(t *testing.T) {
+	spec := readSpec(t)
+	sections := []struct {
+		name string
+		yaml string
+	}{
+		{name: "create", yaml: sectionBetween(t, spec, "      operationId: createAdminUser", "  /api/v1/admin/users/{id}:")},
+		{name: "patch", yaml: sectionBetween(t, spec, "      operationId: patchAdminUser", "  /api/v1/admin/users/{id}/reset-password:")},
+		{name: "reset-password", yaml: sectionBetween(t, spec, "      operationId: resetAdminUserPassword", "  /api/v1/admin/users/{id}/revoke-sessions:")},
+		{name: "revoke-sessions", yaml: sectionBetween(t, spec, "      operationId: revokeAdminUserSessions", "components:\n  securitySchemes:")},
+	}
+	for _, section := range sections {
+		t.Run(section.name, func(t *testing.T) {
+			if !strings.Contains(section.yaml, "'400':\n          $ref: '#/components/responses/InvalidInput'") {
+				t.Fatal("admin mutation must document INVALID_INPUT 400")
+			}
+			if !strings.Contains(section.yaml, "'413':\n          $ref: '#/components/responses/RequestTooLarge'") {
+				t.Fatal("admin mutation must document REQUEST_TOO_LARGE 413")
+			}
+		})
+	}
+}
+
 func readSpec(t *testing.T) string {
 	t.Helper()
 

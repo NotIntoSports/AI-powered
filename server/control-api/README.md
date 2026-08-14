@@ -79,11 +79,15 @@ docker compose exec -T postgres bash -c 'pg_dump -Fc -U "$POSTGRES_USER" -d "$PO
 docker compose cp postgres:/tmp/backup.dump ./backup.dump
 ```
 
-Restore into the named volume (this replaces objects in the target database):
+Restore into the named volume (this replaces objects in the target database).
+Stop `control-api` first so it does not hold connections or rewrite objects
+while `pg_restore --clean` runs, then start it again after restore completes:
 
 ```powershell
+docker compose stop control-api
 docker compose cp ./backup.dump postgres:/tmp/backup.dump
 docker compose exec -T postgres bash -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists /tmp/backup.dump'
+docker compose start control-api
 ```
 
 Host-side tools can also use `127.0.0.1:54329`. Do not paste `DATABASE_URL` into

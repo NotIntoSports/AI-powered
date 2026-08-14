@@ -124,12 +124,16 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/User'}
+        '400':
+          $ref: '#/components/responses/InvalidInput'
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
           $ref: '#/components/responses/Forbidden'
         '409':
           $ref: '#/components/responses/UsernameTaken'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
         '422':
           $ref: '#/components/responses/InvalidInputUnprocessable'
   /api/v1/admin/users/{id}:
@@ -154,6 +158,8 @@ paths:
           headers:
             Cache-Control:
               schema: {type: string, const: no-store}
+        '400':
+          $ref: '#/components/responses/InvalidInput'
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
@@ -162,6 +168,8 @@ paths:
           $ref: '#/components/responses/UserNotFound'
         '409':
           $ref: '#/components/responses/LastAdminRequired'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
         '422':
           $ref: '#/components/responses/InvalidInputUnprocessable'
   /api/v1/admin/users/{id}/reset-password:
@@ -186,12 +194,16 @@ paths:
           headers:
             Cache-Control:
               schema: {type: string, const: no-store}
+        '400':
+          $ref: '#/components/responses/InvalidInput'
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/UserNotFound'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
         '422':
           $ref: '#/components/responses/InvalidInputUnprocessable'
   /api/v1/admin/users/{id}/revoke-sessions:
@@ -216,12 +228,16 @@ paths:
           headers:
             Cache-Control:
               schema: {type: string, const: no-store}
+        '400':
+          $ref: '#/components/responses/InvalidInput'
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/UserNotFound'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
 components:
   securitySchemes:
     cookieAuth:
