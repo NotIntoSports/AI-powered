@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ai-interviewer/ai-powered/control-api/internal/config"
+	"github.com/ai-interviewer/ai-powered/control-api/internal/database"
 	"github.com/ai-interviewer/ai-powered/control-api/internal/httpapi"
 )
 
@@ -18,6 +19,15 @@ func main() {
 	cfg, err := config.Load(os.Getenv)
 	if err != nil {
 		log.Fatal(err)
+	}
+
+	pool, err := database.Open(context.Background(), cfg.DatabaseURL)
+	if err != nil {
+		log.Fatalf("open database: %v", err)
+	}
+	defer pool.Close()
+	if err := database.Migrate(context.Background(), pool); err != nil {
+		log.Fatalf("migrate database: %v", err)
 	}
 
 	server := &http.Server{
