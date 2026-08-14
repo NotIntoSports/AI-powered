@@ -3,6 +3,9 @@ node_modules/
 .env.local
 .env*
 !.env.example
+*.dump
+*.pgdump
+backup.dump
 *.pem
 *.key
 *.p12

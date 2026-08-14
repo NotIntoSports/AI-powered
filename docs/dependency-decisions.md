@@ -331,3 +331,58 @@
 - OBS：继续复用现有 `obs-websocket-js 5.0.8` 和 OBS WebSocket 的 `StartVirtualCam`、`StopVirtualCam`、`GetVirtualCamStatus`，不新增依赖。启动或停止命令即使先返回错误，也以最长 2 秒内轮询得到的最终输出状态为准，避免 OBS 异步完成操作时被客户端误报失败。
 - 素材选择：继续使用浏览器原生文件输入；`accept` 只改善文件选择体验，服务端仍校验真实 MIME、文件头和 50MB 大小上限。前后端共享 JPEG、PNG、WebP、MP4、WebM 策略，界面直接说明推荐 16:9、1280×720、视频静音循环和仅本机保存。
 - 成本与安全：无新增包、网络服务、云端费用或数据流；素材仍只保存在本机 `data/avatar`，OBS 密码与现有安全边界不变。
+
+# 2026-08-14：Go 控制 API 基础设施
+
+- 目标与边界：为现有 Windows Electron/Next.js 客户端旁新增本机 Go 控制 API 的最小骨架。本任务仅提供配置、健康检查和 OpenAPI 占位定义；不改动现有客户端行为，不接入认证、普通用户、AI、RTC、候选人数据或数据库。
+- Go 1.26.5：使用指定 Go 工具链和标准 `net/http` 服务器生命周期。[官方发布历史](https://go.dev/doc/devel/release)记录其发布于 2026-07-07，并包含 `crypto/tls` 与 `os` 安全修复。它在 Windows 上原生可构建，浏览器和 OBS 无运行时耦合；不会引入云端服务、GPU/CPU 后台进程、内存常驻组件或按量 API 成本。
+- `github.com/go-chi/chi/v5 v5.3.1`：MIT。[官方发布页](https://github.com/go-chi/chi/releases/tag/v5.3.1)记录 2026-07-06 发布并标记为 Latest；它直接提供请求 ID、恢复和超时中间件，选择它而非自行编写中间件链，保持后续 API 路由可组合且接入量小。运行时只增加小型 Go 路由代码，不访问外部服务或处理密钥。
+- `github.com/jackc/pgx/v5 v5.10.0`：MIT。[官方发布页](https://github.com/jackc/pgx/releases/tag/v5.10.0)记录 2026-06-03 标签活动；它是 PostgreSQL Go 驱动和工具集，为后续数据库接入预先锁定。本任务不建立连接、不读取或写入候选人数据；它与 Windows Go 构建兼容，不影响浏览器或 OBS。
+- `golang.org/x/crypto v0.54.0`：BSD-3-Clause。[Go 官方包元数据](https://pkg.go.dev/golang.org/x/crypto@v0.54.0)确认版本与许可证；该补充密码学包为后续服务端凭据处理预先锁定，本任务的依赖锚点只引用 `bcrypt`，不实现认证、不处理密码或令牌。其为纯 Go 依赖，无浏览器、OBS、GPU 或付费 API 影响；密钥只允许在未来由服务端环境变量读取，禁止写入源码、日志或版本库。
+- `github.com/pressly/goose/v3 v3.27.3`：MIT。[官方发布页](https://github.com/pressly/goose/releases/tag/v3.27.3)记录 2026-07-22 发布并标记为 Latest，检查时主分支在该发布后仍有提交；它为后续显式迁移流程预先锁定。本任务不创建数据库、迁移或数据模型，它不会成为常驻服务组件，不影响 Windows、浏览器或 OBS。
+- 锁定方式：`internal/dependencies/tools.go` 使用 `tools` 构建标签和空导入保存尚未启用的 pgx、x/crypto、goose 模块引用；`go mod tidy` 会保留精确版本，但正常构建和运行时不会链接它们。这是比在运行时代码中空导入更小、且不扩展本任务功能范围的常规 Go 依赖锚点。
+- 部署体积证据：使用指定 Windows/amd64 Go 1.26.5 执行 `go build -o $env:TEMP\control-api-task-1.exe ./cmd/control-api`，未压缩可执行文件实测为 10,151,936 字节；这是本任务的运行时部署增量。pgx、x/crypto 和 goose 仅存在于带 `tools` 标签的依赖锚点，不进入该正常构建产物；其模块下载与源码缓存属于开发/CI 磁盘成本，不是服务器部署体积。
+- 维护与安全审查（检查日 2026-08-14）：Go 官方已于 2026-08-13 发布含 `net/http` 等安全修复的 1.26.6；本任务因明确版本约束仍锁定 1.26.5，但部署前必须升级并重跑测试。Go 漏洞库 [GO-2026-5774](https://pkg.go.dev/vuln/GO-2026-5774)、[GO-2026-5775](https://pkg.go.dev/vuln/GO-2026-5775) 仅影响 chi 5.3.0 之前版本，当前 5.3.1 不在范围；[GO-2026-4771](https://pkg.go.dev/vuln/GO-2026-4771) 仅影响 pgx 5.9.0 之前版本，当前 5.10.0 不在范围；[GO-2026-5033](https://pkg.go.dev/vuln/GO-2026-5033) 仅影响 x/crypto 0.52.0 之前版本，当前 0.54.0 不在范围。[GO-2026-5932](https://pkg.go.dev/vuln/GO-2026-5932) 指出所有版本的 `x/crypto/openpgp` 均不安全且不再维护，因此禁止后续引入该子包；当前只锚定 `bcrypt`。当前健康接口不包含数据库 URL 或其他配置值；后续启用预锁定依赖时必须重新检查官方发布、安全公告、数据流向和资源成本。
+- 未采用 Ory Kratos：其覆盖注册、账户恢复、MFA、OIDC 和多租户身份能力，均超出本阶段范围；引入它会增加独立服务、运行资源、配置和维护面，故本阶段明确不接入。
+
+# 2026-08-14：Go 控制 API 身份数据库迁移
+
+- 目标：在启动时以 PostgreSQL 16+ 创建并升级用户、可撤销会话、设备和审计 schema；复用 Task 1 已锁定而未链接到运行时的直接依赖，Go 1.26 额外记录 pgx 所需的间接池依赖，不新增功能重叠的包。迁移嵌入 Go 二进制，避免生产环境依赖工作目录中的 SQL 文件。
+- `github.com/jackc/pgx/v5 v5.10.0`：MIT；官方模块与发布页显示其为活跃维护的 PostgreSQL 驱动，且 Task 1 的安全审查确认已规避仅影响 5.9.0 之前的 GO-2026-4771。使用其 `pgxpool` 和标准库适配层，而非自行实现 PostgreSQL 协议或再引入 ORM。它是纯 Go、原生兼容 Windows 和本项目指定 Go 1.26.5，不运行于浏览器或 OBS；运行时最大 10 个数据库连接，CPU/内存开销受此上限约束，无 GPU 或付费 API 成本。数据库 URL 只从进程环境读取，错误、日志和测试报告均不得回显 URL 或其中的凭据。
+- `github.com/jackc/puddle/v2 v2.2.2`：MIT；这是 pgx v5.10.0 官方 `go.mod` 指定的间接资源池，Go 1.26 在实际导入 `pgxpool` 后将其写入模块图。它提供 pgx 所需的并发安全池实现，本项目不直接调用其 API，不能移除或替换；纯 Go、兼容 Windows/Go 1.26.5，且仅随最多 10 条连接的 pgx 池运行，无浏览器、OBS、GPU、云端或按量成本。其代码不接收数据库 URL，凭据仍只进入 pgx 的进程内连接配置。
+- `github.com/pressly/goose/v3 v3.27.3`：MIT；官方 Go package 元数据确认带标签的可再分发稳定版本，官方发布页显示 2026-07-22 发布且项目仍维护。采用其官方 `SetBaseFS` 嵌入 SQL 迁移支持及 PostgreSQL 方言，避免自写 migration history/并发升级机制；它只在启动迁移时运行，不产生浏览器、OBS、GPU、云端或按量 API 成本。Task 1 已审查其版本与维护状态；本任务未发现新的已知安全公告，发布前仍须执行依赖漏洞扫描。
+- 未采用 SQLite、mock 或自写迁移器：身份 schema 依赖 PostgreSQL enum、JSONB、`bytea` 和生产目标的一致语义；替换会降低约束覆盖，不能验证真实迁移。测试仅在显式提供 `TEST_DATABASE_URL` 时连接一次性 PostgreSQL，未提供时明确跳过，不传输任何候选人数据或密钥。
+- 体积、兼容性与维护：pgx 和 goose 已存在于 `go.mod`/`go.sum`；实际导入 `pgxpool` 后，Go 1.26 将 pgx 指定的 `puddle/v2` 写入间接依赖清单，但不新增服务或云端费用。本任务会在 Go 1.26.5 Windows/amd64 上构建和 vet。自动迁移要求最小权限数据库用户具备 schema 变更权限；多实例同时启动的迁移锁和生产数据库备份/恢复流程留待容器与运行文档任务明确。
+
+# 2026-08-14：Go 控制 API 用户、会话与审计存储
+
+- 目标：实现 PostgreSQL 用户、可撤销不透明会话和追加式审计写入；只持久化 Task 3 已生成的编码密码哈希，不在本层处理明文密码，也不实现 HTTP 或身份编排服务。
+- 采用：继续复用已锁定的 `github.com/jackc/pgx/v5 v5.10.0`（MIT）及 Go 1.26.5 标准库 `crypto/rand`、`crypto/sha256`、`crypto/subtle`、`encoding/base64` 和 `encoding/json`，不新增依赖。pgx 官方文档提供 `Exec`、`Query`、`QueryRow` 的参数绑定接口，且 `pgx.Tx` 实现相同方法，因此用最小 `database.DBTX` 适配池与事务；官方 5.10.0 变更记录显示 2026-06-03 发布并包含针对恶意或受控 PostgreSQL 服务端的协议和认证加固，仓库在检查日仍有发布后的维护提交。
+- 未采用：不引入 ORM、会话框架、身份平台或审计 SDK。当前 schema 和查询数量小，现有 pgx 已完整覆盖参数化 SQL 与事务复用；额外框架会增加二进制体积、供应链和迁移维护面。令牌 ID、SHA-256 摘要、五分钟节流和 metadata denylist 属于短小且安全边界明确的领域逻辑，标准库已提供所需密码学原语；不复制第三方源码。
+- 安全与数据：32 字节随机会话令牌仅返回一次，数据库只保存 SHA-256 摘要并在索引查询后进行恒定时间比较；SQL 全部使用位置参数。审计 metadata 在 JSON 编码前拒绝大小写不敏感的敏感键。数据库 URL 仅由测试/进程环境提供，测试使用随机隔离 schema，缺少 `TEST_DATABASE_URL` 时明确跳过，不使用 mock 或 SQLite。
+- 兼容、资源与成本：纯 Go/pgx 方案兼容指定 Windows Go 1.26.5 和 PostgreSQL 16+，不进入浏览器或 OBS，不需要 GPU、外部进程或付费 API；运行时沿用已有最多 10 个连接的池上限，只增加小型查询与少量随机/哈希计算。已知限制是本机没有 PostgreSQL URL 时无法执行真实集成路径；上线前仍需升级已知含标准库安全修复的 Go 1.26.6，并重新运行漏洞扫描和 PostgreSQL 集成测试。
+
+# 2026-08-14：Go 控制 API 管理员命令行与身份编排
+
+- 目标：提供一次性初始管理员创建和管理员密码重置，继续复用已有 Argon2id、pgx 事务、用户、会话和追加式审计存储；初始化只创建 `admin`，不创建普通客户端用户，也不提供注册或密码参数/环境变量入口。
+- 终端输入采用：`golang.org/x/term v0.45.0`（BSD-3-Clause）。[Go 官方包元数据](https://pkg.go.dev/golang.org/x/term@v0.45.0)记录该标签发布于 2026-07-08，由 Go 项目持续维护，`ReadPassword` 在真实终端上关闭本地回显，`IsTerminal` 支持 Windows 文件描述符判定。2026-08-15 检查 [Go 官方 `x/term` 仓库](https://go.googlesource.com/term.git)时，`master` 页面展示的标签为 `v0.45.0`；同日 `pkg.go.dev` 的 `v0.45.0` 包页面却提示该页面不是最新模块包视图。由于两个官方视图存在差异，且本地 `go list -m -json golang.org/x/term@latest` 因代理超时失败，本记录不声称已经确定全局最新版本；在没有权威的新标签证据前继续锁定已验证的 `v0.45.0`，发布前重新核对官方标签并执行漏洞扫描。使用官方独立模块，不使用已废弃并迁移到它的 `x/crypto/ssh/terminal`，也不自行维护 Windows Console API 及 Unix termios 分支。
+- 兼容、体积与成本：`x/term` 是纯 Go/平台系统调用适配，兼容本项目 Go 1.26.5 与 Windows；不运行于浏览器或 OBS，不引入 GPU、常驻进程、网络服务或付费 API。它只链接到短命管理 CLI，部署体积影响在最终容器任务中实测；无单独内存或 CPU 后台开销。
+- 安全与数据：密码仅从交互终端或两行标准输入读取，不进入命令行、环境变量、标准输出或日志；空值和不匹配确认在连接数据库前失败。检查 Go 官方问题跟踪器中的未解决终端问题时，确认 [golang/go#19909](https://github.com/golang/go/issues/19909) 仍讨论 `ReadPassword` 对重定向标准输入返回 ioctl 错误；本 CLI 在调用前先用 `IsTerminal` 分流，对管道/文件改用有界的两行 scanner，因此不依赖该未解决行为。检查日未在 Go 漏洞库中找到直接影响 `x/term v0.45.0` 的公告；发布前仍须对完整模块图执行 `govulncheck`。身份变更、会话撤销与审计写入在同一 pgx 事务内，任一步失败即回滚。
+
+# 2026-08-15：Go 控制 API 登录、会话中间件与登录限流
+
+- 目标与边界：实现登录、退出、当前用户和按用途隔离的会话中间件。浏览器只接受 `control_session` Cookie，桌面端只接受 Bearer Token；失败响应不暴露用户是否存在、密码哈希、令牌、数据库 URL 或原始内部错误。本任务不增加注册、找回密码、MFA、OIDC、普通用户初始化、AI/RTC 或候选人数据处理。
+- 复用方案：继续使用已锁定的 `github.com/go-chi/chi/v5 v5.3.1`（MIT）请求 ID/路由中间件、`github.com/jackc/pgx/v5 v5.10.0`（MIT）事务、`golang.org/x/crypto v0.54.0`（BSD-3-Clause）Argon2id，以及 Go 1.26.5 标准库 `net/http`、`encoding/json`、`net/netip`、`crypto/sha256` 和 `sync`。Go 官方 `net/http.MaxBytesReader` 会在越界时返回 `MaxBytesError` 并限制恶意请求资源消耗；JSON Decoder 提供未知字段拒绝和单值解析能力。现有依赖均为纯 Go 或当前项目已验证的 Windows/服务器依赖，不接触浏览器或 OBS，不需要 GPU、外部服务或付费 API。
+- 限流方案调查：Go 官方 `golang.org/x/time/rate` 提供并发安全的 token bucket，`v0.15.0` 包页面记录 BSD-3-Clause、2026-02-11 发布和大量下游使用；但页面同时提示该版本不是模块最新视图，而本机访问官方 Go module proxy 超时，无法可靠确认并下载当前最新标签。即使采用它，本项目仍必须自行实现“规范化用户名 + 规范 IP”键、可信代理 CIDR 边界和 30 分钟条目淘汰。为避免在无法完成版本与模块校验时扩展供应链，本任务不新增该模块，而用标准库实现只包含令牌补充、容量和淘汰的最小同步结构；后续若需要跨实例共享或分布式限流，应改用服务器侧共享存储，而不是继续扩展内存实现。
+- 安全与代理边界：默认只信任 TCP 直连地址；仅当直连 peer 命中显式 `TRUSTED_PROXY_CIDRS` 时才读取代理转发地址，并对地址使用 `netip` 解析/规范化。限流键和失败审计只保存规范化用户名及来源 IP，不保存密码、Token、Authorization 或 Cookie。内存桶最多突发 10 次、按五分钟补充五次额度，30 分钟无活动后淘汰；它是单进程防爆破层，不替代反向代理或共享存储限流。
+- 体积、维护与限制：无新增模块，部署增量仅为少量标准库可达代码和每个活跃登录键一个小型内存条目；无云端费用或额外数据去向。当前 Go 1.26.5 已知落后于带标准库安全修复的 1.26.6，发布前仍须升级工具链、执行 `govulncheck`、在带 C 编译器的 CI 跑 `-race`，并在显式提供 `TEST_DATABASE_URL` 的隔离 PostgreSQL 上验证事务回滚、会话撤销和审计原子性。
+
+# 2026-08-15：Go 控制 API 生产容器与本地 Compose
+
+- 目标：为 `server/control-api` 提供可复现的非 root 镜像、仅回环的开发 Compose、部署文档和可选容器冒烟测试；不改动 Electron/Next.js 行为，不新增与 chi/pgx/goose 重叠的运行时库。
+- 构建镜像：官方 [`golang:1.26.5-alpine`](https://hub.docker.com/_/golang)。[Docker Hub 官方标签](https://hub.docker.com/_/golang)在检查日将 `1.26.5-alpine` 作为 `1.26.5-alpine3.24` 的共享标签；许可证为 Go BSD-3-Clause，Alpine 基础系统为 MIT。官方文档给出 `COPY go.mod go.sum` 后 `go mod download` 再复制源码的缓存顺序，以及 `CGO_ENABLED=0` 静态编译。选择 alpine 构建器而不是完整 Debian `golang:1.26.5`，是为了缩小构建层；最终运行时不保留该构建器。
+- 运行镜像：[`gcr.io/distroless/static-debian12:nonroot`](https://github.com/GoogleContainerTools/distroless)（Apache-2.0）。官方 README 将 `static-debian12` 列为无 shell、无包管理器的静态 Go 运行时，并提供 `:nonroot` 标签；ENTRYPOINT 必须使用 JSON 向量形式。未采用 `scratch`（缺少 CA/时区与非 root 用户元数据）、未采用 `alpine`/`debian` 运行时（含 shell 与包管理器，攻击面更大）、也未采用更重的 K8s/Helm/Ory 栈。Debian 13 变体存在，但本任务按计划锁定 `static-debian12:nonroot`。
+- 数据库：官方 [`postgres:16`](https://hub.docker.com/_/postgres)（PostgreSQL License）。Compose 使用命名卷、`pg_isready` 健康检查，并将 API/`5432` 发布限制在 `127.0.0.1:8080` 与 `127.0.0.1:54329`。未采用 SQLite 或自建 Postgres 镜像，以免偏离已锁定的 PostgreSQL 16+ schema。
+- Compose：官方 Compose 规范的 `depends_on.condition: service_healthy`、`127.0.0.1` 端口绑定、`profiles` 一次性服务和项目目录 `.env` 变量替换。`COOKIE_SECURE=false` 仅用于本地 HTTP；生产文档要求 TLS 与 `COOKIE_SECURE=true`。`.env.example` 只有占位符，真实 `.env` 不入库。
+- 未采用：完整 Kubernetes、Istio、Ory Kratos、第二套反向代理镜像或额外健康检查二进制。当前是本机开发栈加一份可部署静态镜像；更重的编排会增加运行资源、密钥面和维护成本。
+- 限制：本机若未安装 Docker，则无法执行 `docker compose config/build/up` 和容器冒烟；Windows 无 C 编译器时 `go test -race` 不可用。发布前仍须在有 Docker 与 GCC 的环境补跑这些命令。
