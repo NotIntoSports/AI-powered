@@ -199,9 +199,9 @@ func (s *Store) Authenticate(ctx context.Context, rawToken, purpose string) (use
 	var updatedLastUsed time.Time
 	err = s.db.QueryRow(ctx, `
 		update user_sessions
-		set last_used_at = $2
+		set last_used_at = $2::timestamptz
 		where id = $1
-		  and (last_used_at is null or last_used_at <= $2 - interval '5 minutes')
+		  and (last_used_at is null or last_used_at <= $2::timestamptz - interval '5 minutes')
 		returning last_used_at
 	`, session.ID, now).Scan(&updatedLastUsed)
 	if err == nil {
