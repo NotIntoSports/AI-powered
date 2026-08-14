@@ -1,0 +1,111 @@
+openapi: 3.1.0
+info:
+  title: AI Interviewer Control API
+  version: 0.1.0
+  description: Local control API skeleton. Protected endpoints are reserved for later tasks.
+servers:
+  - url: http://127.0.0.1:8080
+paths:
+  /healthz:
+    get:
+      operationId: getHealth
+      summary: Get control API health
+      responses:
+        '200':
+          description: Control API is available.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+  /api/v1/auth/{operation}:
+    parameters:
+      - name: operation
+        in: path
+        required: true
+        schema:
+          type: string
+          enum: [login, logout, session]
+    post:
+      operationId: authOperationPlaceholder
+      summary: Reserved authentication operation
+      description: Placeholder only; protected handlers are not implemented in Task 1.
+      responses:
+        '501':
+          description: Authentication handlers are not implemented.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+  /api/v1/admin/users:
+    get:
+      operationId: listAdminUsersPlaceholder
+      summary: Reserved administrator user listing
+      description: Placeholder only; protected handlers are not implemented in Task 1.
+      responses:
+        '501':
+          description: Administrator user handlers are not implemented.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+  /api/v1/admin/users/{userID}:
+    parameters:
+      - name: userID
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: getAdminUserPlaceholder
+      summary: Reserved administrator user lookup
+      description: Placeholder only; protected handlers are not implemented in Task 1.
+      responses:
+        '501':
+          description: Administrator user handlers are not implemented.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+components:
+  schemas:
+    APIError:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+    User:
+      type: object
+      required: [id, email, role, createdAt]
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    SessionResponse:
+      type: object
+      required: [user, expiresAt]
+      properties:
+        user:
+          $ref: '#/components/schemas/User'
+        expiresAt:
+          type: string
+          format: date-time
+    HealthResponse:
+      type: object
+      required: [service, status]
+      properties:
+        service:
+          type: string
+          example: control-api
+        status:
+          type: string
+          example: ok

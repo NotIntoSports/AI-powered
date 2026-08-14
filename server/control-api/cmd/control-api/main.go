@@ -1,0 +1,50 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/ai-interviewer/ai-powered/control-api/internal/config"
+	"github.com/ai-interviewer/ai-powered/control-api/internal/httpapi"
+)
+
+func main() {
+	cfg, err := config.Load(os.Getenv)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	server := &http.Server{
+		Addr:    cfg.ListenAddress,
+		Handler: httpapi.NewRouter(httpapi.Dependencies{}),
+	}
+	serverErrors := make(chan error, 1)
+	go func() {
+		serverErrors <- server.ListenAndServe()
+	}()
+
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(signals)
+
+	select {
+	case err := <-serverErrors:
+		if !errors.Is(err, http.ErrServerClosed) {
+			log.Fatal(err)
+		}
+		return
+	case <-signals:
+	}
+
+	shutdownContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := server.Shutdown(shutdownContext); err != nil {
+		log.Printf("graceful shutdown failed: %v", err)
+	}
+}
