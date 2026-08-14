@@ -100,14 +100,15 @@ func (s *Service) CreateUser(ctx context.Context, actor users.User, username, pl
 		return users.User{}, ErrService
 	}
 
+	encodedPassword, err := password.Hash(plainPassword)
+	if err != nil {
+		return users.User{}, passwordError(err)
+	}
+
 	var created users.User
 	err = pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
 		if err := requireActiveAdministrator(ctx, tx, actor.ID); err != nil {
 			return err
-		}
-		encodedPassword, err := password.Hash(plainPassword)
-		if err != nil {
-			return passwordError(err)
 		}
 		created, err = users.NewStore(tx).Create(ctx, users.CreateInput{
 			Username:     username,
@@ -227,13 +228,14 @@ func (s *Service) ResetPassword(ctx context.Context, actor users.User, userID, p
 		return ErrService
 	}
 
+	encodedPassword, err := password.Hash(plainPassword)
+	if err != nil {
+		return passwordError(err)
+	}
+
 	err = pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
 		if err := requireActiveAdministrator(ctx, tx, actor.ID); err != nil {
 			return err
-		}
-		encodedPassword, err := password.Hash(plainPassword)
-		if err != nil {
-			return passwordError(err)
 		}
 		if err := users.NewStore(tx).ReplacePassword(ctx, userID, encodedPassword); err != nil {
 			return userError(err)
