@@ -27,7 +27,7 @@ create table devices (
 create table user_sessions (
   id text primary key,
   user_id text not null references users(id) on delete restrict,
-  token_digest bytea not null unique,
+  token_digest bytea not null unique check (octet_length(token_digest) = 32),
   purpose text not null check (purpose in ('browser', 'desktop')),
   device_id text references devices(id) on delete set null,
   created_at timestamptz not null,
@@ -58,8 +58,19 @@ create table audit_logs (
 create index audit_logs_actor_user_id_idx on audit_logs (actor_user_id);
 create index audit_logs_created_at_idx on audit_logs (created_at);
 
+create function prevent_audit_log_mutation() returns trigger as $$
+begin
+  raise exception 'audit logs are immutable';
+end;
+$$ language plpgsql;
+
+create trigger audit_logs_immutable
+before update or delete on audit_logs
+for each row execute function prevent_audit_log_mutation();
+
 -- +goose Down
 drop table audit_logs;
+drop function prevent_audit_log_mutation();
 drop table user_sessions;
 drop table devices;
 drop table users;
