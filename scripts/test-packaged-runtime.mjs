@@ -89,10 +89,15 @@ async function runPackagedObsSmoke(stageUrl) {
     await client.call("SetCurrentProgramScene", { sceneName });
     if (obsSmokeMode === "real" || obsSmokeMode === "1") {
       const before = await client.call("GetVirtualCamStatus");
-      if (!before.outputActive) await client.call("StartVirtualCam");
-      const after = await client.call("GetVirtualCamStatus");
-      if (!after.outputActive) throw new Error("Packaged OBS virtual camera did not start");
-      await client.call("StopVirtualCam").catch(() => {});
+      if (!before.outputActive) void client.call("StartVirtualCam").catch(() => {});
+      let active = before.outputActive;
+      const virtualCameraDeadline = Date.now() + 2_000;
+      while (!active && Date.now() < virtualCameraDeadline) {
+        await wait(100);
+        active = (await client.call("GetVirtualCamStatus")).outputActive;
+      }
+      if (!active) throw new Error("Packaged OBS virtual camera did not start");
+      void client.call("StopVirtualCam").catch(() => {});
     }
     process.stdout.write(`Packaged OBS ${version.obsVersion ?? identified.obsWebSocketVersion ?? "unknown"} authenticated and configured\n`);
   } finally {

@@ -9,6 +9,7 @@ import ts from "typescript";
 
 import * as obsConfig from "../../desktop/obs-config.ts";
 import * as obsProcess from "../../desktop/obs-process.ts";
+import * as virtualCameraState from "../../desktop/virtual-camera-state.ts";
 
 const localRequire = createRequire(import.meta.url);
 
@@ -66,7 +67,8 @@ test("managed OBS upgrades an old runtime and restores websocket configuration",
       "./obs-config": obsConfig,
       "./obs-process": obsProcess,
       "./obs-scene": { configureManagedObsScene() {}, setManagedObsInterventionRouting() {} },
-      "./obs-secret-store": { ManagedObsSecretError: class ManagedObsSecretError extends Error {} }
+      "./obs-secret-store": { ManagedObsSecretError: class ManagedObsSecretError extends Error {} },
+      "./virtual-camera-state": virtualCameraState
     }
   );
   try {

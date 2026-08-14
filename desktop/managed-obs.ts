@@ -24,6 +24,7 @@ import {
 } from "./obs-scene";
 import { ManagedObsSecretError, type ManagedObsSecretStore } from "./obs-secret-store";
 import type { ManagedObsState } from "./types";
+import { reconcileVirtualCameraState } from "./virtual-camera-state";
 
 export const MANAGED_OBS_STARTUP_TIMEOUT_MS = 30_000;
 const PORT_POLL_INTERVAL_MS = 500;
@@ -274,10 +275,7 @@ export class ManagedObsController {
         await client.disconnect().catch(() => undefined);
         return this.fail("virtual-camera", "OBS_VIRTUAL_CAMERA_NOT_REGISTERED");
       }
-      const status = await client.call("GetVirtualCamStatus") as { outputActive: boolean };
-      if (!status.outputActive) await client.call("StartVirtualCam");
-      const verified = await client.call("GetVirtualCamStatus") as { outputActive: boolean };
-      if (!verified.outputActive) throw new Error("OBS virtual camera remained inactive");
+      await reconcileVirtualCameraState(client, true);
     } catch {
       await client.disconnect().catch(() => undefined);
       return this.fail("virtual-camera", "OBS_VIRTUAL_CAMERA_FAILED");
@@ -305,11 +303,7 @@ export class ManagedObsController {
     const client = await this.connectedClient();
     if (!client) return this.fail("process", "OBS_NOT_RUNNING");
     try {
-      const current = await client.call("GetVirtualCamStatus") as { outputActive: boolean };
-      if (active && !current.outputActive) await client.call("StartVirtualCam");
-      if (!active && current.outputActive) await client.call("StopVirtualCam");
-      const verified = await client.call("GetVirtualCamStatus") as { outputActive: boolean };
-      if (verified.outputActive !== active) throw new Error("OBS virtual camera state mismatch");
+      await reconcileVirtualCameraState(client, active);
       this.state = { status: "ready", version: this.obsVersion, virtualCameraActive: active };
       return this.state;
     } catch {
@@ -344,8 +338,7 @@ export class ManagedObsController {
     this.client = null;
     if (client) {
       try {
-        const status = await client.call("GetVirtualCamStatus") as { outputActive: boolean };
-        if (status.outputActive) await client.call("StopVirtualCam");
+        await reconcileVirtualCameraState(client, false);
       } catch {
         // The process may already be exiting.
       }

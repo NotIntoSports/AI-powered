@@ -325,3 +325,9 @@
 - 系统组件：继续复用 Virtual Audio Driver 25.7.14（MIT/MS-PL）签名发布物和 Windows 自带 `pnputil`，不自行开发音频驱动；OBS Virtual Camera 使用官方内置模块。预览版与 NSIS 安装器复用同一 PowerShell 注册逻辑：提权前后都验证 32/64 位模块固定 SHA-256 与 `OBS Project, LLC` Authenticode 签名，再使用相应位数 `regsvr32`，最后核对两个注册表视图；UAC 取消、签名/哈希错误和注册失败返回稳定错误码。
 - 安全与数据：WebSocket 长期随机密码的主副本用 Electron `safeStorage`/CurrentUser DPAPI 加密，并按 OBS 上游要求存在专用配置的明文字段；不经命令行、渲染 IPC 或日志。专用 OBS 仅访问随机回环地址舞台。无新增云端服务、API 成本或候选人数据流，也不创建防火墙例外。
 - 体积与限制：安装包增加约 188 MB（压缩前还包括解压后的 OBS 文件与驱动资源）。Windows 驱动签名策略、UAC 和重启要求无法由应用绕过；Virtual Camera 和虚拟声卡最终状态仍需 Windows 10 2004+/Windows 11 x64 实机安装测试。
+
+# 2026-08-14：虚拟摄像头状态协调与素材上传提示
+
+- OBS：继续复用现有 `obs-websocket-js 5.0.8` 和 OBS WebSocket 的 `StartVirtualCam`、`StopVirtualCam`、`GetVirtualCamStatus`，不新增依赖。启动或停止命令即使先返回错误，也以最长 2 秒内轮询得到的最终输出状态为准，避免 OBS 异步完成操作时被客户端误报失败。
+- 素材选择：继续使用浏览器原生文件输入；`accept` 只改善文件选择体验，服务端仍校验真实 MIME、文件头和 50MB 大小上限。前后端共享 JPEG、PNG、WebP、MP4、WebM 策略，界面直接说明推荐 16:9、1280×720、视频静音循环和仅本机保存。
+- 成本与安全：无新增包、网络服务、云端费用或数据流；素材仍只保存在本机 `data/avatar`，OBS 密码与现有安全边界不变。

@@ -1,8 +1,9 @@
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { dataRoot, getDatabase, hasMigration, runTransaction } from "./database";
+import { AVATAR_MIME_KINDS, MAX_AVATAR_BYTES } from "./avatar-policy";
 
-export const MAX_AVATAR_BYTES = 50 * 1024 * 1024;
+export { MAX_AVATAR_BYTES } from "./avatar-policy";
 
 export type AvatarKind = "image" | "video";
 
@@ -37,6 +38,7 @@ function text(bytes: Uint8Array, start: number, end: number) {
 }
 
 export function validateAvatar(bytes: Uint8Array, declaredMimeType: string) {
+  if (!(declaredMimeType in AVATAR_MIME_KINDS)) throw new Error("UNSUPPORTED_MEDIA");
   const format = formats[declaredMimeType as keyof typeof formats];
   if (!format || !format.matches(bytes)) {
     throw new Error("UNSUPPORTED_MEDIA");
