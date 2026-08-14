@@ -353,3 +353,11 @@
 - `github.com/pressly/goose/v3 v3.27.3`：MIT；官方 Go package 元数据确认带标签的可再分发稳定版本，官方发布页显示 2026-07-22 发布且项目仍维护。采用其官方 `SetBaseFS` 嵌入 SQL 迁移支持及 PostgreSQL 方言，避免自写 migration history/并发升级机制；它只在启动迁移时运行，不产生浏览器、OBS、GPU、云端或按量 API 成本。Task 1 已审查其版本与维护状态；本任务未发现新的已知安全公告，发布前仍须执行依赖漏洞扫描。
 - 未采用 SQLite、mock 或自写迁移器：身份 schema 依赖 PostgreSQL enum、JSONB、`bytea` 和生产目标的一致语义；替换会降低约束覆盖，不能验证真实迁移。测试仅在显式提供 `TEST_DATABASE_URL` 时连接一次性 PostgreSQL，未提供时明确跳过，不传输任何候选人数据或密钥。
 - 体积、兼容性与维护：pgx 和 goose 已存在于 `go.mod`/`go.sum`；实际导入 `pgxpool` 后，Go 1.26 将 pgx 指定的 `puddle/v2` 写入间接依赖清单，但不新增服务或云端费用。本任务会在 Go 1.26.5 Windows/amd64 上构建和 vet。自动迁移要求最小权限数据库用户具备 schema 变更权限；多实例同时启动的迁移锁和生产数据库备份/恢复流程留待容器与运行文档任务明确。
+
+# 2026-08-14：Go 控制 API 用户、会话与审计存储
+
+- 目标：实现 PostgreSQL 用户、可撤销不透明会话和追加式审计写入；只持久化 Task 3 已生成的编码密码哈希，不在本层处理明文密码，也不实现 HTTP 或身份编排服务。
+- 采用：继续复用已锁定的 `github.com/jackc/pgx/v5 v5.10.0`（MIT）及 Go 1.26.5 标准库 `crypto/rand`、`crypto/sha256`、`crypto/subtle`、`encoding/base64` 和 `encoding/json`，不新增依赖。pgx 官方文档提供 `Exec`、`Query`、`QueryRow` 的参数绑定接口，且 `pgx.Tx` 实现相同方法，因此用最小 `database.DBTX` 适配池与事务；官方 5.10.0 变更记录显示 2026-06-03 发布并包含针对恶意或受控 PostgreSQL 服务端的协议和认证加固，仓库在检查日仍有发布后的维护提交。
+- 未采用：不引入 ORM、会话框架、身份平台或审计 SDK。当前 schema 和查询数量小，现有 pgx 已完整覆盖参数化 SQL 与事务复用；额外框架会增加二进制体积、供应链和迁移维护面。令牌 ID、SHA-256 摘要、五分钟节流和 metadata denylist 属于短小且安全边界明确的领域逻辑，标准库已提供所需密码学原语；不复制第三方源码。
+- 安全与数据：32 字节随机会话令牌仅返回一次，数据库只保存 SHA-256 摘要并在索引查询后进行恒定时间比较；SQL 全部使用位置参数。审计 metadata 在 JSON 编码前拒绝大小写不敏感的敏感键。数据库 URL 仅由测试/进程环境提供，测试使用随机隔离 schema，缺少 `TEST_DATABASE_URL` 时明确跳过，不使用 mock 或 SQLite。
+- 兼容、资源与成本：纯 Go/pgx 方案兼容指定 Windows Go 1.26.5 和 PostgreSQL 16+，不进入浏览器或 OBS，不需要 GPU、外部进程或付费 API；运行时沿用已有最多 10 个连接的池上限，只增加小型查询与少量随机/哈希计算。已知限制是本机没有 PostgreSQL URL 时无法执行真实集成路径；上线前仍需升级已知含标准库安全修复的 Go 1.26.6，并重新运行漏洞扫描和 PostgreSQL 集成测试。
