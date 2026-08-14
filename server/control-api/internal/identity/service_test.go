@@ -99,6 +99,75 @@ func TestCreateOperatorRequiresActiveAdministratorAndAudits(t *testing.T) {
 	}
 }
 
+func TestCreateUserAllowsAdministratorRole(t *testing.T) {
+	db := newMemoryDB()
+	admin := users.User{ID: "admin-actor", Username: "owner", Role: users.RoleAdmin, Status: users.StatusActive}
+	seedMemoryUser(db, admin)
+	created, err := NewService(db).CreateUser(context.Background(), admin, "second-admin", testPassword, users.RoleAdmin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Role != users.RoleAdmin {
+		t.Fatalf("role = %q, want admin", created.Role)
+	}
+}
+
+func TestSetUserStatusDisablesAndRevokesSessions(t *testing.T) {
+	db := newMemoryDB()
+	admin := users.User{ID: "admin-actor", Username: "owner", Role: users.RoleAdmin, Status: users.StatusActive}
+	operator := users.User{ID: "operator-1", Username: "client", Role: users.RoleOperator, Status: users.StatusActive}
+	seedMemoryUser(db, admin)
+	seedMemoryUser(db, operator)
+	db.sessions["session-1"] = memorySession{userID: operator.ID}
+	db.sessions["session-2"] = memorySession{userID: operator.ID}
+
+	if err := NewService(db).SetUserStatus(context.Background(), admin, operator.ID, users.StatusDisabled); err != nil {
+		t.Fatal(err)
+	}
+	if db.users[operator.ID].status != users.StatusDisabled {
+		t.Fatalf("status = %s", db.users[operator.ID].status)
+	}
+	for id, session := range db.sessions {
+		if session.userID == operator.ID && !session.revoked {
+			t.Fatalf("session %s still active", id)
+		}
+	}
+	if len(db.audits) != 1 || db.audits[0].action != audit.ActionUserStatusChanged {
+		t.Fatalf("audits = %#v", db.audits)
+	}
+}
+
+func TestSetUserStatusProtectsLastActiveAdmin(t *testing.T) {
+	db := newMemoryDB()
+	admin := users.User{ID: "admin-actor", Username: "owner", Role: users.RoleAdmin, Status: users.StatusActive}
+	seedMemoryUser(db, admin)
+	err := NewService(db).SetUserStatus(context.Background(), admin, admin.ID, users.StatusDisabled)
+	if !errors.Is(err, users.ErrLastAdmin) {
+		t.Fatalf("error = %v, want ErrLastAdmin", err)
+	}
+	if db.users[admin.ID].status != users.StatusActive {
+		t.Fatal("last admin was disabled")
+	}
+}
+
+func TestRevokeUserSessionsCanPreserveCurrent(t *testing.T) {
+	db := newMemoryDB()
+	admin := users.User{ID: "admin-actor", Username: "owner", Role: users.RoleAdmin, Status: users.StatusActive}
+	seedMemoryUser(db, admin)
+	db.sessions["keep"] = memorySession{userID: admin.ID}
+	db.sessions["drop"] = memorySession{userID: admin.ID}
+
+	if err := NewService(db).RevokeUserSessions(context.Background(), admin, admin.ID, "keep"); err != nil {
+		t.Fatal(err)
+	}
+	if db.sessions["keep"].revoked {
+		t.Fatal("current session was revoked")
+	}
+	if !db.sessions["drop"].revoked {
+		t.Fatal("other session was not revoked")
+	}
+}
+
 func TestCreateOperatorReloadsAndLocksPersistedActor(t *testing.T) {
 	for name, persisted := range map[string]*users.User{
 		"operator": {ID: "actor", Username: "operator", Role: users.RoleOperator, Status: users.StatusActive},
@@ -371,27 +440,37 @@ type memoryTx struct {
 	sessions map[string]memorySession
 	audits   []memoryAudit
 	closed   bool
+	nest     int
 }
 
 func (tx *memoryTx) Begin(context.Context) (pgx.Tx, error) {
-	return nil, errors.New("unexpected nested transaction")
+	tx.nest++
+	return tx, nil
 }
 
 func (tx *memoryTx) Commit(context.Context) error {
 	if tx.closed {
 		return pgx.ErrTxClosed
 	}
+	if tx.nest > 0 {
+		tx.nest--
+		return nil
+	}
 	tx.closed = true
-	tx.parent.users = tx.users
-	tx.parent.sessions = tx.sessions
-	tx.parent.audits = tx.audits
+	tx.parent.users = cloneUsers(tx.users)
+	tx.parent.sessions = cloneSessions(tx.sessions)
+	tx.parent.audits = append([]memoryAudit(nil), tx.audits...)
 	tx.parent.commitCalls++
 	return nil
 }
 
 func (tx *memoryTx) Rollback(context.Context) error {
 	if tx.closed {
-		return pgx.ErrTxClosed
+		return nil
+	}
+	if tx.nest > 0 {
+		tx.nest--
+		return nil
 	}
 	tx.closed = true
 	tx.parent.rollbackCalls++
@@ -423,11 +502,27 @@ func (tx *memoryTx) Exec(_ context.Context, sql string, args ...any) (pgconn.Com
 		user.passwordHash = args[1].(string)
 		tx.users[id] = user
 		return pgconn.NewCommandTag("UPDATE 1"), nil
+	case strings.Contains(sql, "update users") && strings.Contains(sql, "status"):
+		id := args[0].(string)
+		user, ok := tx.users[id]
+		if !ok {
+			return pgconn.NewCommandTag("UPDATE 0"), nil
+		}
+		user.status = args[1].(users.Status)
+		user.updatedAt = args[2].(time.Time)
+		tx.users[id] = user
+		return pgconn.NewCommandTag("UPDATE 1"), nil
 	case strings.Contains(sql, "update user_sessions"):
 		userID := args[0].(string)
+		preserveID := ""
+		if len(args) >= 2 {
+			if sessionID, ok := args[1].(string); ok {
+				preserveID = sessionID
+			}
+		}
 		var affected int
 		for id, session := range tx.sessions {
-			if session.userID == userID && !session.revoked {
+			if session.userID == userID && !session.revoked && id != preserveID {
 				session.revoked = true
 				tx.sessions[id] = session
 				affected++
@@ -462,6 +557,20 @@ func (tx *memoryTx) QueryRow(_ context.Context, sql string, args ...any) pgx.Row
 			return memoryRow{err: pgx.ErrNoRows}
 		}
 		return memoryRow{values: []any{user.role, user.status}}
+	case strings.Contains(sql, "from users") && strings.Contains(sql, "where id = $1"):
+		user, ok := tx.users[args[0].(string)]
+		if !ok {
+			return memoryRow{err: pgx.ErrNoRows}
+		}
+		return memoryRow{values: []any{user.id, user.username, user.role, user.status, user.createdAt, user.updatedAt, (*time.Time)(nil)}}
+	case strings.Contains(sql, "count(*)") && strings.Contains(sql, "role = 'admin'") && strings.Contains(sql, "status = 'active'"):
+		count := 0
+		for _, user := range tx.users {
+			if user.role == users.RoleAdmin && user.status == users.StatusActive {
+				count++
+			}
+		}
+		return memoryRow{values: []any{count}}
 	case strings.Contains(sql, "count(*)") && strings.Contains(sql, "role = 'admin'"):
 		count := 0
 		for _, user := range tx.users {

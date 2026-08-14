@@ -13,6 +13,7 @@ import (
 	"github.com/ai-interviewer/ai-powered/control-api/internal/config"
 	"github.com/ai-interviewer/ai-powered/control-api/internal/database"
 	"github.com/ai-interviewer/ai-powered/control-api/internal/httpapi"
+	"github.com/ai-interviewer/ai-powered/control-api/internal/identity"
 )
 
 func main() {
@@ -38,6 +39,7 @@ func main() {
 		Addr: cfg.ListenAddress,
 		Handler: httpapi.NewRouter(httpapi.Dependencies{
 			Authentication:    authentication,
+			UserAdmin:         identity.NewService(pool),
 			SessionTTL:        cfg.SessionTTL,
 			CookieSecure:      cfg.CookieSecure,
 			TrustedProxyCIDRs: cfg.TrustedProxyCIDRs,

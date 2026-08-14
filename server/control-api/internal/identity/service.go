@@ -91,6 +91,10 @@ func (s *Service) CreateInitialAdmin(ctx context.Context, username, plainPasswor
 }
 
 func (s *Service) CreateOperator(ctx context.Context, actor users.User, username, plainPassword string) (users.User, error) {
+	return s.CreateUser(ctx, actor, username, plainPassword, users.RoleOperator)
+}
+
+func (s *Service) CreateUser(ctx context.Context, actor users.User, username, plainPassword string, role users.Role) (users.User, error) {
 	requestID, err := newRequestID()
 	if err != nil {
 		return users.User{}, ErrService
@@ -108,7 +112,7 @@ func (s *Service) CreateOperator(ctx context.Context, actor users.User, username
 		created, err = users.NewStore(tx).Create(ctx, users.CreateInput{
 			Username:     username,
 			PasswordHash: encodedPassword,
-			Role:         users.RoleOperator,
+			Role:         role,
 		})
 		if err != nil {
 			return userError(err)
@@ -120,7 +124,7 @@ func (s *Service) CreateOperator(ctx context.Context, actor users.User, username
 			TargetID:    created.ID,
 			Result:      audit.ResultSuccess,
 			RequestID:   requestID,
-			Metadata:    map[string]any{"role": string(users.RoleOperator)},
+			Metadata:    map[string]any{"role": string(role)},
 		}); err != nil {
 			return ErrService
 		}
@@ -130,6 +134,91 @@ func (s *Service) CreateOperator(ctx context.Context, actor users.User, username
 		return users.User{}, identityError(err)
 	}
 	return created, nil
+}
+
+func (s *Service) ListUsers(ctx context.Context, actor users.User) ([]users.User, error) {
+	var listed []users.User
+	err := pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
+		if err := requireActiveAdministrator(ctx, tx, actor.ID); err != nil {
+			return err
+		}
+		var err error
+		listed, err = users.NewStore(tx).List(ctx)
+		if err != nil {
+			return userError(err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, identityError(err)
+	}
+	return listed, nil
+}
+
+func (s *Service) SetUserStatus(ctx context.Context, actor users.User, userID string, status users.Status) error {
+	requestID, err := newRequestID()
+	if err != nil {
+		return ErrService
+	}
+
+	err = pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
+		if err := requireActiveAdministrator(ctx, tx, actor.ID); err != nil {
+			return err
+		}
+		if err := users.NewStore(tx).SetStatus(ctx, userID, status); err != nil {
+			return userError(err)
+		}
+		if status == users.StatusDisabled {
+			if err := sessions.NewStore(tx).RevokeUser(ctx, userID); err != nil {
+				return ErrService
+			}
+		}
+		if err := audit.NewStore(tx).Append(ctx, audit.Event{
+			ActorUserID: actor.ID,
+			Action:      audit.ActionUserStatusChanged,
+			TargetType:  "user",
+			TargetID:    userID,
+			Result:      audit.ResultSuccess,
+			RequestID:   requestID,
+			Metadata:    map[string]any{"status": string(status)},
+		}); err != nil {
+			return ErrService
+		}
+		return nil
+	})
+	return identityError(err)
+}
+
+func (s *Service) RevokeUserSessions(ctx context.Context, actor users.User, userID, preserveSessionID string) error {
+	requestID, err := newRequestID()
+	if err != nil {
+		return ErrService
+	}
+
+	err = pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
+		if err := requireActiveAdministrator(ctx, tx, actor.ID); err != nil {
+			return err
+		}
+		if _, err := users.NewStore(tx).Get(ctx, userID); err != nil {
+			return userError(err)
+		}
+		if err := sessions.NewStore(tx).RevokeUserExcept(ctx, userID, preserveSessionID); err != nil {
+			return ErrService
+		}
+		if err := audit.NewStore(tx).Append(ctx, audit.Event{
+			ActorUserID: actor.ID,
+			Action:      audit.ActionUserSessionsRevoked,
+			TargetType:  "user",
+			TargetID:    userID,
+			Result:      audit.ResultSuccess,
+			RequestID:   requestID,
+			Metadata:    map[string]any{"preserveCurrent": preserveSessionID != ""},
+		}); err != nil {
+			return ErrService
+		}
+		return nil
+	})
+	return identityError(err)
 }
 
 func (s *Service) ResetPassword(ctx context.Context, actor users.User, userID, plainPassword string) error {

@@ -86,29 +86,142 @@ paths:
           $ref: '#/components/responses/Unauthenticated'
   /api/v1/admin/users:
     get:
-      operationId: listAdminUsersPlaceholder
-      summary: Reserved for Task 7.
+      operationId: listAdminUsers
+      summary: List users ordered by creation time.
+      security:
+        - cookieAuth: []
       responses:
-        '501':
-          description: Not implemented.
+        '200':
+          description: Public user records.
           headers:
             Cache-Control:
               schema: {type: string, const: no-store}
-  /api/v1/admin/users/{userID}:
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/User'}
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      operationId: createAdminUser
+      summary: Create an administrator or operator. No default operator is seeded.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateUserRequest'}
+      responses:
+        '201':
+          description: Created public user.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/User'}
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/UsernameTaken'
+        '422':
+          $ref: '#/components/responses/InvalidInputUnprocessable'
+  /api/v1/admin/users/{id}:
     parameters:
-      - name: userID
+      - name: id
         in: path
         required: true
         schema: {type: string}
-    get:
-      operationId: getAdminUserPlaceholder
-      summary: Reserved for Task 7.
+    patch:
+      operationId: patchAdminUser
+      summary: Set user status to active or disabled. Disabling revokes every session.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PatchUserRequest'}
       responses:
-        '501':
-          description: Not implemented.
+        '204':
+          description: Status updated.
           headers:
             Cache-Control:
               schema: {type: string, const: no-store}
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/UserNotFound'
+        '409':
+          $ref: '#/components/responses/LastAdminRequired'
+        '422':
+          $ref: '#/components/responses/InvalidInputUnprocessable'
+  /api/v1/admin/users/{id}/reset-password:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+    post:
+      operationId: resetAdminUserPassword
+      summary: Replace a password and revoke every session for the target user.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ResetPasswordRequest'}
+      responses:
+        '204':
+          description: Password replaced and sessions revoked.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/UserNotFound'
+        '422':
+          $ref: '#/components/responses/InvalidInputUnprocessable'
+  /api/v1/admin/users/{id}/revoke-sessions:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+    post:
+      operationId: revokeAdminUserSessions
+      summary: Revoke sessions. preserveCurrent keeps the caller session only when the target is that administrator.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RevokeSessionsRequest'}
+      responses:
+        '204':
+          description: Sessions revoked.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/UserNotFound'
 components:
   securitySchemes:
     cookieAuth:
@@ -144,6 +257,7 @@ components:
       content:
         application/json:
           schema: {$ref: '#/components/schemas/APIError'}
+          example: {code: UNAUTHENTICATED, message: authentication is required, requestId: request-id}
     RequestTooLarge:
       description: Request body exceeds 32 KiB.
       headers:
@@ -160,6 +274,51 @@ components:
       content:
         application/json:
           schema: {$ref: '#/components/schemas/APIError'}
+    Forbidden:
+      description: Administrator access is required.
+      headers:
+        Cache-Control:
+          schema: {type: string, const: no-store}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/APIError'}
+          example: {code: FORBIDDEN, message: administrator access is required, requestId: request-id}
+    UsernameTaken:
+      description: Username is already taken.
+      headers:
+        Cache-Control:
+          schema: {type: string, const: no-store}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/APIError'}
+          example: {code: USERNAME_TAKEN, message: username is already taken, requestId: request-id}
+    LastAdminRequired:
+      description: The last active administrator cannot be disabled.
+      headers:
+        Cache-Control:
+          schema: {type: string, const: no-store}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/APIError'}
+          example: {code: LAST_ADMIN_REQUIRED, message: the last active administrator cannot be disabled, requestId: request-id}
+    UserNotFound:
+      description: User was not found.
+      headers:
+        Cache-Control:
+          schema: {type: string, const: no-store}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/APIError'}
+          example: {code: USER_NOT_FOUND, message: user was not found, requestId: request-id}
+    InvalidInputUnprocessable:
+      description: Role, status, username, or password is invalid.
+      headers:
+        Cache-Control:
+          schema: {type: string, const: no-store}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/APIError'}
+          example: {code: INVALID_INPUT, message: request body is invalid, requestId: request-id}
   schemas:
     APIError:
       type: object
@@ -204,3 +363,28 @@ components:
       properties:
         service: {type: string, example: control-api}
         status: {type: string, example: ok}
+    CreateUserRequest:
+      type: object
+      additionalProperties: false
+      required: [username, password, role]
+      properties:
+        username: {type: string}
+        password: {type: string, format: password}
+        role: {type: string, enum: [admin, operator]}
+    PatchUserRequest:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status: {type: string, enum: [active, disabled]}
+    ResetPasswordRequest:
+      type: object
+      additionalProperties: false
+      required: [password]
+      properties:
+        password: {type: string, format: password}
+    RevokeSessionsRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        preserveCurrent: {type: boolean}

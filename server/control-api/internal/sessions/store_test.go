@@ -183,6 +183,31 @@ func TestAuthenticateThrottlesLastUsedUpdates(t *testing.T) {
 	}
 }
 
+func TestRevokeUserExceptPreservesMatchingSession(t *testing.T) {
+	pool := openSessionTestPool(t)
+	userStore := users.NewStore(pool)
+	store := NewStore(pool)
+	ctx := context.Background()
+	user := createSessionTestUser(t, userStore, "except-user")
+	keep, keepSession, err := store.Create(ctx, CreateInput{UserID: user.ID, Purpose: PurposeDesktop, TTL: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	drop, dropSession, err := store.Create(ctx, CreateInput{UserID: user.ID, Purpose: PurposeDesktop, TTL: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RevokeUserExcept(ctx, user.ID, keepSession.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.Authenticate(ctx, keep, PurposeDesktop); err != nil {
+		t.Fatalf("preserved session: %v", err)
+	}
+	if _, _, err := store.Authenticate(ctx, drop, PurposeDesktop); !errors.Is(err, ErrUnauthenticated) {
+		t.Fatalf("dropped session %s error = %v", dropSession.ID, err)
+	}
+}
+
 func TestStoresComposeInsideTransactionForPasswordAndStatusRevocation(t *testing.T) {
 	pool := openSessionTestPool(t)
 	ctx := context.Background()

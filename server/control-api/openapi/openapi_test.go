@@ -51,6 +51,18 @@ func TestAuthenticationSecuritySchemesAreExact(t *testing.T) {
 	}
 }
 
+func TestAdminUserErrorsAreDocumented(t *testing.T) {
+	spec := readSpec(t)
+	for _, code := range []string{"USERNAME_TAKEN", "LAST_ADMIN_REQUIRED", "USER_NOT_FOUND", "INVALID_INPUT", "UNAUTHENTICATED", "FORBIDDEN"} {
+		if !strings.Contains(spec, "code: "+code) && !strings.Contains(spec, "example: {code: "+code) {
+			t.Fatalf("missing documented error code %s", code)
+		}
+	}
+	if !strings.Contains(spec, "requestId:") {
+		t.Fatal("admin errors must include requestId")
+	}
+}
+
 func readSpec(t *testing.T) string {
 	t.Helper()
 

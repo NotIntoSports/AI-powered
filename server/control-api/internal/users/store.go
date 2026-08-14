@@ -153,6 +153,30 @@ func (s *Store) GetByNormalizedUsername(ctx context.Context, normalized string) 
 	return user, nil
 }
 
+func (s *Store) Get(ctx context.Context, id string) (User, error) {
+	user := User{}
+	err := s.db.QueryRow(ctx, `
+		select id, username, role, status, created_at, updated_at, last_login_at
+		from users
+		where id = $1
+	`, id).Scan(
+		&user.ID,
+		&user.Username,
+		&user.Role,
+		&user.Status,
+		&user.CreatedAt,
+		&user.UpdatedAt,
+		&user.LastLoginAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return User{}, ErrUserNotFound
+	}
+	if err != nil {
+		return User{}, ErrStore
+	}
+	return user, nil
+}
+
 func (s *Store) List(ctx context.Context) ([]User, error) {
 	rows, err := s.db.Query(ctx, `
 		select id, username, role, status, created_at, updated_at, last_login_at
@@ -191,50 +215,15 @@ func (s *Store) SetStatus(ctx context.Context, id string, status Status) error {
 		return ErrInvalidStatus
 	}
 
-	err := pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock($1, $2)`, userStatusLockNamespace, userStatusLockObject); err != nil {
-			return ErrStore
-		}
-
-		var role Role
-		var current Status
-		err := tx.QueryRow(ctx, `
-			select role, status
-			from users
-			where id = $1
-			for update
-		`, id).Scan(&role, &current)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrUserNotFound
-		}
-		if err != nil {
-			return ErrStore
-		}
-
-		if role == RoleAdmin && current == StatusActive && status != StatusActive {
-			var activeAdmins int
-			if err := tx.QueryRow(ctx, `
-				select count(*)
-				from users
-				where role = 'admin' and status = 'active'
-			`).Scan(&activeAdmins); err != nil {
-				return ErrStore
-			}
-			if activeAdmins <= 1 {
-				return ErrLastAdmin
-			}
-		}
-
-		command, err := tx.Exec(ctx, `
-			update users
-			set status = $2, updated_at = $3
-			where id = $1
-		`, id, status, time.Now().UTC().Truncate(time.Microsecond))
-		if err != nil || command.RowsAffected() != 1 {
-			return ErrStore
-		}
-		return nil
-	})
+	apply := func(tx pgx.Tx) error {
+		return applyUserStatus(ctx, tx, id, status)
+	}
+	var err error
+	if tx, ok := s.db.(pgx.Tx); ok {
+		err = apply(tx)
+	} else {
+		err = pgx.BeginFunc(ctx, s.db, apply)
+	}
 	if err == nil {
 		return nil
 	}
@@ -245,6 +234,51 @@ func (s *Store) SetStatus(ctx context.Context, id string, status Status) error {
 		return ErrLastAdmin
 	}
 	return ErrStore
+}
+
+func applyUserStatus(ctx context.Context, tx pgx.Tx, id string, status Status) error {
+	if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock($1, $2)`, userStatusLockNamespace, userStatusLockObject); err != nil {
+		return ErrStore
+	}
+
+	var role Role
+	var current Status
+	err := tx.QueryRow(ctx, `
+		select role, status
+		from users
+		where id = $1
+		for update
+	`, id).Scan(&role, &current)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrUserNotFound
+	}
+	if err != nil {
+		return ErrStore
+	}
+
+	if role == RoleAdmin && current == StatusActive && status != StatusActive {
+		var activeAdmins int
+		if err := tx.QueryRow(ctx, `
+			select count(*)
+			from users
+			where role = 'admin' and status = 'active'
+		`).Scan(&activeAdmins); err != nil {
+			return ErrStore
+		}
+		if activeAdmins <= 1 {
+			return ErrLastAdmin
+		}
+	}
+
+	command, err := tx.Exec(ctx, `
+		update users
+		set status = $2, updated_at = $3
+		where id = $1
+	`, id, status, time.Now().UTC().Truncate(time.Microsecond))
+	if err != nil || command.RowsAffected() != 1 {
+		return ErrStore
+	}
+	return nil
 }
 
 func (s *Store) ReplacePassword(ctx context.Context, id, encoded string) error {

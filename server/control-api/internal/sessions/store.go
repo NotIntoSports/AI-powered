@@ -232,11 +232,15 @@ func (s *Store) RevokeToken(ctx context.Context, rawToken string) error {
 }
 
 func (s *Store) RevokeUser(ctx context.Context, userID string) error {
+	return s.RevokeUserExcept(ctx, userID, "")
+}
+
+func (s *Store) RevokeUserExcept(ctx context.Context, userID, sessionID string) error {
 	_, err := s.db.Exec(ctx, `
 		update user_sessions
-		set revoked_at = $2
-		where user_id = $1 and revoked_at is null
-	`, userID, time.Now().UTC().Truncate(time.Microsecond))
+		set revoked_at = $3
+		where user_id = $1 and revoked_at is null and ($2 = '' or id <> $2)
+	`, userID, sessionID, time.Now().UTC().Truncate(time.Microsecond))
 	if err != nil {
 		return ErrStore
 	}
