@@ -1,0 +1,24 @@
+# syntax=docker/dockerfile:1
+
+FROM golang:1.26.5-alpine AS builder
+WORKDIR /src
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/control-api ./cmd/control-api \
+	&& CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/control-api-admin ./cmd/control-api-admin
+
+FROM gcr.io/distroless/static-debian12:nonroot
+LABEL org.opencontainers.image.source="https://github.com/NotIntoSports/AI-powered" \
+	org.opencontainers.image.licenses="MIT" \
+	org.opencontainers.image.title="control-api" \
+	org.opencontainers.image.description="Private management API with no public registration"
+
+COPY --from=builder /out/control-api /control-api
+COPY --from=builder /out/control-api-admin /control-api-admin
+
+USER nonroot:nonroot
+EXPOSE 8080
+ENTRYPOINT ["/control-api"]

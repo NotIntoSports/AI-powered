@@ -14,6 +14,10 @@ The source repository and Windows distribution use third-party components. Their
 | Virtual Audio Driver | MIT; derived Microsoft samples under MS-PL | https://github.com/VirtualDrivers/Virtual-Audio-Driver |
 | Microsoft Windows classic samples | MIT | https://github.com/microsoft/Windows-classic-samples |
 | Volcengine RTC Web SDK | BSD-3-Clause | https://www.npmjs.com/package/@volcengine/rtc |
+| chi v5 | MIT | https://github.com/go-chi/chi |
+| pgx v5 | MIT | https://github.com/jackc/pgx |
+| goose v3 | MIT | https://github.com/pressly/goose |
+| golang.org/x/crypto | BSD-3-Clause | https://cs.opensource.google/go/x/crypto |
 
 OBS Studio 32.2.1 is redistributed as a separate portable program. Its corresponding source archive is available from the official release at https://github.com/obsproject/obs-studio/releases/tag/32.2.1 and must remain available with the distribution's GPL notices/source offer.
 

@@ -20,6 +20,8 @@
 
 Windows 客户端安装、接线和已知限制见 [docs/windows-client.md](docs/windows-client.md)。
 
+独立的管理 API 在 [server/control-api](server/control-api/README.md)：它与本面试客户端分离，没有公开注册入口。
+
 ## 运行
 
 ```powershell

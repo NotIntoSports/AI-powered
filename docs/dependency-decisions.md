@@ -376,3 +376,13 @@
 - 限流方案调查：Go 官方 `golang.org/x/time/rate` 提供并发安全的 token bucket，`v0.15.0` 包页面记录 BSD-3-Clause、2026-02-11 发布和大量下游使用；但页面同时提示该版本不是模块最新视图，而本机访问官方 Go module proxy 超时，无法可靠确认并下载当前最新标签。即使采用它，本项目仍必须自行实现“规范化用户名 + 规范 IP”键、可信代理 CIDR 边界和 30 分钟条目淘汰。为避免在无法完成版本与模块校验时扩展供应链，本任务不新增该模块，而用标准库实现只包含令牌补充、容量和淘汰的最小同步结构；后续若需要跨实例共享或分布式限流，应改用服务器侧共享存储，而不是继续扩展内存实现。
 - 安全与代理边界：默认只信任 TCP 直连地址；仅当直连 peer 命中显式 `TRUSTED_PROXY_CIDRS` 时才读取代理转发地址，并对地址使用 `netip` 解析/规范化。限流键和失败审计只保存规范化用户名及来源 IP，不保存密码、Token、Authorization 或 Cookie。内存桶最多突发 10 次、按五分钟补充五次额度，30 分钟无活动后淘汰；它是单进程防爆破层，不替代反向代理或共享存储限流。
 - 体积、维护与限制：无新增模块，部署增量仅为少量标准库可达代码和每个活跃登录键一个小型内存条目；无云端费用或额外数据去向。当前 Go 1.26.5 已知落后于带标准库安全修复的 1.26.6，发布前仍须升级工具链、执行 `govulncheck`、在带 C 编译器的 CI 跑 `-race`，并在显式提供 `TEST_DATABASE_URL` 的隔离 PostgreSQL 上验证事务回滚、会话撤销和审计原子性。
+
+# 2026-08-15：Go 控制 API 生产容器与本地 Compose
+
+- 目标：为 `server/control-api` 提供可复现的非 root 镜像、仅回环的开发 Compose、部署文档和可选容器冒烟测试；不改动 Electron/Next.js 行为，不新增与 chi/pgx/goose 重叠的运行时库。
+- 构建镜像：官方 [`golang:1.26.5-alpine`](https://hub.docker.com/_/golang)。[Docker Hub 官方标签](https://hub.docker.com/_/golang)在检查日将 `1.26.5-alpine` 作为 `1.26.5-alpine3.24` 的共享标签；许可证为 Go BSD-3-Clause，Alpine 基础系统为 MIT。官方文档给出 `COPY go.mod go.sum` 后 `go mod download` 再复制源码的缓存顺序，以及 `CGO_ENABLED=0` 静态编译。选择 alpine 构建器而不是完整 Debian `golang:1.26.5`，是为了缩小构建层；最终运行时不保留该构建器。
+- 运行镜像：[`gcr.io/distroless/static-debian12:nonroot`](https://github.com/GoogleContainerTools/distroless)（Apache-2.0）。官方 README 将 `static-debian12` 列为无 shell、无包管理器的静态 Go 运行时，并提供 `:nonroot` 标签；ENTRYPOINT 必须使用 JSON 向量形式。未采用 `scratch`（缺少 CA/时区与非 root 用户元数据）、未采用 `alpine`/`debian` 运行时（含 shell 与包管理器，攻击面更大）、也未采用更重的 K8s/Helm/Ory 栈。Debian 13 变体存在，但本任务按计划锁定 `static-debian12:nonroot`。
+- 数据库：官方 [`postgres:16`](https://hub.docker.com/_/postgres)（PostgreSQL License）。Compose 使用命名卷、`pg_isready` 健康检查，并将 API/`5432` 发布限制在 `127.0.0.1:8080` 与 `127.0.0.1:54329`。未采用 SQLite 或自建 Postgres 镜像，以免偏离已锁定的 PostgreSQL 16+ schema。
+- Compose：官方 Compose 规范的 `depends_on.condition: service_healthy`、`127.0.0.1` 端口绑定、`profiles` 一次性服务和项目目录 `.env` 变量替换。`COOKIE_SECURE=false` 仅用于本地 HTTP；生产文档要求 TLS 与 `COOKIE_SECURE=true`。`.env.example` 只有占位符，真实 `.env` 不入库。
+- 未采用：完整 Kubernetes、Istio、Ory Kratos、第二套反向代理镜像或额外健康检查二进制。当前是本机开发栈加一份可部署静态镜像；更重的编排会增加运行资源、密钥面和维护成本。
+- 限制：本机若未安装 Docker，则无法执行 `docker compose config/build/up` 和容器冒烟；Windows 无 C 编译器时 `go test -race` 不可用。发布前仍须在有 Docker 与 GCC 的环境补跑这些命令。

@@ -1,0 +1,13 @@
+.env
+.env.*
+!.env.example
+*.dump
+*.pgdump
+media/
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+credentials.json
+secrets.json
+.git
