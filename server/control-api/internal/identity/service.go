@@ -91,9 +91,6 @@ func (s *Service) CreateInitialAdmin(ctx context.Context, username, plainPasswor
 }
 
 func (s *Service) CreateOperator(ctx context.Context, actor users.User, username, plainPassword string) (users.User, error) {
-	if !activeAdministrator(actor) {
-		return users.User{}, ErrForbidden
-	}
 	requestID, err := newRequestID()
 	if err != nil {
 		return users.User{}, ErrService
@@ -101,6 +98,9 @@ func (s *Service) CreateOperator(ctx context.Context, actor users.User, username
 
 	var created users.User
 	err = pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
+		if err := requireActiveAdministrator(ctx, tx, actor.ID); err != nil {
+			return err
+		}
 		encodedPassword, err := password.Hash(plainPassword)
 		if err != nil {
 			return passwordError(err)
@@ -133,15 +133,15 @@ func (s *Service) CreateOperator(ctx context.Context, actor users.User, username
 }
 
 func (s *Service) ResetPassword(ctx context.Context, actor users.User, userID, plainPassword string) error {
-	if !activeAdministrator(actor) {
-		return ErrForbidden
-	}
 	requestID, err := newRequestID()
 	if err != nil {
 		return ErrService
 	}
 
 	err = pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
+		if err := requireActiveAdministrator(ctx, tx, actor.ID); err != nil {
+			return err
+		}
 		encodedPassword, err := password.Hash(plainPassword)
 		if err != nil {
 			return passwordError(err)
@@ -167,8 +167,25 @@ func (s *Service) ResetPassword(ctx context.Context, actor users.User, userID, p
 	return identityError(err)
 }
 
-func activeAdministrator(actor users.User) bool {
-	return actor.Role == users.RoleAdmin && actor.Status == users.StatusActive
+func requireActiveAdministrator(ctx context.Context, tx pgx.Tx, actorID string) error {
+	var role users.Role
+	var status users.Status
+	err := tx.QueryRow(ctx, `
+		select role, status
+		from users
+		where id = $1
+		for update
+	`, actorID).Scan(&role, &status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrForbidden
+	}
+	if err != nil {
+		return ErrService
+	}
+	if role != users.RoleAdmin || status != users.StatusActive {
+		return ErrForbidden
+	}
+	return nil
 }
 
 func newRequestID() (string, error) {

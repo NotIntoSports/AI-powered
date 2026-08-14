@@ -365,6 +365,6 @@
 # 2026-08-14：Go 控制 API 管理员命令行与身份编排
 
 - 目标：提供一次性初始管理员创建和管理员密码重置，继续复用已有 Argon2id、pgx 事务、用户、会话和追加式审计存储；初始化只创建 `admin`，不创建普通客户端用户，也不提供注册或密码参数/环境变量入口。
-- 终端输入采用：`golang.org/x/term v0.45.0`（BSD-3-Clause）。[Go 官方包元数据](https://pkg.go.dev/golang.org/x/term@v0.45.0)记录该标签发布于 2026-07-08，由 Go 项目持续维护，`ReadPassword` 在真实终端上关闭本地回显，`IsTerminal` 支持 Windows 文件描述符判定。使用官方独立模块，不使用已废弃并迁移到它的 `x/crypto/ssh/terminal`，也不自行维护 Windows Console API 及 Unix termios 分支。
+- 终端输入采用：`golang.org/x/term v0.45.0`（BSD-3-Clause）。[Go 官方包元数据](https://pkg.go.dev/golang.org/x/term@v0.45.0)记录该标签发布于 2026-07-08，由 Go 项目持续维护，`ReadPassword` 在真实终端上关闭本地回显，`IsTerminal` 支持 Windows 文件描述符判定。检查日使用指定 Go 工具链执行 `go list -m -json golang.org/x/term@latest`，返回的当前最新版仍为 `v0.45.0`，因此无需升级；`pkg.go.dev` 页面的“not latest”提示与模块查询结果不一致，以 Go 模块查询结果为锁定依据。使用官方独立模块，不使用已废弃并迁移到它的 `x/crypto/ssh/terminal`，也不自行维护 Windows Console API 及 Unix termios 分支。
 - 兼容、体积与成本：`x/term` 是纯 Go/平台系统调用适配，兼容本项目 Go 1.26.5 与 Windows；不运行于浏览器或 OBS，不引入 GPU、常驻进程、网络服务或付费 API。它只链接到短命管理 CLI，部署体积影响在最终容器任务中实测；无单独内存或 CPU 后台开销。
-- 安全与数据：密码仅从交互终端或两行标准输入读取，不进入命令行、环境变量、标准输出或日志；空值和不匹配确认在连接数据库前失败。检查日未在 Go 漏洞库中找到直接影响 `x/term v0.45.0` 的公告；发布前仍须对完整模块图执行 `govulncheck`。身份变更、会话撤销与审计写入在同一 pgx 事务内，任一步失败即回滚。
+- 安全与数据：密码仅从交互终端或两行标准输入读取，不进入命令行、环境变量、标准输出或日志；空值和不匹配确认在连接数据库前失败。检查 Go 官方问题跟踪器中的未解决终端问题时，确认 [golang/go#19909](https://github.com/golang/go/issues/19909) 仍讨论 `ReadPassword` 对重定向标准输入返回 ioctl 错误；本 CLI 在调用前先用 `IsTerminal` 分流，对管道/文件改用有界的两行 scanner，因此不依赖该未解决行为。检查日未在 Go 漏洞库中找到直接影响 `x/term v0.45.0` 的公告；发布前仍须对完整模块图执行 `govulncheck`。身份变更、会话撤销与审计写入在同一 pgx 事务内，任一步失败即回滚。

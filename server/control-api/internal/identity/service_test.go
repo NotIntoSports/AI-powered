@@ -2,16 +2,24 @@ package identity
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
+	"fmt"
+	"os"
+	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/ai-interviewer/ai-powered/control-api/internal/audit"
+	"github.com/ai-interviewer/ai-powered/control-api/internal/database"
 	"github.com/ai-interviewer/ai-powered/control-api/internal/password"
 	"github.com/ai-interviewer/ai-powered/control-api/internal/users"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 const testPassword = "correct horse battery staple"
@@ -71,13 +79,14 @@ func TestCreateOperatorRequiresActiveAdministratorAndAudits(t *testing.T) {
 		if !errors.Is(err, ErrForbidden) {
 			t.Fatalf("actor %#v error = %v, want ErrForbidden", actor, err)
 		}
-		if db.beginCalls != 0 {
-			t.Fatalf("unauthorized actor began %d transactions", db.beginCalls)
+		if db.beginCalls != 1 || db.rollbackCalls != 1 {
+			t.Fatalf("unauthorized actor transaction begin=%d rollback=%d", db.beginCalls, db.rollbackCalls)
 		}
 	}
 
 	db := newMemoryDB()
 	admin := users.User{ID: "admin-actor", Username: "owner", Role: users.RoleAdmin, Status: users.StatusActive}
+	seedMemoryUser(db, admin)
 	created, err := NewService(db).CreateOperator(context.Background(), admin, "client-user", testPassword)
 	if err != nil {
 		t.Fatal(err)
@@ -87,6 +96,31 @@ func TestCreateOperatorRequiresActiveAdministratorAndAudits(t *testing.T) {
 	}
 	if len(db.audits) != 1 || db.audits[0].action != audit.ActionUserCreated || db.audits[0].actorUserID != admin.ID {
 		t.Fatalf("audits = %#v", db.audits)
+	}
+}
+
+func TestCreateOperatorReloadsAndLocksPersistedActor(t *testing.T) {
+	for name, persisted := range map[string]*users.User{
+		"operator": {ID: "actor", Username: "operator", Role: users.RoleOperator, Status: users.StatusActive},
+		"disabled": {ID: "actor", Username: "disabled", Role: users.RoleAdmin, Status: users.StatusDisabled},
+		"deleted":  {ID: "actor", Username: "deleted", Role: users.RoleAdmin, Status: users.StatusDeleted},
+		"missing":  nil,
+	} {
+		t.Run(name, func(t *testing.T) {
+			db := newMemoryDB()
+			if persisted != nil {
+				seedMemoryUser(db, *persisted)
+			}
+			forged := users.User{ID: "actor", Username: "forged", Role: users.RoleAdmin, Status: users.StatusActive}
+
+			_, err := NewService(db).CreateOperator(context.Background(), forged, "must-not-exist", testPassword)
+			if !errors.Is(err, ErrForbidden) {
+				t.Fatalf("error = %v, want ErrForbidden", err)
+			}
+			if _, exists := findMemoryUserByUsername(db, "must-not-exist"); exists || len(db.audits) != 0 {
+				t.Fatalf("unauthorized create mutated state: users=%#v audits=%#v", db.users, db.audits)
+			}
+		})
 	}
 }
 
@@ -100,8 +134,8 @@ func TestResetPasswordRequiresActiveAdministratorRevokesSessionsAndAudits(t *tes
 		if !errors.Is(err, ErrForbidden) {
 			t.Fatalf("actor %#v error = %v, want ErrForbidden", actor, err)
 		}
-		if db.beginCalls != 0 {
-			t.Fatalf("unauthorized actor began %d transactions", db.beginCalls)
+		if db.beginCalls != 1 || db.rollbackCalls != 1 {
+			t.Fatalf("unauthorized actor transaction begin=%d rollback=%d", db.beginCalls, db.rollbackCalls)
 		}
 	}
 
@@ -110,6 +144,7 @@ func TestResetPasswordRequiresActiveAdministratorRevokesSessionsAndAudits(t *tes
 	db.sessions["session-one"] = memorySession{userID: "target"}
 	db.sessions["session-two"] = memorySession{userID: "target"}
 	admin := users.User{ID: "admin-actor", Username: "owner", Role: users.RoleAdmin, Status: users.StatusActive}
+	seedMemoryUser(db, admin)
 
 	if err := NewService(db).ResetPassword(context.Background(), admin, "target", "replacement password value"); err != nil {
 		t.Fatal(err)
@@ -131,12 +166,40 @@ func TestResetPasswordRequiresActiveAdministratorRevokesSessionsAndAudits(t *tes
 	}
 }
 
+func TestResetPasswordReloadsAndLocksPersistedActor(t *testing.T) {
+	for name, persisted := range map[string]*users.User{
+		"operator": {ID: "actor", Username: "operator", Role: users.RoleOperator, Status: users.StatusActive},
+		"disabled": {ID: "actor", Username: "disabled", Role: users.RoleAdmin, Status: users.StatusDisabled},
+		"deleted":  {ID: "actor", Username: "deleted", Role: users.RoleAdmin, Status: users.StatusDeleted},
+		"missing":  nil,
+	} {
+		t.Run(name, func(t *testing.T) {
+			db := newMemoryDB()
+			if persisted != nil {
+				seedMemoryUser(db, *persisted)
+			}
+			db.users["target"] = memoryUser{id: "target", username: "target-user", normalized: "target-user", passwordHash: "old-hash", role: users.RoleOperator, status: users.StatusActive}
+			db.sessions["session"] = memorySession{userID: "target"}
+			forged := users.User{ID: "actor", Username: "forged", Role: users.RoleAdmin, Status: users.StatusActive}
+
+			err := NewService(db).ResetPassword(context.Background(), forged, "target", "replacement password value")
+			if !errors.Is(err, ErrForbidden) {
+				t.Fatalf("error = %v, want ErrForbidden", err)
+			}
+			if db.users["target"].passwordHash != "old-hash" || db.sessions["session"].revoked || len(db.audits) != 0 {
+				t.Fatalf("unauthorized reset mutated state: user=%#v session=%#v audits=%#v", db.users["target"], db.sessions["session"], db.audits)
+			}
+		})
+	}
+}
+
 func TestAuditFailureRollsBackIdentityMutationAndSessionRevocation(t *testing.T) {
 	db := newMemoryDB()
 	db.users["target"] = memoryUser{id: "target", username: "client-user", normalized: "client-user", passwordHash: "old-hash", role: users.RoleOperator, status: users.StatusActive}
 	db.sessions["session-one"] = memorySession{userID: "target"}
 	db.failAudit = true
 	admin := users.User{ID: "admin-actor", Role: users.RoleAdmin, Status: users.StatusActive}
+	seedMemoryUser(db, admin)
 
 	err := NewService(db).ResetPassword(context.Background(), admin, "target", "replacement password value")
 	if !errors.Is(err, ErrService) {
@@ -147,6 +210,99 @@ func TestAuditFailureRollsBackIdentityMutationAndSessionRevocation(t *testing.T)
 	}
 	if db.commitCalls != 0 || db.rollbackCalls != 1 || len(db.audits) != 0 {
 		t.Fatalf("commit=%d rollback=%d audits=%d", db.commitCalls, db.rollbackCalls, len(db.audits))
+	}
+}
+
+func TestCreateAuditFailuresRollBackInsertedUsers(t *testing.T) {
+	t.Run("initial administrator", func(t *testing.T) {
+		db := newMemoryDB()
+		db.failAudit = true
+
+		_, err := NewService(db).CreateInitialAdmin(context.Background(), "owner", testPassword)
+		if !errors.Is(err, ErrService) {
+			t.Fatalf("error = %v, want ErrService", err)
+		}
+		if len(db.users) != 0 || len(db.audits) != 0 || db.commitCalls != 0 || db.rollbackCalls != 1 {
+			t.Fatalf("users=%#v audits=%#v commit=%d rollback=%d", db.users, db.audits, db.commitCalls, db.rollbackCalls)
+		}
+	})
+
+	t.Run("operator", func(t *testing.T) {
+		db := newMemoryDB()
+		admin := users.User{ID: "admin-actor", Username: "owner", Role: users.RoleAdmin, Status: users.StatusActive}
+		seedMemoryUser(db, admin)
+		db.failAudit = true
+
+		_, err := NewService(db).CreateOperator(context.Background(), admin, "client-user", testPassword)
+		if !errors.Is(err, ErrService) {
+			t.Fatalf("error = %v, want ErrService", err)
+		}
+		if _, exists := findMemoryUserByUsername(db, "client-user"); exists || len(db.audits) != 0 || db.commitCalls != 0 || db.rollbackCalls != 1 {
+			t.Fatalf("users=%#v audits=%#v commit=%d rollback=%d", db.users, db.audits, db.commitCalls, db.rollbackCalls)
+		}
+	})
+}
+
+func TestConcurrentInitialAdminCreationUsesPostgreSQLSingletonLock(t *testing.T) {
+	pool := openIdentityTestPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	firstConnection, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer firstConnection.Release()
+	secondConnection, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer secondConnection.Release()
+
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	var ready sync.WaitGroup
+	ready.Add(2)
+	for index, service := range []*Service{NewService(firstConnection), NewService(secondConnection)} {
+		go func(index int, service *Service) {
+			ready.Done()
+			<-start
+			_, err := service.CreateInitialAdmin(ctx, fmt.Sprintf("owner-%d", index), testPassword)
+			results <- err
+		}(index, service)
+	}
+	ready.Wait()
+	close(start)
+
+	var succeeded, alreadyExists int
+	for range 2 {
+		select {
+		case err := <-results:
+			switch {
+			case err == nil:
+				succeeded++
+			case errors.Is(err, ErrAdminAlreadyExists):
+				alreadyExists++
+			default:
+				t.Fatalf("concurrent bootstrap error = %v", err)
+			}
+		case <-ctx.Done():
+			t.Fatalf("concurrent bootstrap timed out: %v", ctx.Err())
+		}
+	}
+	if succeeded != 1 || alreadyExists != 1 {
+		t.Fatalf("succeeded=%d alreadyExists=%d, want 1 and 1", succeeded, alreadyExists)
+	}
+
+	var administratorCount, auditCount int
+	if err := pool.QueryRow(ctx, `select count(*) from users where role = 'admin' and status <> 'deleted'`).Scan(&administratorCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `select count(*) from audit_logs where action = 'admin.created'`).Scan(&auditCount); err != nil {
+		t.Fatal(err)
+	}
+	if administratorCount != 1 || auditCount != 1 {
+		t.Fatalf("administrators=%d admin.created=%d, want 1 and 1", administratorCount, auditCount)
 	}
 }
 
@@ -300,6 +456,12 @@ func (*memoryTx) Query(context.Context, string, ...any) (pgx.Rows, error) {
 func (tx *memoryTx) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
 	tx.parent.traces = append(tx.parent.traces, sql)
 	switch {
+	case strings.Contains(sql, "from users") && strings.Contains(sql, "for update"):
+		user, ok := tx.users[args[0].(string)]
+		if !ok {
+			return memoryRow{err: pgx.ErrNoRows}
+		}
+		return memoryRow{values: []any{user.role, user.status}}
 	case strings.Contains(sql, "count(*)") && strings.Contains(sql, "role = 'admin'"):
 		count := 0
 		for _, user := range tx.users {
@@ -396,4 +558,101 @@ func firstTrace(traces []string) string {
 		return ""
 	}
 	return traces[0]
+}
+
+func seedMemoryUser(db *memoryDB, user users.User) {
+	db.users[user.ID] = memoryUser{
+		id:           user.ID,
+		username:     user.Username,
+		normalized:   strings.ToLower(user.Username),
+		passwordHash: "existing-password-hash",
+		role:         user.Role,
+		status:       user.Status,
+		createdAt:    time.Now().UTC(),
+		updatedAt:    time.Now().UTC(),
+	}
+}
+
+func findMemoryUserByUsername(db *memoryDB, username string) (memoryUser, bool) {
+	for _, user := range db.users {
+		if user.username == username {
+			return user, true
+		}
+	}
+	return memoryUser{}, false
+}
+
+var identitySchemaPattern = regexp.MustCompile(`^control_api_identity_test_[a-f0-9]{32}$`)
+
+func openIdentityTestPool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	databaseURL := os.Getenv("TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("TEST_DATABASE_URL is not set; skipping PostgreSQL concurrency integration test")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	adminPool, err := pgxpool.New(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("open test PostgreSQL pool: %v", err)
+	}
+	if err := adminPool.Ping(ctx); err != nil {
+		adminPool.Close()
+		t.Fatalf("ping test PostgreSQL pool: %v", err)
+	}
+	t.Cleanup(adminPool.Close)
+
+	schema := newIdentityTestSchemaName(t)
+	quotedSchema := quoteIdentityTestSchema(t, schema)
+	if _, err := adminPool.Exec(ctx, "create schema "+quotedSchema); err != nil {
+		t.Fatalf("create test schema: %v", err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		if _, err := adminPool.Exec(cleanupCtx, "drop schema "+quotedSchema+" cascade"); err != nil {
+			t.Errorf("drop test schema %q: %v", schema, err)
+		}
+	})
+
+	config, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		t.Fatalf("parse test PostgreSQL pool configuration: %v", err)
+	}
+	if config.ConnConfig.RuntimeParams == nil {
+		config.ConnConfig.RuntimeParams = make(map[string]string)
+	}
+	config.ConnConfig.RuntimeParams["search_path"] = schema
+	config.MaxConns = 4
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		t.Fatalf("open schema-scoped test PostgreSQL pool: %v", err)
+	}
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		t.Fatalf("ping schema-scoped test PostgreSQL pool: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	if err := database.Migrate(context.Background(), pool); err != nil {
+		t.Fatalf("migrate test schema: %v", err)
+	}
+	return pool
+}
+
+func newIdentityTestSchemaName(t *testing.T) string {
+	t.Helper()
+	random := make([]byte, 16)
+	if _, err := rand.Read(random); err != nil {
+		t.Fatalf("generate test schema name: %v", err)
+	}
+	return "control_api_identity_test_" + hex.EncodeToString(random)
+}
+
+func quoteIdentityTestSchema(t *testing.T, schema string) string {
+	t.Helper()
+	if !identitySchemaPattern.MatchString(schema) {
+		t.Fatalf("unsafe test schema name %q", schema)
+	}
+	return fmt.Sprintf(`"%s"`, schema)
 }
