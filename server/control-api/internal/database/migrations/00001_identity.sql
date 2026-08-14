@@ -29,7 +29,7 @@ create table user_sessions (
   user_id text not null references users(id) on delete restrict,
   token_digest bytea not null unique check (octet_length(token_digest) = 32),
   purpose text not null check (purpose in ('browser', 'desktop')),
-  device_id text references devices(id) on delete restrict,
+  device_id text references devices(id) on delete set null,
   created_at timestamptz not null,
   expires_at timestamptz not null,
   last_used_at timestamptz,

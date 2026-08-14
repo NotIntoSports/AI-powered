@@ -10,20 +10,77 @@ import (
 	"github.com/pressly/goose/v3"
 )
 
-func TestIdentityMigrationPreservesDeviceBindingAndDownOrder(t *testing.T) {
-	migration, err := migrations.ReadFile("migrations/00001_identity.sql")
+func TestIdentityMigrationPreservesHistoricalDeviceBindingAndDownOrder(t *testing.T) {
+	versionOne, err := migrations.ReadFile("migrations/00001_identity.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
-	sql := string(migration)
-	if !strings.Contains(sql, "device_id text references devices(id) on delete restrict") {
-		t.Fatal("device-bound sessions must prevent physical device deletion")
+	versionTwo, err := migrations.ReadFile("migrations/00002_preserve_session_device_binding.sql")
+	if err != nil {
+		t.Fatal(err)
 	}
-	downMarker := strings.Index(sql, "-- +goose Down")
-	dropSessions := strings.Index(sql, "drop table user_sessions;")
-	dropDevices := strings.Index(sql, "drop table devices;")
+	v1SQL := string(versionOne)
+	if !strings.Contains(v1SQL, "device_id text references devices(id) on delete set null") {
+		t.Fatal("historical migration version 1 must retain ON DELETE SET NULL")
+	}
+	v2SQL := string(versionTwo)
+	v2DownMarker := strings.Index(v2SQL, "-- +goose Down")
+	if v2DownMarker < 0 || !strings.Contains(v2SQL[:v2DownMarker], "on delete restrict") {
+		t.Fatal("migration version 2 Up must establish ON DELETE RESTRICT")
+	}
+	if !strings.Contains(v2SQL[v2DownMarker:], "on delete set null") {
+		t.Fatal("migration version 2 Down must restore ON DELETE SET NULL")
+	}
+	downMarker := strings.Index(v1SQL, "-- +goose Down")
+	dropSessions := strings.Index(v1SQL, "drop table user_sessions;")
+	dropDevices := strings.Index(v1SQL, "drop table devices;")
 	if downMarker < 0 || dropSessions < downMarker || dropDevices < downMarker || dropSessions > dropDevices {
 		t.Fatal("down migration must drop user_sessions before devices")
+	}
+}
+
+func TestDeviceForeignKeyMigrationIsPathIndependentAtVersionOne(t *testing.T) {
+	testPool := openTestPool(t)
+	ctx := context.Background()
+	if err := goose.SetDialect("postgres"); err != nil {
+		t.Fatal(err)
+	}
+	goose.SetBaseFS(migrations)
+	db := stdlib.OpenDBFromPool(testPool.Pool)
+	defer db.Close()
+
+	if err := goose.UpToContext(ctx, db, "migrations", 1); err != nil {
+		t.Fatalf("fresh up to version 1: %v", err)
+	}
+	assertDeviceForeignKeyDeleteAction(t, testPool, "SET NULL")
+
+	if err := goose.UpContext(ctx, db, "migrations"); err != nil {
+		t.Fatalf("full up: %v", err)
+	}
+	assertDeviceForeignKeyDeleteAction(t, testPool, "RESTRICT")
+
+	if err := goose.DownToContext(ctx, db, "migrations", 1); err != nil {
+		t.Fatalf("down to version 1: %v", err)
+	}
+	assertDeviceForeignKeyDeleteAction(t, testPool, "SET NULL")
+}
+
+func assertDeviceForeignKeyDeleteAction(t *testing.T, testPool *testPool, want string) {
+	t.Helper()
+	var definition string
+	if err := testPool.QueryRow(context.Background(), `
+		select pg_get_constraintdef(constraint_row.oid)
+		from pg_constraint as constraint_row
+		join pg_class as table_row on table_row.oid = constraint_row.conrelid
+		join pg_namespace as schema_row on schema_row.oid = table_row.relnamespace
+		where schema_row.nspname = current_schema()
+		  and table_row.relname = 'user_sessions'
+		  and constraint_row.conname = 'user_sessions_device_id_fkey'
+	`).Scan(&definition); err != nil {
+		t.Fatalf("load device foreign key: %v", err)
+	}
+	if !strings.Contains(definition, "ON DELETE "+want) {
+		t.Fatalf("device foreign key = %q, want ON DELETE %s", definition, want)
 	}
 }
 
