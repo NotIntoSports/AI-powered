@@ -56,18 +56,20 @@ func NewRouter(dependencies Dependencies) http.Handler {
 
 	if dependencies.UserAdmin != nil {
 		adminUsers := newAdminUsersHandler(dependencies.UserAdmin)
-		r.Route("/api/v1/admin/users", func(r chi.Router) {
+		r.Route("/api/v1/admin", func(r chi.Router) {
 			r.Use(noStore)
 			r.Use(authentication.loadSession)
 			r.Use(func(next http.Handler) http.Handler {
 				return RequireSession(sessions.PurposeBrowser, next)
 			})
 			r.Use(requireAdministrator)
-			r.Get("/", adminUsers.list)
-			r.Post("/", adminUsers.create)
-			r.Patch("/{id}", adminUsers.patch)
-			r.Post("/{id}/reset-password", adminUsers.resetPassword)
-			r.Post("/{id}/revoke-sessions", adminUsers.revokeSessions)
+			r.Route("/users", func(r chi.Router) {
+				r.Get("/", adminUsers.list)
+				r.Post("/", adminUsers.create)
+				r.Patch("/{id}", adminUsers.patch)
+				r.Post("/{id}/reset-password", adminUsers.resetPassword)
+				r.Post("/{id}/revoke-sessions", adminUsers.revokeSessions)
+			})
 		})
 	}
 

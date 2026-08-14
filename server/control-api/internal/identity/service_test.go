@@ -110,6 +110,9 @@ func TestCreateUserAllowsAdministratorRole(t *testing.T) {
 	if created.Role != users.RoleAdmin {
 		t.Fatalf("role = %q, want admin", created.Role)
 	}
+	if len(db.audits) != 1 || db.audits[0].action != audit.ActionUserCreated || db.audits[0].actorUserID != admin.ID {
+		t.Fatalf("audits = %#v", db.audits)
+	}
 }
 
 func TestSetUserStatusDisablesAndRevokesSessions(t *testing.T) {
@@ -165,6 +168,9 @@ func TestRevokeUserSessionsCanPreserveCurrent(t *testing.T) {
 	}
 	if !db.sessions["drop"].revoked {
 		t.Fatal("other session was not revoked")
+	}
+	if len(db.audits) != 1 || db.audits[0].action != audit.ActionUserSessionsRevoked || db.audits[0].actorUserID != admin.ID || db.audits[0].targetID != admin.ID {
+		t.Fatalf("audits = %#v", db.audits)
 	}
 }
 

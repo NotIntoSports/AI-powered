@@ -140,7 +140,10 @@ func TestAdminUsersListAndCreate(t *testing.T) {
 
 func TestAdminUsersCreateRejectsDuplicatesInvalidRoleAndEmptyPassword(t *testing.T) {
 	adminUsers := &fakeUserAdmin{
-		create: func(_ users.User, username, _ string, role users.Role) (users.User, error) {
+		create: func(_ users.User, username, plainPassword string, role users.Role) (users.User, error) {
+			if plainPassword == "" {
+				return users.User{}, password.ErrInvalidPassword
+			}
 			if username == "taken" {
 				return users.User{}, users.ErrUsernameTaken
 			}
@@ -157,6 +160,9 @@ func TestAdminUsersCreateRejectsDuplicatesInvalidRoleAndEmptyPassword(t *testing
 
 	invalidRole := performAdminCookieRequest(t, router, http.MethodPost, "/api/v1/admin/users", `{"username":"newbie","password":"correct horse battery staple","role":"superadmin"}`)
 	assertAPIError(t, invalidRole, http.StatusUnprocessableEntity, "INVALID_INPUT")
+
+	emptyPassword := performAdminCookieRequest(t, router, http.MethodPost, "/api/v1/admin/users", `{"username":"newbie","password":"","role":"operator"}`)
+	assertAPIError(t, emptyPassword, http.StatusUnprocessableEntity, "INVALID_INPUT")
 }
 
 func TestAdminUsersPatchDisableAndResetRevokeThroughService(t *testing.T) {
