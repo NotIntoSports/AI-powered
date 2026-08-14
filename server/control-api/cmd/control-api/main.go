@@ -29,10 +29,19 @@ func main() {
 	if err := database.Migrate(context.Background(), pool); err != nil {
 		log.Fatalf("migrate database: %v", err)
 	}
+	authentication, err := httpapi.NewDatabaseAuthentication(pool, cfg.SessionTTL)
+	if err != nil {
+		log.Fatal("initialize authentication service")
+	}
 
 	server := &http.Server{
-		Addr:    cfg.ListenAddress,
-		Handler: httpapi.NewRouter(httpapi.Dependencies{}),
+		Addr: cfg.ListenAddress,
+		Handler: httpapi.NewRouter(httpapi.Dependencies{
+			Authentication:    authentication,
+			SessionTTL:        cfg.SessionTTL,
+			CookieSecure:      cfg.CookieSecure,
+			TrustedProxyCIDRs: cfg.TrustedProxyCIDRs,
+		}),
 	}
 	serverErrors := make(chan error, 1)
 	go func() {

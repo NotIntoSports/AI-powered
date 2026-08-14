@@ -1,15 +1,13 @@
 openapi: 3.1.0
 info:
   title: AI Interviewer Control API
-  version: 0.1.0
-  description: Local control API skeleton. Protected endpoints are reserved for later tasks.
+  version: 0.2.0
 servers:
   - url: http://127.0.0.1:8080
 paths:
   /healthz:
     get:
       operationId: getHealth
-      summary: Get control API health
       responses:
         '200':
           description: Control API is available.
@@ -17,115 +15,192 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HealthResponse'
-  /api/v1/auth/{operation}:
-    parameters:
-      - name: operation
-        in: path
-        required: true
-        schema:
-          type: string
-          enum: [login, logout, session]
+  /api/v1/auth/login:
     post:
-      operationId: authOperationPlaceholder
-      summary: Reserved authentication operation
-      description: Placeholder only; protected handlers are not implemented in Task 1.
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
       responses:
-        '501':
-          description: Authentication handlers are not implemented.
+        '200':
+          description: Authenticated browser or desktop session.
           headers:
             Cache-Control:
-              description: Prevents authentication responses from being stored by caches.
+              schema:
+                type: string
+                const: no-store
+            Set-Cookie:
+              description: Browser purpose only; control_session with HttpOnly, Secure, SameSite=Strict, and Path=/.
+              schema: {type: string}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/InvalidCredentials'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /api/v1/auth/logout:
+    post:
+      operationId: logout
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        '204':
+          description: Current session revoked.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+  /api/v1/auth/me:
+    get:
+      operationId: getCurrentUser
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Current public user.
+          headers:
+            Cache-Control:
               schema:
                 type: string
                 const: no-store
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/APIError'
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
   /api/v1/admin/users:
     get:
       operationId: listAdminUsersPlaceholder
-      summary: Reserved administrator user listing
-      description: Placeholder only; protected handlers are not implemented in Task 1.
+      summary: Reserved for Task 7.
       responses:
         '501':
-          description: Administrator user handlers are not implemented.
+          description: Not implemented.
           headers:
             Cache-Control:
-              description: Prevents authenticated responses from being stored by caches.
-              schema:
-                type: string
-                const: no-store
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
+              schema: {type: string, const: no-store}
   /api/v1/admin/users/{userID}:
     parameters:
       - name: userID
         in: path
         required: true
-        schema:
-          type: string
+        schema: {type: string}
     get:
       operationId: getAdminUserPlaceholder
-      summary: Reserved administrator user lookup
-      description: Placeholder only; protected handlers are not implemented in Task 1.
+      summary: Reserved for Task 7.
       responses:
         '501':
-          description: Administrator user handlers are not implemented.
+          description: Not implemented.
           headers:
             Cache-Control:
-              description: Prevents authenticated responses from being stored by caches.
-              schema:
-                type: string
-                const: no-store
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
+              schema: {type: string, const: no-store}
 components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: control_session
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+  responses:
+    InvalidInput:
+      description: Invalid input.
+      headers:
+        Cache-Control:
+          schema: {type: string, const: no-store}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/APIError'}
+    InvalidCredentials:
+      description: Invalid username or password.
+      headers:
+        Cache-Control:
+          schema: {type: string, const: no-store}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/APIError'}
+    Unauthenticated:
+      description: Authentication is required.
+      headers:
+        Cache-Control:
+          schema: {type: string, const: no-store}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/APIError'}
+    RequestTooLarge:
+      description: Request body exceeds 32 KiB.
+      headers:
+        Cache-Control:
+          schema: {type: string, const: no-store}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/APIError'}
+    RateLimited:
+      description: Too many login attempts.
+      headers:
+        Cache-Control:
+          schema: {type: string, const: no-store}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/APIError'}
   schemas:
     APIError:
       type: object
       required: [code, message, requestId]
       properties:
-        code:
-          type: string
-        message:
-          type: string
+        code: {type: string}
+        message: {type: string}
         requestId:
           type: string
     User:
       type: object
-      required: [id, email, role, createdAt]
+      required: [id, username, role, status, createdAt, updatedAt]
       properties:
-        id:
-          type: string
-        email:
-          type: string
-          format: email
-        role:
-          type: string
-        createdAt:
-          type: string
-          format: date-time
-    SessionResponse:
+        id: {type: string}
+        username: {type: string}
+        role: {type: string, enum: [admin, operator]}
+        status: {type: string, enum: [active, disabled, deleted]}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+        lastLoginAt: {type: string, format: date-time}
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [username, password, purpose]
+      properties:
+        username: {type: string}
+        password: {type: string, format: password}
+        purpose: {type: string, enum: [browser, desktop]}
+        deviceId: {type: string}
+    LoginResponse:
       type: object
       required: [user, expiresAt]
       properties:
-        user:
-          $ref: '#/components/schemas/User'
-        expiresAt:
+        user: {$ref: '#/components/schemas/User'}
+        accessToken:
           type: string
-          format: date-time
+          description: Present only for desktop purpose.
+        expiresAt: {type: string, format: date-time}
     HealthResponse:
       type: object
       required: [service, status]
       properties:
-        service:
-          type: string
-          example: control-api
-        status:
-          type: string
-          example: ok
+        service: {type: string, example: control-api}
+        status: {type: string, example: ok}

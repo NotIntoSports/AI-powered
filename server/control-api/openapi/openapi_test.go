@@ -20,13 +20,10 @@ func TestAPIErrorRequiresRequestID(t *testing.T) {
 
 func TestAuthenticationResponsesDeclareNoStore(t *testing.T) {
 	spec := readSpec(t)
-	protectedPaths := []struct {
-		name string
-		yaml string
-	}{
-		{name: "authentication", yaml: sectionBetween(t, spec, "  /api/v1/auth/{operation}:", "  /api/v1/admin/users:")},
-		{name: "admin users", yaml: sectionBetween(t, spec, "  /api/v1/admin/users:", "  /api/v1/admin/users/{userID}:")},
-		{name: "admin user", yaml: sectionBetween(t, spec, "  /api/v1/admin/users/{userID}:", "components:")},
+	protectedPaths := []struct{ name, yaml string }{
+		{name: "login", yaml: sectionBetween(t, spec, "  /api/v1/auth/login:", "  /api/v1/auth/logout:")},
+		{name: "logout", yaml: sectionBetween(t, spec, "  /api/v1/auth/logout:", "  /api/v1/auth/me:")},
+		{name: "me", yaml: sectionBetween(t, spec, "  /api/v1/auth/me:", "  /api/v1/admin/users:")},
 	}
 
 	for _, path := range protectedPaths {
@@ -38,6 +35,19 @@ func TestAuthenticationResponsesDeclareNoStore(t *testing.T) {
 				t.Fatal("authenticated Cache-Control header must be no-store")
 			}
 		})
+	}
+}
+
+func TestAuthenticationSecuritySchemesAreExact(t *testing.T) {
+	spec := readSpec(t)
+	security := sectionBetween(t, spec, "  securitySchemes:", "  responses:")
+	for _, required := range []string{
+		"    cookieAuth:\n      type: apiKey\n      in: cookie\n      name: control_session",
+		"    bearerAuth:\n      type: http\n      scheme: bearer\n      bearerFormat: opaque",
+	} {
+		if !strings.Contains(security, required) {
+			t.Fatalf("missing exact security scheme:\n%s", required)
+		}
 	}
 }
 

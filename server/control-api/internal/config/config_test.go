@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"net/netip"
 	"testing"
 	"time"
 )
@@ -44,10 +45,11 @@ func TestLoadUsesDefaults(t *testing.T) {
 
 func TestLoadAcceptsConfiguredValuesAtMaximumTTL(t *testing.T) {
 	env := map[string]string{
-		"DATABASE_URL":   "postgres://test",
-		"LISTEN_ADDRESS": "127.0.0.1:9090",
-		"SESSION_TTL":    "720h",
-		"COOKIE_SECURE":  "false",
+		"DATABASE_URL":        "postgres://test",
+		"LISTEN_ADDRESS":      "127.0.0.1:9090",
+		"SESSION_TTL":         "720h",
+		"COOKIE_SECURE":       "false",
+		"TRUSTED_PROXY_CIDRS": "10.0.0.0/8, 2001:db8::/32",
 	}
 	cfg, err := Load(func(key string) string { return env[key] })
 	if err != nil {
@@ -61,5 +63,25 @@ func TestLoadAcceptsConfiguredValuesAtMaximumTTL(t *testing.T) {
 	}
 	if cfg.CookieSecure {
 		t.Error("CookieSecure = true")
+	}
+	wantPrefixes := []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8"), netip.MustParsePrefix("2001:db8::/32")}
+	if len(cfg.TrustedProxyCIDRs) != len(wantPrefixes) {
+		t.Fatalf("TrustedProxyCIDRs=%v", cfg.TrustedProxyCIDRs)
+	}
+	for index := range wantPrefixes {
+		if cfg.TrustedProxyCIDRs[index] != wantPrefixes[index] {
+			t.Fatalf("TrustedProxyCIDRs[%d]=%v", index, cfg.TrustedProxyCIDRs[index])
+		}
+	}
+}
+
+func TestLoadRejectsInvalidTrustedProxyCIDR(t *testing.T) {
+	env := map[string]string{
+		"DATABASE_URL":        "postgres://test",
+		"TRUSTED_PROXY_CIDRS": "10.0.0.1,not-a-prefix",
+	}
+	_, err := Load(func(key string) string { return env[key] })
+	if !errors.Is(err, ErrTrustedProxyCIDRs) {
+		t.Fatalf("error=%v", err)
 	}
 }

@@ -3,7 +3,9 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/netip"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -17,13 +19,15 @@ const (
 var (
 	ErrDatabaseURLRequired = errors.New("DATABASE_URL is required")
 	ErrSessionTTLRange     = errors.New("SESSION_TTL must be between 15m and 720h")
+	ErrTrustedProxyCIDRs   = errors.New("TRUSTED_PROXY_CIDRS must contain valid CIDR prefixes")
 )
 
 type Config struct {
-	ListenAddress string
-	DatabaseURL   string
-	SessionTTL    time.Duration
-	CookieSecure  bool
+	ListenAddress     string
+	DatabaseURL       string
+	SessionTTL        time.Duration
+	CookieSecure      bool
+	TrustedProxyCIDRs []netip.Prefix
 }
 
 func Load(getenv func(string) string) (Config, error) {
@@ -53,6 +57,15 @@ func Load(getenv func(string) string) (Config, error) {
 			return Config{}, fmt.Errorf("COOKIE_SECURE must be a boolean: %w", err)
 		}
 		cfg.CookieSecure = cookieSecure
+	}
+	if value := getenv("TRUSTED_PROXY_CIDRS"); value != "" {
+		for _, rawPrefix := range strings.Split(value, ",") {
+			prefix, err := netip.ParsePrefix(strings.TrimSpace(rawPrefix))
+			if err != nil {
+				return Config{}, fmt.Errorf("%w: %q", ErrTrustedProxyCIDRs, rawPrefix)
+			}
+			cfg.TrustedProxyCIDRs = append(cfg.TrustedProxyCIDRs, prefix.Masked())
+		}
 	}
 
 	return cfg, nil
