@@ -335,11 +335,12 @@
 # 2026-08-14：Go 控制 API 基础设施
 
 - 目标与边界：为现有 Windows Electron/Next.js 客户端旁新增本机 Go 控制 API 的最小骨架。本任务仅提供配置、健康检查和 OpenAPI 占位定义；不改动现有客户端行为，不接入认证、普通用户、AI、RTC、候选人数据或数据库。
-- Go 1.26.5：使用指定 Go 工具链和标准 `net/http` 服务器生命周期。它在 Windows 上原生可构建，浏览器和 OBS 无运行时耦合；不会引入云端服务、GPU/CPU 后台进程、内存常驻组件或按量 API 成本。
-- `github.com/go-chi/chi/v5 v5.3.1`：MIT。官方维护的轻量 `net/http` 路由器，直接提供请求 ID、恢复和超时中间件；选择它而非自行编写中间件链，保持后续 API 路由可组合且接入量小。该版本是当前已发布版本，运行时只增加小型 Go 路由代码，不访问外部服务或处理密钥。
-- `github.com/jackc/pgx/v5 v5.10.0`：MIT。官方维护的 PostgreSQL Go 驱动和工具集，为后续数据库接入预先锁定；本任务不建立连接、不读取或写入候选人数据。它与 Windows Go 构建兼容，不影响浏览器或 OBS；后续启用前须再次检查该固定版本的安全公告和资源使用。
-- `golang.org/x/crypto v0.54.0`：BSD-3-Clause。Go 官方维护的补充密码学包，为后续服务端凭据处理预先锁定；本任务不实现认证、不处理密码或令牌。其为纯 Go 依赖，无浏览器、OBS、GPU 或付费 API 影响；密钥只允许在未来由服务端环境变量读取，禁止写入源码、日志或版本库。
-- `github.com/pressly/goose/v3 v3.27.3`：MIT。活跃维护的 Go 数据库迁移工具，为后续显式迁移流程预先锁定；本任务不创建数据库、迁移或数据模型。它不会成为常驻服务组件，不影响 Windows、浏览器或 OBS，后续实际执行迁移前仍须评估连接凭据和运行成本。
+- Go 1.26.5：使用指定 Go 工具链和标准 `net/http` 服务器生命周期。[官方发布历史](https://go.dev/doc/devel/release)记录其发布于 2026-07-07，并包含 `crypto/tls` 与 `os` 安全修复。它在 Windows 上原生可构建，浏览器和 OBS 无运行时耦合；不会引入云端服务、GPU/CPU 后台进程、内存常驻组件或按量 API 成本。
+- `github.com/go-chi/chi/v5 v5.3.1`：MIT。[官方发布页](https://github.com/go-chi/chi/releases/tag/v5.3.1)记录 2026-07-06 发布并标记为 Latest；它直接提供请求 ID、恢复和超时中间件，选择它而非自行编写中间件链，保持后续 API 路由可组合且接入量小。运行时只增加小型 Go 路由代码，不访问外部服务或处理密钥。
+- `github.com/jackc/pgx/v5 v5.10.0`：MIT。[官方发布页](https://github.com/jackc/pgx/releases/tag/v5.10.0)记录 2026-06-03 标签活动；它是 PostgreSQL Go 驱动和工具集，为后续数据库接入预先锁定。本任务不建立连接、不读取或写入候选人数据；它与 Windows Go 构建兼容，不影响浏览器或 OBS。
+- `golang.org/x/crypto v0.54.0`：BSD-3-Clause。[Go 官方包元数据](https://pkg.go.dev/golang.org/x/crypto@v0.54.0)确认版本与许可证；该补充密码学包为后续服务端凭据处理预先锁定，本任务的依赖锚点只引用 `bcrypt`，不实现认证、不处理密码或令牌。其为纯 Go 依赖，无浏览器、OBS、GPU 或付费 API 影响；密钥只允许在未来由服务端环境变量读取，禁止写入源码、日志或版本库。
+- `github.com/pressly/goose/v3 v3.27.3`：MIT。[官方发布页](https://github.com/pressly/goose/releases/tag/v3.27.3)记录 2026-07-22 发布并标记为 Latest，检查时主分支在该发布后仍有提交；它为后续显式迁移流程预先锁定。本任务不创建数据库、迁移或数据模型，它不会成为常驻服务组件，不影响 Windows、浏览器或 OBS。
 - 锁定方式：`internal/dependencies/tools.go` 使用 `tools` 构建标签和空导入保存尚未启用的 pgx、x/crypto、goose 模块引用；`go mod tidy` 会保留精确版本，但正常构建和运行时不会链接它们。这是比在运行时代码中空导入更小、且不扩展本任务功能范围的常规 Go 依赖锚点。
-- 维护与安全：四个指定版本均来自其官方 Go 模块或官方仓库发布；在实现后以 `go mod tidy`、单元测试和 `go vet` 验证。当前健康接口不包含数据库 URL 或其他配置值，服务只监听配置的本机地址；后续新增依赖或启用预锁定项时，必须重新检查维护状态、已知漏洞、许可证和数据流向。
+- 部署体积证据：使用指定 Windows/amd64 Go 1.26.5 执行 `go build -o $env:TEMP\control-api-task-1.exe ./cmd/control-api`，未压缩可执行文件实测为 10,151,936 字节；这是本任务的运行时部署增量。pgx、x/crypto 和 goose 仅存在于带 `tools` 标签的依赖锚点，不进入该正常构建产物；其模块下载与源码缓存属于开发/CI 磁盘成本，不是服务器部署体积。
+- 维护与安全审查（检查日 2026-08-14）：Go 官方已于 2026-08-13 发布含 `net/http` 等安全修复的 1.26.6；本任务因明确版本约束仍锁定 1.26.5，但部署前必须升级并重跑测试。Go 漏洞库 [GO-2026-5774](https://pkg.go.dev/vuln/GO-2026-5774)、[GO-2026-5775](https://pkg.go.dev/vuln/GO-2026-5775) 仅影响 chi 5.3.0 之前版本，当前 5.3.1 不在范围；[GO-2026-4771](https://pkg.go.dev/vuln/GO-2026-4771) 仅影响 pgx 5.9.0 之前版本，当前 5.10.0 不在范围；[GO-2026-5033](https://pkg.go.dev/vuln/GO-2026-5033) 仅影响 x/crypto 0.52.0 之前版本，当前 0.54.0 不在范围。[GO-2026-5932](https://pkg.go.dev/vuln/GO-2026-5932) 指出所有版本的 `x/crypto/openpgp` 均不安全且不再维护，因此禁止后续引入该子包；当前只锚定 `bcrypt`。当前健康接口不包含数据库 URL 或其他配置值；后续启用预锁定依赖时必须重新检查官方发布、安全公告、数据流向和资源成本。
 - 未采用 Ory Kratos：其覆盖注册、账户恢复、MFA、OIDC 和多租户身份能力，均超出本阶段范围；引入它会增加独立服务、运行资源、配置和维护面，故本阶段明确不接入。

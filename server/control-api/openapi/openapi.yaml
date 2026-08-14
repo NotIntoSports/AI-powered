@@ -32,6 +32,12 @@ paths:
       responses:
         '501':
           description: Authentication handlers are not implemented.
+          headers:
+            Cache-Control:
+              description: Prevents authentication responses from being stored by caches.
+              schema:
+                type: string
+                const: no-store
           content:
             application/json:
               schema:
@@ -44,6 +50,12 @@ paths:
       responses:
         '501':
           description: Administrator user handlers are not implemented.
+          headers:
+            Cache-Control:
+              description: Prevents authenticated responses from being stored by caches.
+              schema:
+                type: string
+                const: no-store
           content:
             application/json:
               schema:
@@ -62,6 +74,12 @@ paths:
       responses:
         '501':
           description: Administrator user handlers are not implemented.
+          headers:
+            Cache-Control:
+              description: Prevents authenticated responses from being stored by caches.
+              schema:
+                type: string
+                const: no-store
           content:
             application/json:
               schema:
@@ -70,11 +88,13 @@ components:
   schemas:
     APIError:
       type: object
-      required: [code, message]
+      required: [code, message, requestId]
       properties:
         code:
           type: string
         message:
+          type: string
+        requestId:
           type: string
     User:
       type: object
