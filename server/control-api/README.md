@@ -72,16 +72,18 @@ after the database is healthy. The official `postgres:16` container already has
 `POSTGRES_USER` and `POSTGRES_DB`; do not put `DATABASE_URL` or the password on
 the command line.
 
-Backup:
+Backup (custom format; filename matches `*.dump` ignore rules):
 
 ```powershell
-docker compose exec postgres bash -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' | Set-Content -Encoding utf8NoBOM backup.sql
+docker compose exec -T postgres bash -c 'pg_dump -Fc -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f /tmp/backup.dump'
+docker compose cp postgres:/tmp/backup.dump ./backup.dump
 ```
 
 Restore into the named volume (this replaces objects in the target database):
 
 ```powershell
-Get-Content -Raw backup.sql | docker compose exec -T postgres bash -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+docker compose cp ./backup.dump postgres:/tmp/backup.dump
+docker compose exec -T postgres bash -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists /tmp/backup.dump'
 ```
 
 Host-side tools can also use `127.0.0.1:54329`. Do not paste `DATABASE_URL` into

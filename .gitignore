@@ -5,6 +5,7 @@ node_modules/
 !.env.example
 *.dump
 *.pgdump
+backup.dump
 *.pem
 *.key
 *.p12
