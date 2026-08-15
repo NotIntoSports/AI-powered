@@ -249,6 +249,13 @@
 - 兼容性：PostCSS 的依赖范围允许该补丁版本；通过完整构建、现有测试和 `npm audit --audit-level=high` 验证。
 - 未选择：直接升级到 nanoid 6，因为属于不必要的主版本升级，可能增加 Next.js/PostCSS 兼容风险。
 
+# 2026-08-15：将 nanoid override 从 3.3.17 升到 3.3.18
+
+- 调查：GitHub Advisory GHSA-2v37-7h3g-55p8 在 2026-08-13 把受影响范围改成 `<3.3.18`。项目仍 pin 在 `3.3.17`，CI 的 `npm audit --audit-level=high` 因此失败。官方 3.x 补丁是 [nanoid 3.3.18](https://github.com/ai/nanoid/releases/tag/3.3.18)，MIT，2026-08-07 发布。
+- 选择：继续用现有 npm `overrides`，只把 nanoid 从 `3.3.17` 改到 `3.3.18`。不新增依赖、不改业务代码、不升级 PostCSS 或 Next.js。
+- 兼容性：仍在 PostCSS 8.5.23 声明的 `nanoid@^3.3.16` 范围内；业务代码不直接调用 nanoid，该包只用于 CSS/source map 内部 ID。
+- 未选择：去掉 audit 门禁，或跨主版本升到 nanoid 5/6。前者会让高危漏洞漏过；后者对 PostCSS 的 CJS `require('nanoid/non-secure')` 不兼容。
+
 # 2026-08-10：Windows 桌面壳与安装打包
 
 - Electron：固定 `43.3.0`，MIT。官方文档推荐配合独立打包工具；它保留现有 Next.js 服务端 API，避免将项目重写为纯静态前端。代价是安装体积与内存高于 Tauri，但当前复用成本最低。
@@ -395,3 +402,11 @@
 - 未采用：在现有面试 Next.js 应用中加 `/admin` 路由（会把管理后台和 Windows 专属能力缠在一起）；未采用独立身份 SaaS。
 - 安全：密码与会话令牌不写入 localStorage/sessionStorage/日志；无注册入口；operator 登录后不能使用管理 API。
 - 限制：本机无 Docker 时不验证管理端容器；生产仍须 TLS 与 `COOKIE_SECURE=true`。
+
+# 2026-08-15：管理端个人服务器 HTTP:80 部署
+
+- 目标：在个人 Ubuntu 服务器上部署管理后台，浏览器从 80 端口访问；不改管理端业务代码。
+- 采用：复用已有 `server/control-api` 与 `server/management-web` 官方镜像构建，以及官方 [`postgres:16`](https://hub.docker.com/_/postgres)（PostgreSQL License）和 [`nginx:1.27-alpine`](https://hub.docker.com/_/nginx)（2-clause BSD）。Nginx 只反向代理管理前端，PostgreSQL 与 Go API 不发布到公网端口。
+- 原因：设计文档已选择 Caddy 或 Nginx 做反向代理；用户明确要求前端走 80。现有开发 Compose 只绑定 `127.0.0.1:3001`，不能直接作为公网入口。
+- 未采用：Caddy 自动 HTTPS（会把 80 跳到 443，与“前端用 80 口”冲突）；未把宿主机已有公网 `5432` PostgreSQL 当作应用库（该实例对 `0.0.0.0` 开放，且与容器网络隔离目标不一致）。
+- 限制：当前按用户要求使用明文 HTTP，因此 `COOKIE_SECURE=false`。没有 TLS 时会话 Cookie 可被网络侧截获；上线公网前应改为 443 并恢复 `COOKIE_SECURE=true`。
