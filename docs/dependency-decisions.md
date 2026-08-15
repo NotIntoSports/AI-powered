@@ -386,3 +386,12 @@
 - Compose：官方 Compose 规范的 `depends_on.condition: service_healthy`、`127.0.0.1` 端口绑定、`profiles` 一次性服务和项目目录 `.env` 变量替换。`COOKIE_SECURE=false` 仅用于本地 HTTP；生产文档要求 TLS 与 `COOKIE_SECURE=true`。`.env.example` 只有占位符，真实 `.env` 不入库。
 - 未采用：完整 Kubernetes、Istio、Ory Kratos、第二套反向代理镜像或额外健康检查二进制。当前是本机开发栈加一份可部署静态镜像；更重的编排会增加运行资源、密钥面和维护成本。
 - 限制：本机若未安装 Docker，则无法执行 `docker compose config/build/up` 和容器冒烟；Windows 无 C 编译器时 `go test -race` 不可用。发布前仍须在有 Docker 与 GCC 的环境补跑这些命令。
+
+# 2026-08-15：管理后台登录与用户管理网页
+
+- 目标：给已完成的 Go control-api 提供浏览器管理控制台，覆盖登录/退出和用户创建、禁用、重置密码、撤销会话；不包含公开注册、AI/RTC 配置或候选人数据。
+- 采用：与现有面试客户端相同大版本的 [Next.js](https://github.com/vercel/next.js) `^15.4.0`（MIT）和 React `^19.1.0`（MIT），独立应用放在 `server/management-web`，避免把 OBS/舞台/面试控制台与管理后台混在同一个 Next 应用里。
+- 接入：官方 App Router 与 `next.config` `rewrites`，把浏览器 `/api/v1` 代理到 `CONTROL_API_ORIGIN`，从而保持 `control_session` 的 first-party Cookie，不新增 CORS 库、状态管理库或 UI 套件。
+- 未采用：在现有面试 Next.js 应用中加 `/admin` 路由（会把管理后台和 Windows 专属能力缠在一起）；未采用独立身份 SaaS。
+- 安全：密码与会话令牌不写入 localStorage/sessionStorage/日志；无注册入口；operator 登录后不能使用管理 API。
+- 限制：本机无 Docker 时不验证管理端容器；生产仍须 TLS 与 `COOKIE_SECURE=true`。

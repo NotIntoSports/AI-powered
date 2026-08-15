@@ -50,5 +50,19 @@ services:
     tty: true
     restart: "no"
 
+  management-web:
+    image: management-web:local
+    build:
+      context: ../management-web
+    ports:
+      - "127.0.0.1:3001:3001"
+    environment:
+      CONTROL_API_ORIGIN: http://control-api:8080
+      HOSTNAME: 0.0.0.0
+      PORT: "3001"
+    depends_on:
+      - control-api
+    restart: unless-stopped
+
 volumes:
   control_api_pgdata:

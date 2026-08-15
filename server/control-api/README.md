@@ -35,6 +35,11 @@ profile and is not started by `docker compose up -d`.
 Health check: `GET http://127.0.0.1:8080/healthz` returns
 `{"service":"control-api","status":"ok"}`.
 
+The administrator browser console is `server/management-web` on
+`http://127.0.0.1:3001`. It proxies `/api/v1` to this API and has no public
+registration. After the API is up: `docker compose up -d management-web` or
+`npm run dev` in `server/management-web`.
+
 Browser login uses `POST /api/v1/auth/login` with JSON
 `{"username":"...","password":"...","purpose":"browser"}` and the
 `control_session` cookie. Desktop clients use `purpose: "desktop"` and
