@@ -111,6 +111,16 @@ export default function UsersPage() {
     setNotice(preserveCurrent ? "已撤销其他会话，当前登录保留" : `已撤销 ${user.username} 的全部会话`);
   }
 
+  function canDisable(user: PublicUser) {
+    if (me?.id === user.id) return false;
+    if (user.status !== "active") return false;
+    if (user.role === "admin") {
+      const activeAdmins = users.filter((item) => item.role === "admin" && item.status === "active");
+      if (activeAdmins.length <= 1) return false;
+    }
+    return true;
+  }
+
   return (
     <ConsoleShell me={me}>
       {error ? <p className="error">{error}</p> : null}
@@ -136,15 +146,15 @@ export default function UsersPage() {
           <label>
             角色
             <select value={role} onChange={(event) => setRole(event.target.value as "operator" | "admin")}>
-              <option value="operator">operator</option>
-              <option value="admin">admin</option>
+              <option value="operator">客户端</option>
+              <option value="admin">管理员</option>
             </select>
           </label>
         </div>
         <button type="submit" disabled={busy}>
           创建
         </button>
-        <p className="muted">不会公开注册。operator 供 Windows 客户端使用，不能进入本后台。</p>
+        <p className="muted">不会公开注册。客户端账号给 Windows 客户端登录，不能进入本后台。管理员账号只用于网页后台。</p>
       </form>
 
       <section className="card">
@@ -154,7 +164,7 @@ export default function UsersPage() {
             <tr>
               <th>用户名</th>
               <th>角色</th>
-              <th>账号</th>
+              <th>状态</th>
               <th>在线</th>
               <th>最后登录</th>
               <th>操作</th>
@@ -164,15 +174,19 @@ export default function UsersPage() {
             {users.map((user) => (
               <tr key={user.id}>
                 <td>{user.username}</td>
-                <td>{user.role}</td>
-                <td>{user.status}</td>
+                <td>{user.role === "admin" ? "管理员" : "客户端"}</td>
+                <td>{user.status === "active" ? "启用" : user.status === "disabled" ? "停用" : user.status}</td>
                 <td><OnlineMark online={Boolean(user.online)} /></td>
                 <td>{formatTime(user.lastLoginAt)}</td>
                 <td className="row">
                   {user.status === "active" ? (
-                    <button className="danger" type="button" onClick={() => void setStatus(user, "disabled")}>
-                      禁用
-                    </button>
+                    canDisable(user) ? (
+                      <button className="danger" type="button" onClick={() => void setStatus(user, "disabled")}>
+                        禁用
+                      </button>
+                    ) : (
+                      <span className="muted">{me?.id === user.id ? "当前登录" : "最后一位管理员"}</span>
+                    )
                   ) : (
                     <button className="secondary" type="button" onClick={() => void setStatus(user, "active")}>
                       启用

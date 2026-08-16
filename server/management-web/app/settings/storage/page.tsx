@@ -10,6 +10,7 @@ import {
   type PublicStorageSettings,
   type StorageTestResult
 } from "../../../lib/control-api";
+import { ConfigStatus, SecretField } from "../config-status";
 
 export default function StorageSettingsPage() {
   const { me, error, setError } = useAdminSession();
@@ -70,7 +71,7 @@ export default function StorageSettingsPage() {
       const data = result.body as PublicStorageSettings;
       setConfig(data);
       setSecretKey("");
-      setNotice(data.available ? "对象存储已写入数据库并可用。" : "已保存，但还需要 Bucket、地域和密钥后才能上传简历。");
+      setNotice(data.available ? "对象存储已配置并可用。" : "已保存，但还需要 Bucket、地域和密钥后才能上传简历。");
     } finally {
       setBusy(false);
     }
@@ -106,24 +107,27 @@ export default function StorageSettingsPage() {
       {error ? <p className="error">{error}</p> : null}
       {notice ? <p className="ok">{notice}</p> : null}
       <form className="card" onSubmit={save} autoComplete="off">
-        <h2>腾讯云 COS</h2>
+        <div className="card-head">
+          <h2>腾讯云 COS</h2>
+          <ConfigStatus
+            ready={Boolean(config?.available)}
+            readyText="已配置并可用"
+            waitText="还差 Bucket 或密钥"
+          />
+        </div>
         <p className="muted">
-          SecretKey 使用服务器主密钥加密后写入 PostgreSQL，读取接口不会返回密钥。客户端只通过管理 API 上传，不会拿到云密钥。
-          {config?.secretKeyConfigured ? " 当前已保存密钥。" : " 请填写 SecretId 和 SecretKey。"}
+          这里只给管理员保存腾讯云密钥。Windows 客户端上传简历时走服务端接口，不会拿到 SecretKey。
         </p>
         <label>
           SecretId
           <input value={secretId} onChange={(event) => setSecretId(event.target.value)} autoComplete="off" />
         </label>
-        <label>
-          SecretKey{config?.secretKeyConfigured ? "（留空则保留已保存密钥）" : ""}
-          <input
-            type="password"
-            value={secretKey}
-            onChange={(event) => setSecretKey(event.target.value)}
-            autoComplete="new-password"
-          />
-        </label>
+        <SecretField
+          label="SecretKey"
+          configured={Boolean(config?.secretKeyConfigured)}
+          value={secretKey}
+          onChange={setSecretKey}
+        />
         <div className="row">
           <label>
             地域
@@ -131,7 +135,7 @@ export default function StorageSettingsPage() {
           </label>
           <label>
             Bucket
-            <input value={bucket} onChange={(event) => setBucket(event.target.value)} placeholder="例如 resume-1250000000" />
+            <input value={bucket} onChange={(event) => setBucket(event.target.value)} placeholder={config?.available ? "" : "保存后这里会显示桶名"} />
           </label>
           <label>
             启用

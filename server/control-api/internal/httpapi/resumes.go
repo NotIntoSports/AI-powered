@@ -13,24 +13,43 @@ import (
 )
 
 type ResumeAdmin interface {
-	List(ctx context.Context) ([]resumes.Record, error)
+	List(ctx context.Context, uploadedByUserID string) ([]resumes.Record, error)
 	Upload(ctx context.Context, actor users.User, requestID string, input resumes.UploadInput) (resumes.Record, error)
-	DownloadURL(ctx context.Context, id string) (string, resumes.Record, error)
+	DownloadURL(ctx context.Context, actor users.User, id string) (string, resumes.Record, error)
+	Delete(ctx context.Context, actor users.User, requestID, id string) error
 }
 
 type resumeHandler struct {
-	admin ResumeAdmin
+	admin     ResumeAdmin
+	knowledge KnowledgeAdmin
 }
 
-func newResumeHandler(admin ResumeAdmin) *resumeHandler {
-	return &resumeHandler{admin: admin}
+func newResumeHandler(admin ResumeAdmin, knowledge KnowledgeAdmin) *resumeHandler {
+	return &resumeHandler{admin: admin, knowledge: knowledge}
 }
 
 func (handler *resumeHandler) list(w http.ResponseWriter, request *http.Request) {
 	if _, ok := requestActor(w, request); !ok {
 		return
 	}
-	records, err := handler.admin.List(request.Context())
+	records, err := handler.admin.List(request.Context(), "")
+	if err != nil {
+		writeAPIError(w, request, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to list resumes")
+		return
+	}
+	writeJSON(w, http.StatusOK, records)
+}
+
+func (handler *resumeHandler) listMine(w http.ResponseWriter, request *http.Request) {
+	actor, ok := requestActor(w, request)
+	if !ok {
+		return
+	}
+	if strings.TrimSpace(actor.ID) == "" {
+		writeAPIError(w, request, http.StatusUnauthorized, "UNAUTHENTICATED", "authentication required")
+		return
+	}
+	records, err := handler.admin.List(request.Context(), actor.ID)
 	if err != nil {
 		writeAPIError(w, request, http.StatusInternalServerError, "INTERNAL_ERROR", "unable to list resumes")
 		return
@@ -68,19 +87,39 @@ func (handler *resumeHandler) upload(w http.ResponseWriter, request *http.Reques
 	if !writeResumeError(w, request, err) {
 		return
 	}
+	if handler.knowledge != nil {
+		handler.knowledge.EnqueueIndex(record.ID, actor.ID, middleware.GetReqID(request.Context()))
+	}
 	writeJSON(w, http.StatusCreated, record)
 }
 
 func (handler *resumeHandler) download(w http.ResponseWriter, request *http.Request) {
-	if _, ok := requestActor(w, request); !ok {
+	actor, ok := requestActor(w, request)
+	if !ok {
 		return
 	}
 	id := strings.TrimSpace(chi.URLParam(request, "id"))
-	url, _, err := handler.admin.DownloadURL(request.Context(), id)
+	url, _, err := handler.admin.DownloadURL(request.Context(), actor, id)
 	if !writeResumeError(w, request, err) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"url": url})
+}
+
+func (handler *resumeHandler) delete(w http.ResponseWriter, request *http.Request) {
+	actor, ok := requestActor(w, request)
+	if !ok {
+		return
+	}
+	id := strings.TrimSpace(chi.URLParam(request, "id"))
+	if handler.knowledge != nil {
+		_ = handler.knowledge.DeleteDocument(request.Context(), id, "")
+	}
+	err := handler.admin.Delete(request.Context(), actor, middleware.GetReqID(request.Context()), id)
+	if !writeResumeError(w, request, err) {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func writeResumeError(w http.ResponseWriter, request *http.Request, err error) bool {

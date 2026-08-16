@@ -195,6 +195,8 @@ func writeAdminError(w http.ResponseWriter, request *http.Request, err error) bo
 		writeAPIError(w, request, http.StatusConflict, "USERNAME_TAKEN", "username is already taken")
 	case errors.Is(err, users.ErrLastAdmin):
 		writeAPIError(w, request, http.StatusConflict, "LAST_ADMIN_REQUIRED", "the last active administrator cannot be disabled")
+	case errors.Is(err, users.ErrCannotDisableSelf):
+		writeAPIError(w, request, http.StatusConflict, "CANNOT_DISABLE_SELF", "cannot disable the current administrator")
 	case errors.Is(err, users.ErrUserNotFound):
 		writeAPIError(w, request, http.StatusNotFound, "USER_NOT_FOUND", "user was not found")
 	case errors.Is(err, users.ErrInvalidUsername),

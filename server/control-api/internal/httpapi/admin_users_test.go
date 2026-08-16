@@ -203,6 +203,12 @@ func TestAdminUsersPatchDisableAndResetRevokeThroughService(t *testing.T) {
 	lastAdminResponse := performAdminCookieRequest(t, testAdminRouter(adminBrowserAuth(), lastAdmin), http.MethodPatch, "/api/v1/admin/users/"+testUser.ID, `{"status":"disabled"}`)
 	assertAPIError(t, lastAdminResponse, http.StatusConflict, "LAST_ADMIN_REQUIRED")
 
+	selfDisable := &fakeUserAdmin{
+		setStatus: func(users.User, string, users.Status) error { return users.ErrCannotDisableSelf },
+	}
+	selfDisableResponse := performAdminCookieRequest(t, testAdminRouter(adminBrowserAuth(), selfDisable), http.MethodPatch, "/api/v1/admin/users/"+testUser.ID, `{"status":"disabled"}`)
+	assertAPIError(t, selfDisableResponse, http.StatusConflict, "CANNOT_DISABLE_SELF")
+
 	missing := &fakeUserAdmin{
 		setStatus: func(users.User, string, users.Status) error { return users.ErrUserNotFound },
 	}

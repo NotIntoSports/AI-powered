@@ -5,7 +5,7 @@ name: control-api
 
 services:
   postgres:
-    image: postgres:16
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -32,9 +32,21 @@ services:
       LISTEN_ADDRESS: 0.0.0.0:8080
       COOKIE_SECURE: "false"
       SETTINGS_MASTER_KEY: ${SETTINGS_MASTER_KEY}
+      KNOWLEDGE_PROVIDER: ${KNOWLEDGE_PROVIDER:-local-pgvector}
+      EMBEDDING_BASE_URL: http://embedding:80
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-m3}
     depends_on:
       postgres:
         condition: service_healthy
+      embedding:
+        condition: service_started
+    restart: unless-stopped
+
+  embedding:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9
+    command: ["--model-id", "BAAI/bge-m3"]
+    volumes:
+      - embedding_model_cache:/data
     restart: unless-stopped
 
   control-api-admin:
@@ -94,3 +106,4 @@ services:
 
 volumes:
   control_api_pgdata:
+  embedding_model_cache:

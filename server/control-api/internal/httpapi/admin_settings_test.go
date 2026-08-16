@@ -12,15 +12,24 @@ import (
 )
 
 type fakeSettingsAdmin struct {
-	ai      settings.PublicAI
-	rtc     settings.PublicRTC
-	storage settings.PublicStorage
-	putAI   settings.AIInput
-	putRTC  settings.RTCInput
+	ai        settings.PublicAI
+	clientAI  settings.ClientAI
+	clientASR settings.ClientASR
+	rtc       settings.PublicRTC
+	storage   settings.PublicStorage
+	putAI     settings.AIInput
+	putRTC    settings.RTCInput
 }
 
 func (fake *fakeSettingsAdmin) GetAI(context.Context) (settings.PublicAI, error) {
 	return fake.ai, nil
+}
+
+func (fake *fakeSettingsAdmin) GetClientAI(context.Context) (settings.ClientAI, error) {
+	if fake.clientAI.APIKey != "" || fake.clientAI.Configured {
+		return fake.clientAI, nil
+	}
+	return settings.ClientAI{PublicAI: fake.ai}, nil
 }
 
 func (fake *fakeSettingsAdmin) PutAI(_ context.Context, _ users.User, _ string, input settings.AIInput) (settings.PublicAI, error) {
@@ -39,6 +48,13 @@ func (fake *fakeSettingsAdmin) PutAI(_ context.Context, _ users.User, _ string, 
 
 func (fake *fakeSettingsAdmin) TestAI(context.Context, users.User, string, *settings.AIInput) (settings.AITestResult, error) {
 	return settings.AITestResult{Reachable: true, ModelFound: true, Message: "连接正常，已找到模型 gpt-4o-mini"}, nil
+}
+
+func (fake *fakeSettingsAdmin) GetClientASR(context.Context) (settings.ClientASR, error) {
+	if fake.clientASR.APIKey != "" || fake.clientASR.Configured {
+		return fake.clientASR, nil
+	}
+	return settings.ClientASR{}, nil
 }
 
 func (fake *fakeSettingsAdmin) GetRTC(context.Context) (settings.PublicRTC, error) {
@@ -261,5 +277,107 @@ func TestClientRTCTokenIssuesLiveKitConnection(t *testing.T) {
 	decodeJSON(t, response, &connection)
 	if connection.Provider != "livekit" || connection.URL != "wss://livekit.example.com" || connection.AppID != "" {
 		t.Fatalf("connection=%#v", connection)
+	}
+}
+
+func TestClientAISettingsReturnsRuntimeKeyForDesktop(t *testing.T) {
+	router := NewRouter(Dependencies{
+		Authentication: &fakeAuthentication{
+			authenticate: func(rawToken, purpose string) (AuthenticatedSession, error) {
+				if rawToken != "desktop-token" || purpose != sessions.PurposeDesktop {
+					return AuthenticatedSession{}, ErrUnauthenticated
+				}
+				return AuthenticatedSession{
+					User:     users.User{ID: "op", Username: "admin", Role: users.RoleOperator, Status: users.StatusActive},
+					Session:  sessions.Session{ID: "session-desktop", UserID: "op", Purpose: sessions.PurposeDesktop},
+					RawToken: rawToken,
+				}, nil
+			},
+		},
+		SettingsAdmin: &fakeSettingsAdmin{clientAI: settings.ClientAI{
+			PublicAI: settings.PublicAI{
+				Configured: true,
+				Available:  true,
+				BaseURL:    "https://api.openai.com/v1",
+				Model:      "gpt-4o-mini",
+			},
+			APIKey: "sk-client-runtime",
+		}},
+	})
+	response := performRequest(t, router, http.MethodGet, "/api/v1/client/settings/ai", "", map[string]string{
+		"Authorization": "Bearer desktop-token",
+	})
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var body settings.ClientAI
+	decodeJSON(t, response, &body)
+	if body.APIKey != "sk-client-runtime" || body.Model != "gpt-4o-mini" || !body.Available {
+		t.Fatalf("client AI=%#v", body)
+	}
+}
+
+func TestClientAISettingsRejectsBrowserSession(t *testing.T) {
+	router := NewRouter(Dependencies{
+		Authentication: adminBrowserAuth(),
+		SettingsAdmin: &fakeSettingsAdmin{clientAI: settings.ClientAI{
+			APIKey: "sk-should-not-leak",
+		}},
+	})
+	response := performAdminCookieRequest(t, router, http.MethodGet, "/api/v1/client/settings/ai", "")
+	assertAPIError(t, response, http.StatusForbidden, "FORBIDDEN")
+	if strings.Contains(response.Body.String(), "sk-should-not-leak") {
+		t.Fatal("browser session received client AI key")
+	}
+}
+
+func TestClientASRSettingsReturnsRuntimeKeyForDesktop(t *testing.T) {
+	router := NewRouter(Dependencies{
+		Authentication: &fakeAuthentication{
+			authenticate: func(rawToken, purpose string) (AuthenticatedSession, error) {
+				if rawToken != "desktop-token" || purpose != sessions.PurposeDesktop {
+					return AuthenticatedSession{}, ErrUnauthenticated
+				}
+				return AuthenticatedSession{
+					User:     users.User{ID: "op", Username: "admin", Role: users.RoleOperator, Status: users.StatusActive},
+					Session:  sessions.Session{ID: "session-desktop", UserID: "op", Purpose: sessions.PurposeDesktop},
+					RawToken: rawToken,
+				}, nil
+			},
+		},
+		SettingsAdmin: &fakeSettingsAdmin{clientASR: settings.ClientASR{
+			Configured: true,
+			Available:  true,
+			BaseURL:    "https://speech.example.com/v1",
+			Model:      "whisper-1",
+			Language:   "zh",
+			APIKey:     "sk-asr-runtime",
+			Source:     "asr",
+		}},
+	})
+	response := performRequest(t, router, http.MethodGet, "/api/v1/client/settings/asr", "", map[string]string{
+		"Authorization": "Bearer desktop-token",
+	})
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var body settings.ClientASR
+	decodeJSON(t, response, &body)
+	if body.APIKey != "sk-asr-runtime" || body.BaseURL != "https://speech.example.com/v1" || !body.Available {
+		t.Fatalf("client ASR=%#v", body)
+	}
+}
+
+func TestClientASRSettingsRejectsBrowserSession(t *testing.T) {
+	router := NewRouter(Dependencies{
+		Authentication: adminBrowserAuth(),
+		SettingsAdmin: &fakeSettingsAdmin{clientASR: settings.ClientASR{
+			APIKey: "sk-asr-should-not-leak",
+		}},
+	})
+	response := performAdminCookieRequest(t, router, http.MethodGet, "/api/v1/client/settings/asr", "")
+	assertAPIError(t, response, http.StatusForbidden, "FORBIDDEN")
+	if strings.Contains(response.Body.String(), "sk-asr-should-not-leak") {
+		t.Fatal("browser session received client ASR key")
 	}
 }

@@ -18,6 +18,7 @@ type Dependencies struct {
 	SettingsAdmin     SettingsAdmin
 	PresenceAdmin     PresenceAdmin
 	ResumeAdmin       ResumeAdmin
+	KnowledgeAdmin    KnowledgeAdmin
 	LoginLimiter      *ratelimit.LoginLimiter
 	SessionTTL        time.Duration
 	CookieSecure      bool
@@ -93,10 +94,15 @@ func NewRouter(dependencies Dependencies) http.Handler {
 				})
 			}
 			if dependencies.ResumeAdmin != nil {
-				resumeAdmin := newResumeHandler(dependencies.ResumeAdmin)
+				resumeAdmin := newResumeHandler(dependencies.ResumeAdmin, dependencies.KnowledgeAdmin)
 				r.Get("/resumes", resumeAdmin.list)
 				r.Post("/resumes", resumeAdmin.upload)
 				r.Get("/resumes/{id}/download", resumeAdmin.download)
+				r.Delete("/resumes/{id}", resumeAdmin.delete)
+				if dependencies.KnowledgeAdmin != nil {
+					knowledgeAdmin := newKnowledgeHandler(dependencies.KnowledgeAdmin)
+					r.Post("/resumes/{id}/reindex", knowledgeAdmin.reindex)
+				}
 			}
 		})
 	}
@@ -107,11 +113,21 @@ func NewRouter(dependencies Dependencies) http.Handler {
 			r.Use(authentication.loadSession)
 			r.Use(requireAnySession)
 			if dependencies.ResumeAdmin != nil {
-				clientResumes := newResumeHandler(dependencies.ResumeAdmin)
+				clientResumes := newResumeHandler(dependencies.ResumeAdmin, dependencies.KnowledgeAdmin)
+				r.Get("/resumes", clientResumes.listMine)
 				r.Post("/resumes", clientResumes.upload)
+				r.Get("/resumes/{id}/download", clientResumes.download)
+				r.Delete("/resumes/{id}", clientResumes.delete)
+				if dependencies.KnowledgeAdmin != nil {
+					clientKnowledge := newKnowledgeHandler(dependencies.KnowledgeAdmin)
+					r.Get("/resumes/{id}/status", clientKnowledge.status)
+					r.Post("/knowledge/search", clientKnowledge.search)
+				}
 			}
 			if dependencies.SettingsAdmin != nil {
 				clientSettings := newAdminSettingsHandler(dependencies.SettingsAdmin)
+				r.Get("/settings/ai", clientSettings.getClientAI)
+				r.Get("/settings/asr", clientSettings.getClientASR)
 				r.Post("/rtc/token", clientSettings.issueRTC)
 			}
 		})

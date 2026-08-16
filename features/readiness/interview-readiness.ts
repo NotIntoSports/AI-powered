@@ -1,4 +1,7 @@
+import type { OutputMode } from "./output-mode";
+
 export type InterviewReadinessInput = {
+  outputMode?: OutputMode;
   modelConfigured: boolean;
   stageConnected: boolean;
   mediaReady: boolean;
@@ -11,13 +14,13 @@ export type InterviewReadinessInput = {
 };
 
 export type InterviewReadinessItem = {
-  id: keyof InterviewReadinessInput;
+  id: keyof Omit<InterviewReadinessInput, "outputMode">;
   label: string;
   ready: boolean;
-  required: true;
+  required: boolean;
 };
 
-const labels: Record<keyof InterviewReadinessInput, string> = {
+const labels: Record<keyof Omit<InterviewReadinessInput, "outputMode">, string> = {
   modelConfigured: "AI 模型已配置",
   stageConnected: "数字人舞台在线",
   mediaReady: "数字人画面已加载",
@@ -29,15 +32,37 @@ const labels: Record<keyof InterviewReadinessInput, string> = {
   meetingPreviewConfirmed: "会议软件入会预览已确认"
 };
 
+const itemIds = Object.keys(labels) as Array<keyof Omit<InterviewReadinessInput, "outputMode">>;
+
+const virtualRequiredIds = new Set<keyof Omit<InterviewReadinessInput, "outputMode">>([
+  "modelConfigured",
+  "stageConnected",
+  "speechReady",
+  "obsConnected",
+  "virtualCameraActive",
+  "virtualCameraVerified",
+  "virtualAudioReady",
+  "meetingPreviewConfirmed"
+]);
+
+export function isReadinessItemRequired(
+  id: keyof Omit<InterviewReadinessInput, "outputMode">,
+  mode: OutputMode = "real"
+): boolean {
+  if (mode === "real") return id === "modelConfigured";
+  return virtualRequiredIds.has(id);
+}
+
 export function getInterviewReadiness(
   input: InterviewReadinessInput
 ): { ready: boolean; items: InterviewReadinessItem[]; missing: InterviewReadinessItem[] } {
-  const items = (Object.keys(labels) as Array<keyof InterviewReadinessInput>).map((id) => ({
+  const outputMode = input.outputMode ?? "real";
+  const items = itemIds.map((id) => ({
     id,
     label: labels[id],
     ready: input[id],
-    required: true as const
+    required: isReadinessItemRequired(id, outputMode)
   }));
-  const missing = items.filter((item) => !item.ready);
+  const missing = items.filter((item) => item.required && !item.ready);
   return { ready: missing.length === 0, items, missing };
 }

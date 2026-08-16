@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"io"
@@ -28,6 +29,15 @@ const (
 	presignExpiry     = time.Hour
 	maxCandidateRunes = 50
 	maxFilenameRunes  = 200
+	resumeSelectSQL   = `
+		select
+			r.id, r.uploaded_by_user_id, coalesce(u.username, ''), r.candidate_name,
+			r.original_filename, r.content_type, r.size_bytes, r.object_key, r.sha256, r.created_at,
+			r.index_status, coalesce(r.index_error, ''), r.indexed_at, r.knowledge_provider,
+			coalesce(r.external_doc_id, '')
+		from resumes as r
+		left join users as u on u.id = r.uploaded_by_user_id
+	`
 )
 
 var (
@@ -40,16 +50,21 @@ var (
 )
 
 type Record struct {
-	ID                 string    `json:"id"`
-	UploadedByUserID   string    `json:"uploadedByUserId"`
-	UploadedByUsername string    `json:"uploadedByUsername"`
-	CandidateName      string    `json:"candidateName"`
-	OriginalFilename   string    `json:"originalFilename"`
-	ContentType        string    `json:"contentType"`
-	SizeBytes          int64     `json:"sizeBytes"`
-	ObjectKey          string    `json:"objectKey"`
-	SHA256             string    `json:"sha256"`
-	CreatedAt          time.Time `json:"createdAt"`
+	ID                 string     `json:"id"`
+	UploadedByUserID   string     `json:"uploadedByUserId"`
+	UploadedByUsername string     `json:"uploadedByUsername"`
+	CandidateName      string     `json:"candidateName"`
+	OriginalFilename   string     `json:"originalFilename"`
+	ContentType        string     `json:"contentType"`
+	SizeBytes          int64      `json:"sizeBytes"`
+	ObjectKey          string     `json:"-"`
+	SHA256             string     `json:"-"`
+	CreatedAt          time.Time  `json:"createdAt"`
+	IndexStatus        string     `json:"indexStatus"`
+	IndexError         string     `json:"indexError,omitempty"`
+	IndexedAt          *time.Time `json:"indexedAt,omitempty"`
+	KnowledgeProvider  string     `json:"-"`
+	ExternalDocID      string     `json:"-"`
 }
 
 type UploadInput struct {
@@ -63,7 +78,9 @@ type ObjectClient interface {
 	ListBuckets(ctx context.Context, creds objectstore.Credentials) ([]objectstore.Bucket, error)
 	HeadBucket(ctx context.Context, creds objectstore.Credentials) error
 	PutObject(ctx context.Context, creds objectstore.Credentials, key, contentType string, body io.Reader) error
+	GetObject(ctx context.Context, creds objectstore.Credentials, key string) ([]byte, error)
 	PresignGet(ctx context.Context, creds objectstore.Credentials, key string, expiry time.Duration) (string, error)
+	DeleteObject(ctx context.Context, creds objectstore.Credentials, key string) error
 }
 
 type Service struct {
@@ -79,16 +96,21 @@ func NewService(db database.DBTX, box *secretbox.Box, objects ObjectClient) *Ser
 	return &Service{db: db, box: box, objects: objects}
 }
 
-func (s *Service) List(ctx context.Context) ([]Record, error) {
-	rows, err := s.db.Query(ctx, `
-		select
-			r.id, r.uploaded_by_user_id, coalesce(u.username, ''), r.candidate_name,
-			r.original_filename, r.content_type, r.size_bytes, r.object_key, r.sha256, r.created_at
-		from resumes as r
-		left join users as u on u.id = r.uploaded_by_user_id
+func (s *Service) List(ctx context.Context, uploadedByUserID string) ([]Record, error) {
+	query := resumeSelectSQL + `
 		order by r.created_at desc
 		limit 200
-	`)
+	`
+	args := []any{}
+	if uploadedByUserID != "" {
+		query = resumeSelectSQL + `
+			where r.uploaded_by_user_id = $1
+			order by r.created_at desc
+			limit 200
+		`
+		args = append(args, uploadedByUserID)
+	}
+	rows, err := s.db.Query(ctx, query, args...)
 	if err != nil {
 		return nil, ErrStore
 	}
@@ -96,18 +118,7 @@ func (s *Service) List(ctx context.Context) ([]Record, error) {
 	records := make([]Record, 0)
 	for rows.Next() {
 		record := Record{}
-		if err := rows.Scan(
-			&record.ID,
-			&record.UploadedByUserID,
-			&record.UploadedByUsername,
-			&record.CandidateName,
-			&record.OriginalFilename,
-			&record.ContentType,
-			&record.SizeBytes,
-			&record.ObjectKey,
-			&record.SHA256,
-			&record.CreatedAt,
-		); err != nil {
+		if err := scanResume(rows, &record); err != nil {
 			return nil, ErrStore
 		}
 		records = append(records, record)
@@ -174,11 +185,13 @@ func (s *Service) Upload(ctx context.Context, actor users.User, requestID string
 		ObjectKey:          objectKey,
 		SHA256:             digest,
 		CreatedAt:          now,
+		IndexStatus:        "pending",
+		KnowledgeProvider:  "local-pgvector",
 	}, nil
 }
 
-func (s *Service) DownloadURL(ctx context.Context, id string) (string, Record, error) {
-	record, err := s.get(ctx, id)
+func (s *Service) DownloadURL(ctx context.Context, actor users.User, id string) (string, Record, error) {
+	record, err := s.getAccessible(ctx, actor, id)
 	if err != nil {
 		return "", Record{}, err
 	}
@@ -193,16 +206,140 @@ func (s *Service) DownloadURL(ctx context.Context, id string) (string, Record, e
 	return url, record, nil
 }
 
+func (s *Service) Delete(ctx context.Context, actor users.User, requestID, id string) error {
+	record, err := s.getAccessible(ctx, actor, id)
+	if err != nil {
+		return err
+	}
+	creds, err := s.credentials(ctx)
+	if err != nil {
+		return err
+	}
+	if err := s.objects.DeleteObject(ctx, creds, record.ObjectKey); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(ctx, `delete from resumes where id = $1`, id); err != nil {
+		return ErrStore
+	}
+	_ = audit.NewStore(s.db).Append(ctx, audit.Event{
+		ActorUserID: actor.ID,
+		Action:      audit.ActionResumeDeleted,
+		TargetType:  "resume",
+		TargetID:    id,
+		Result:      audit.ResultSuccess,
+		RequestID:   requestID,
+		Metadata: map[string]any{
+			"originalFilename": record.OriginalFilename,
+			"sizeBytes":        record.SizeBytes,
+		},
+	})
+	return nil
+}
+
+func (s *Service) GetAccessible(ctx context.Context, actor users.User, id string) (Record, error) {
+	return s.getAccessible(ctx, actor, id)
+}
+
+func (s *Service) FetchObject(ctx context.Context, objectKey string) ([]byte, error) {
+	creds, err := s.credentials(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.objects.GetObject(ctx, creds, objectKey)
+}
+
+func (s *Service) BeginIndex(ctx context.Context, resumeID string) (Record, bool, error) {
+	record, err := s.get(ctx, resumeID)
+	if err != nil {
+		return Record{}, false, err
+	}
+	tag, err := s.db.Exec(ctx, `
+		update resumes
+		set index_status = 'indexing', index_error = null
+		where id = $1 and index_status in ('pending', 'failed', 'skipped')
+	`, resumeID)
+	if err != nil {
+		return Record{}, false, ErrStore
+	}
+	if tag.RowsAffected() == 0 {
+		return record, false, nil
+	}
+	record.IndexStatus = "indexing"
+	record.IndexError = ""
+	return record, true, nil
+}
+
+func (s *Service) FinishIndex(ctx context.Context, resumeID, status, errorText, provider, externalDocID string) error {
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	_, err := s.db.Exec(ctx, `
+		update resumes
+		set index_status = $2,
+		    index_error = nullif($3, ''),
+		    indexed_at = $4,
+		    knowledge_provider = $5,
+		    external_doc_id = nullif($6, '')
+		where id = $1
+	`, resumeID, status, errorText, now, provider, externalDocID)
+	if err != nil {
+		return ErrStore
+	}
+	return nil
+}
+
+func (s *Service) ResetIndex(ctx context.Context, resumeID string) error {
+	_, err := s.db.Exec(ctx, `
+		update resumes
+		set index_status = 'pending',
+		    index_error = null,
+		    indexed_at = null,
+		    external_doc_id = null
+		where id = $1
+	`, resumeID)
+	if err != nil {
+		return ErrStore
+	}
+	return nil
+}
+
+func (s *Service) getAccessible(ctx context.Context, actor users.User, id string) (Record, error) {
+	record, err := s.get(ctx, id)
+	if err != nil {
+		return Record{}, err
+	}
+	if !canAccessResume(actor, record) {
+		return Record{}, ErrNotFound
+	}
+	return record, nil
+}
+
+func canAccessResume(actor users.User, record Record) bool {
+	if actor.Role == users.RoleAdmin {
+		return true
+	}
+	return actor.ID != "" && actor.ID == record.UploadedByUserID
+}
+
 func (s *Service) get(ctx context.Context, id string) (Record, error) {
 	record := Record{}
-	err := s.db.QueryRow(ctx, `
-		select
-			r.id, r.uploaded_by_user_id, coalesce(u.username, ''), r.candidate_name,
-			r.original_filename, r.content_type, r.size_bytes, r.object_key, r.sha256, r.created_at
-		from resumes as r
-		left join users as u on u.id = r.uploaded_by_user_id
+	err := scanResume(s.db.QueryRow(ctx, resumeSelectSQL+`
 		where r.id = $1
-	`, id).Scan(
+	`, id), &record)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Record{}, ErrNotFound
+	}
+	if err != nil {
+		return Record{}, ErrStore
+	}
+	return record, nil
+}
+
+type resumeScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanResume(row resumeScanner, record *Record) error {
+	var indexedAt sql.NullTime
+	err := row.Scan(
 		&record.ID,
 		&record.UploadedByUserID,
 		&record.UploadedByUsername,
@@ -213,14 +350,20 @@ func (s *Service) get(ctx context.Context, id string) (Record, error) {
 		&record.ObjectKey,
 		&record.SHA256,
 		&record.CreatedAt,
+		&record.IndexStatus,
+		&record.IndexError,
+		&indexedAt,
+		&record.KnowledgeProvider,
+		&record.ExternalDocID,
 	)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return Record{}, ErrNotFound
-	}
 	if err != nil {
-		return Record{}, ErrStore
+		return err
 	}
-	return record, nil
+	if indexedAt.Valid {
+		value := indexedAt.Time
+		record.IndexedAt = &value
+	}
+	return nil
 }
 
 func (s *Service) credentials(ctx context.Context) (objectstore.Credentials, error) {

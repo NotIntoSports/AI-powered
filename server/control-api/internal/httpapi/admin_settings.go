@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/ai-interviewer/ai-powered/control-api/internal/secretbox"
+	"github.com/ai-interviewer/ai-powered/control-api/internal/sessions"
 	"github.com/ai-interviewer/ai-powered/control-api/internal/settings"
 	"github.com/ai-interviewer/ai-powered/control-api/internal/users"
 	"github.com/go-chi/chi/v5/middleware"
@@ -14,6 +15,8 @@ import (
 
 type SettingsAdmin interface {
 	GetAI(ctx context.Context) (settings.PublicAI, error)
+	GetClientAI(ctx context.Context) (settings.ClientAI, error)
+	GetClientASR(ctx context.Context) (settings.ClientASR, error)
 	PutAI(ctx context.Context, actor users.User, requestID string, input settings.AIInput) (settings.PublicAI, error)
 	TestAI(ctx context.Context, actor users.User, requestID string, input *settings.AIInput) (settings.AITestResult, error)
 	GetRTC(ctx context.Context) (settings.PublicRTC, error)
@@ -86,6 +89,40 @@ func (handler *adminSettingsHandler) getAI(w http.ResponseWriter, request *http.
 		return
 	}
 	writeJSON(w, http.StatusOK, public)
+}
+
+func (handler *adminSettingsHandler) getClientAI(w http.ResponseWriter, request *http.Request) {
+	authenticated, ok := request.Context().Value(authenticatedSessionKey{}).(AuthenticatedSession)
+	if !ok {
+		writeSessionError(w, request)
+		return
+	}
+	if authenticated.Session.Purpose != sessions.PurposeDesktop {
+		writeAPIError(w, request, http.StatusForbidden, "FORBIDDEN", "desktop session is required")
+		return
+	}
+	clientAI, err := handler.admin.GetClientAI(request.Context())
+	if !writeSettingsError(w, request, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, clientAI)
+}
+
+func (handler *adminSettingsHandler) getClientASR(w http.ResponseWriter, request *http.Request) {
+	authenticated, ok := request.Context().Value(authenticatedSessionKey{}).(AuthenticatedSession)
+	if !ok {
+		writeSessionError(w, request)
+		return
+	}
+	if authenticated.Session.Purpose != sessions.PurposeDesktop {
+		writeAPIError(w, request, http.StatusForbidden, "FORBIDDEN", "desktop session is required")
+		return
+	}
+	clientASR, err := handler.admin.GetClientASR(request.Context())
+	if !writeSettingsError(w, request, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, clientASR)
 }
 
 func (handler *adminSettingsHandler) putAI(w http.ResponseWriter, request *http.Request) {

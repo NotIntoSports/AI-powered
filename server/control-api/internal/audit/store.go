@@ -43,6 +43,9 @@ const (
 	ActionStorageSettingsUpdated Action = "settings.storage_updated"
 	ActionStorageSettingsTested  Action = "settings.storage_tested"
 	ActionResumeUploaded         Action = "resume.uploaded"
+	ActionResumeDeleted          Action = "resume.deleted"
+	ActionResumeIndexed          Action = "resume.indexed"
+	ActionResumeReindexed        Action = "resume.reindexed"
 )
 
 type Result string
@@ -204,7 +207,10 @@ func (action Action) valid() bool {
 		ActionRTCSettingsTested,
 		ActionStorageSettingsUpdated,
 		ActionStorageSettingsTested,
-		ActionResumeUploaded:
+		ActionResumeUploaded,
+		ActionResumeDeleted,
+		ActionResumeIndexed,
+		ActionResumeReindexed:
 		return true
 	default:
 		return false

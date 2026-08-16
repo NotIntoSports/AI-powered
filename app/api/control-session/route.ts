@@ -30,19 +30,19 @@ export async function POST(request: Request) {
   const username = payload?.username?.trim() || "";
   const password = payload?.password || "";
   if (!username || !password) {
-    return NextResponse.json({ code: "INVALID_INPUT", message: "请填写管理端用户名和密码" }, { status: 422 });
+    return NextResponse.json({ code: "INVALID_INPUT", message: "请填写客户端账号和密码" }, { status: 422 });
   }
   const response = await fetch(`${controlApiOrigin()}/api/v1/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, password, purpose: "desktop", deviceId: "windows-desktop" }),
+    body: JSON.stringify({ username, password, purpose: "desktop" }),
     cache: "no-store"
   });
-  const body = await response.json().catch(() => null) as { accessToken?: string; user?: unknown; message?: string; code?: string } | null;
+  const body = await response.json().catch(() => null) as { accessToken?: string; user?: unknown } | null;
   if (!response.ok || !body?.accessToken) {
     return NextResponse.json(
-      { code: body?.code || "LOGIN_FAILED", message: body?.message || "管理端登录失败" },
-      { status: response.status || 401 }
+      { code: "LOGIN_FAILED", message: response.status === 429 ? "尝试次数过多，请稍后再试" : "登录失败" },
+      { status: response.status === 429 ? 429 : 401, headers: { "Cache-Control": "no-store" } }
     );
   }
   const result = NextResponse.json({ connected: true, user: body.user }, { headers: { "Cache-Control": "no-store" } });

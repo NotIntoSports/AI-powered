@@ -1,4 +1,5 @@
 import type { SubtitleSink } from "./sink.ts";
+import type { RtcNetworkStats } from "../webrtc-stats.ts";
 
 export type SubtitleProvider = "volcengine" | "livekit";
 
@@ -17,6 +18,7 @@ export type SubtitleTransport = {
   readonly provider: SubtitleProvider;
   connect(config: SubtitleConnectConfig): Promise<void>;
   disconnect(): Promise<void>;
+  getNetworkStats?(): Promise<RtcNetworkStats | null>;
 };
 
 export type SubtitleTransportFactory = (

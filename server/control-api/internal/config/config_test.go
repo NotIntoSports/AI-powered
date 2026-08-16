@@ -41,6 +41,15 @@ func TestLoadUsesDefaults(t *testing.T) {
 	if !cfg.CookieSecure {
 		t.Error("CookieSecure = false")
 	}
+	if cfg.KnowledgeProvider != defaultKnowledgeProvider {
+		t.Errorf("KnowledgeProvider = %q", cfg.KnowledgeProvider)
+	}
+	if cfg.EmbeddingBaseURL != defaultEmbeddingBaseURL {
+		t.Errorf("EmbeddingBaseURL = %q", cfg.EmbeddingBaseURL)
+	}
+	if cfg.EmbeddingModel != defaultEmbeddingModel {
+		t.Errorf("EmbeddingModel = %q", cfg.EmbeddingModel)
+	}
 }
 
 func TestLoadAcceptsConfiguredValuesAtMaximumTTL(t *testing.T) {

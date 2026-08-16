@@ -1,4 +1,4 @@
-import { getModelRuntimeConfig } from "./runtime-config";
+import { fetchDesktopControlJson, getModelRuntimeConfig } from "./runtime-config";
 import {
   areEquivalentBaseUrls,
   isSecureEndpoint,
@@ -8,10 +8,19 @@ import {
 export const MAX_AUDIO_BYTES = 15 * 1024 * 1024;
 
 export type TranscriptionProvider = "openai" | "whisper-cpp";
+export type TranscriptionSource = "management" | "environment" | "whisper-cpp" | "none";
 
 type TranscriptionResult = {
   text?: string;
   error?: { message?: string } | string;
+};
+
+type ManagementASR = {
+  available: boolean;
+  baseUrl: string;
+  model: string;
+  language: string;
+  apiKey: string;
 };
 
 const supportedTypes = new Set([
@@ -25,6 +34,10 @@ const supportedTypes = new Set([
   "audio/wav",
   "audio/x-wav"
 ]);
+
+const globalTranscription = globalThis as typeof globalThis & {
+  managementAsrCache?: { at: number; config: ManagementASR | null };
+};
 
 export function isSecureTranscriptionEndpoint(value: string) {
   return isSecureEndpoint(value);
@@ -66,11 +79,49 @@ function hasKnownSignature(bytes: Uint8Array) {
   );
 }
 
+async function getManagementASRConfig(): Promise<ManagementASR | null> {
+  const cached = globalTranscription.managementAsrCache;
+  if (cached && Date.now() - cached.at < 5_000) {
+    return cached.config;
+  }
+  const data = await fetchDesktopControlJson<{
+    available?: boolean;
+    baseUrl?: string;
+    model?: string;
+    language?: string;
+    apiKey?: string;
+  }>("/api/v1/client/settings/asr");
+  if (!data) {
+    globalTranscription.managementAsrCache = { at: Date.now(), config: null };
+    return null;
+  }
+  const config: ManagementASR = {
+    available: Boolean(data.available),
+    baseUrl: String(data.baseUrl || "").replace(/\/$/, ""),
+    model: String(data.model || "whisper-1"),
+    language: String(data.language || "zh"),
+    apiKey: typeof data.apiKey === "string" ? data.apiKey : ""
+  };
+  if (!config.available || !isSecureTranscriptionEndpoint(config.baseUrl)) {
+    globalTranscription.managementAsrCache = { at: Date.now(), config: null };
+    return null;
+  }
+  globalTranscription.managementAsrCache = { at: Date.now(), config };
+  return config;
+}
+
 export function getTranscriptionProvider(): TranscriptionProvider {
   return process.env.TRANSCRIPTION_PROVIDER === "whisper-cpp" ? "whisper-cpp" : "openai";
 }
 
-export async function isTranscriptionConfigured() {
+export async function getTranscriptionSource(): Promise<TranscriptionSource> {
+  if (await getManagementASRConfig()) return "management";
+  if (getTranscriptionProvider() === "whisper-cpp") return "whisper-cpp";
+  if (await isLocalTranscriptionConfigured()) return "environment";
+  return "none";
+}
+
+async function isLocalTranscriptionConfigured() {
   const provider = getTranscriptionProvider();
   if (provider === "whisper-cpp") {
     return isSecureTranscriptionEndpoint(
@@ -88,8 +139,15 @@ export async function isTranscriptionConfigured() {
   }));
 }
 
+export async function isTranscriptionConfigured() {
+  if (await getManagementASRConfig()) return true;
+  return isLocalTranscriptionConfigured();
+}
+
 export async function isTranscriptionReady() {
-  if (!await isTranscriptionConfigured()) return false;
+  const management = await getManagementASRConfig();
+  if (management) return true;
+  if (!await isLocalTranscriptionConfigured()) return false;
   if (getTranscriptionProvider() !== "whisper-cpp") return true;
   try {
     const endpoint = new URL(process.env.WHISPER_CPP_URL || "http://127.0.0.1:8080/inference");
@@ -116,10 +174,10 @@ export async function validateAudioFile(file: File) {
 
 export async function transcribeAudio(file: File) {
   await validateAudioFile(file);
-  const provider = getTranscriptionProvider();
-  return provider === "whisper-cpp"
-    ? transcribeWithWhisperCpp(file)
-    : transcribeWithOpenAI(file);
+  if (await getManagementASRConfig() || getTranscriptionProvider() !== "whisper-cpp") {
+    return transcribeWithOpenAI(file);
+  }
+  return transcribeWithWhisperCpp(file);
 }
 
 async function transcribeWithWhisperCpp(file: File) {
@@ -142,15 +200,13 @@ async function transcribeWithWhisperCpp(file: File) {
 }
 
 async function transcribeWithOpenAI(file: File) {
+  const management = await getManagementASRConfig();
   const runtime = await getModelRuntimeConfig();
-  const baseUrl = (
-    process.env.TRANSCRIPTION_BASE_URL ||
-    runtime.baseUrl
-  ).replace(/\/$/, "");
+  const baseUrl = (management?.baseUrl || process.env.TRANSCRIPTION_BASE_URL || runtime.baseUrl).replace(/\/$/, "");
   if (!isSecureTranscriptionEndpoint(baseUrl)) {
     throw new Error("INSECURE_TRANSCRIPTION_ENDPOINT");
   }
-  const apiKey = selectTranscriptionApiKey({
+  const apiKey = management?.apiKey || selectTranscriptionApiKey({
     explicitKey: process.env.TRANSCRIPTION_API_KEY,
     transcriptionBaseUrl: baseUrl,
     modelBaseUrl: runtime.baseUrl,
@@ -160,8 +216,8 @@ async function transcribeWithOpenAI(file: File) {
 
   const form = new FormData();
   form.append("file", file, file.name || "meeting-audio.webm");
-  form.append("model", process.env.TRANSCRIPTION_MODEL || "gpt-4o-mini-transcribe");
-  form.append("language", process.env.TRANSCRIPTION_LANGUAGE || "zh");
+  form.append("model", management?.model || process.env.TRANSCRIPTION_MODEL || "gpt-4o-mini-transcribe");
+  form.append("language", management?.language || process.env.TRANSCRIPTION_LANGUAGE || "zh");
   form.append("response_format", "json");
 
   const response = await fetch(`${baseUrl}/audio/transcriptions`, {

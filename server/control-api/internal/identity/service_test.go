@@ -159,11 +159,32 @@ func TestSetUserStatusProtectsLastActiveAdmin(t *testing.T) {
 	admin := users.User{ID: "admin-actor", Username: "owner", Role: users.RoleAdmin, Status: users.StatusActive}
 	seedMemoryUser(db, admin)
 	err := NewService(db).SetUserStatus(context.Background(), admin, admin.ID, users.StatusDisabled)
-	if !errors.Is(err, users.ErrLastAdmin) {
-		t.Fatalf("error = %v, want ErrLastAdmin", err)
+	if !errors.Is(err, users.ErrCannotDisableSelf) {
+		t.Fatalf("error = %v, want ErrCannotDisableSelf", err)
 	}
 	if db.users[admin.ID].status != users.StatusActive {
 		t.Fatal("last admin was disabled")
+	}
+}
+
+func TestSetUserStatusRejectsSelfDisableWhenOtherAdminsExist(t *testing.T) {
+	db := newMemoryDB()
+	admin := users.User{ID: "admin-actor", Username: "owner", Role: users.RoleAdmin, Status: users.StatusActive}
+	other := users.User{ID: "admin-two", Username: "second", Role: users.RoleAdmin, Status: users.StatusActive}
+	seedMemoryUser(db, admin)
+	seedMemoryUser(db, other)
+	err := NewService(db).SetUserStatus(context.Background(), admin, admin.ID, users.StatusDisabled)
+	if !errors.Is(err, users.ErrCannotDisableSelf) {
+		t.Fatalf("error = %v, want ErrCannotDisableSelf", err)
+	}
+	if db.users[admin.ID].status != users.StatusActive {
+		t.Fatal("current administrator was disabled")
+	}
+	if err := NewService(db).SetUserStatus(context.Background(), admin, other.ID, users.StatusDisabled); err != nil {
+		t.Fatal(err)
+	}
+	if db.users[other.ID].status != users.StatusDisabled {
+		t.Fatal("other administrator was not disabled")
 	}
 }
 

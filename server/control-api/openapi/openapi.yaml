@@ -599,6 +599,97 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/UserNotFound'
+  /api/v1/admin/resumes/{id}:
+    delete:
+      operationId: deleteAdminResume
+      summary: Delete a resume object and its metadata. The secret key is never returned.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '204':
+          description: Resume deleted.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/UserNotFound'
+  /api/v1/admin/resumes/{id}/reindex:
+    post:
+      operationId: reindexAdminResume
+      summary: Re-run knowledge indexing for a resume. Does not expose vectors or provider internals.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Resume metadata after the reindex job is queued.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Resume'}
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/UserNotFound'
+  /api/v1/client/settings/ai:
+    get:
+      operationId: getClientAISettings
+      summary: Return decrypted AI runtime settings for a desktop session. The key is not stored on the client disk.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Desktop runtime AI settings, including the API key for in-memory use.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ClientAISettings'}
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/SettingsUnavailable'
+  /api/v1/client/settings/asr:
+    get:
+      operationId: getClientASRSettings
+      summary: Return decrypted speech transcription settings for a desktop session. The key is not stored on the client disk.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Desktop runtime ASR settings, including the API key for in-memory use.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ClientASRSettings'}
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/SettingsUnavailable'
   /api/v1/client/rtc/token:
     post:
       operationId: issueClientRTCToken
@@ -633,6 +724,25 @@ paths:
         '503':
           $ref: '#/components/responses/SettingsUnavailable'
   /api/v1/client/resumes:
+    get:
+      operationId: listClientResumes
+      summary: List resumes uploaded by the current desktop user. Object contents are not returned.
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Resume metadata for the current user.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Resume'}
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
     post:
       operationId: uploadClientResume
       summary: Operator or administrator upload of a PDF or Word resume to Tencent COS.
@@ -664,6 +774,112 @@ paths:
           $ref: '#/components/responses/RequestTooLarge'
         '503':
           $ref: '#/components/responses/SettingsUnavailable'
+  /api/v1/client/resumes/{id}/download:
+    get:
+      operationId: downloadClientResume
+      summary: Return a short-lived COS download URL for a resume uploaded by the current user.
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Presigned download URL.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [url]
+                properties:
+                  url: {type: string}
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/UserNotFound'
+  /api/v1/client/resumes/{id}:
+    delete:
+      operationId: deleteClientResume
+      summary: Delete a resume uploaded by the current user so a replacement can be uploaded.
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '204':
+          description: Resume deleted.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/UserNotFound'
+  /api/v1/client/resumes/{id}/status:
+    get:
+      operationId: getClientResumeIndexStatus
+      summary: Return resume knowledge index status. Vectors and object keys are not returned.
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Index status for the resume.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ResumeIndexStatus'}
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/UserNotFound'
+  /api/v1/client/knowledge/search:
+    post:
+      operationId: searchClientKnowledge
+      summary: Search indexed resume chunks for interview follow-up. Failures return an empty list.
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [query, resumeId]
+              properties:
+                query: {type: string, minLength: 1, maxLength: 2000}
+                resumeId: {type: string}
+                topK: {type: integer, minimum: 1, maximum: 10, default: 5}
+      responses:
+        '200':
+          description: Matching chunks, or an empty list when indexing is incomplete or search fails.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KnowledgeSearchResult'}
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
 components:
   securitySchemes:
     cookieAuth:
@@ -743,6 +959,15 @@ components:
         application/json:
           schema: {$ref: '#/components/schemas/APIError'}
           example: {code: LAST_ADMIN_REQUIRED, message: the last active administrator cannot be disabled, requestId: request-id}
+    CannotDisableSelf:
+      description: The current administrator cannot disable their own account.
+      headers:
+        Cache-Control:
+          schema: {type: string, const: no-store}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/APIError'}
+          example: {code: CANNOT_DISABLE_SELF, message: cannot disable the current administrator, requestId: request-id}
     UserNotFound:
       description: User was not found.
       headers:
@@ -885,6 +1110,35 @@ components:
         configVersion: {type: integer}
         updatedAt: {type: string, format: date-time}
         updatedByUsername: {type: string}
+    ClientAISettings:
+      type: object
+      required: [configured, available, provider, baseUrl, model, enabled, apiKeyConfigured]
+      properties:
+        configured: {type: boolean}
+        available: {type: boolean}
+        provider: {type: string}
+        baseUrl: {type: string}
+        model: {type: string}
+        questionTimeoutMs: {type: integer}
+        reportTimeoutMs: {type: integer}
+        enabled: {type: boolean}
+        apiKeyConfigured: {type: boolean}
+        localEndpoint: {type: boolean}
+        configVersion: {type: integer}
+        updatedAt: {type: string, format: date-time}
+        updatedByUsername: {type: string}
+        apiKey: {type: string, format: password}
+    ClientASRSettings:
+      type: object
+      required: [configured, available, baseUrl, model, language]
+      properties:
+        configured: {type: boolean}
+        available: {type: boolean}
+        baseUrl: {type: string}
+        model: {type: string}
+        language: {type: string}
+        apiKey: {type: string, format: password}
+        source: {type: string, enum: [asr, ai]}
     PutAISettingsRequest:
       type: object
       additionalProperties: false
@@ -1021,7 +1275,7 @@ components:
               region: {type: string}
     Resume:
       type: object
-      required: [id, uploadedByUserId, originalFilename, contentType, sizeBytes, objectKey, sha256, createdAt]
+      required: [id, uploadedByUserId, originalFilename, contentType, sizeBytes, createdAt, indexStatus]
       properties:
         id: {type: string}
         uploadedByUserId: {type: string}
@@ -1030,6 +1284,30 @@ components:
         originalFilename: {type: string}
         contentType: {type: string}
         sizeBytes: {type: integer, format: int64}
-        objectKey: {type: string}
-        sha256: {type: string}
         createdAt: {type: string, format: date-time}
+        indexStatus: {type: string, enum: [pending, indexing, ready, failed, skipped]}
+        indexError: {type: string}
+        indexedAt: {type: string, format: date-time}
+    ResumeIndexStatus:
+      type: object
+      additionalProperties: false
+      required: [indexStatus]
+      properties:
+        indexStatus: {type: string, enum: [pending, indexing, ready, failed, skipped]}
+        indexError: {type: string}
+        indexedAt: {type: string, format: date-time}
+    KnowledgeSearchResult:
+      type: object
+      additionalProperties: false
+      required: [chunks]
+      properties:
+        chunks:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [content, score, candidateName]
+            properties:
+              content: {type: string}
+              score: {type: number, format: double}
+              candidateName: {type: string}

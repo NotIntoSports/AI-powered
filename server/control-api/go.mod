@@ -5,6 +5,9 @@ go 1.26.5
 require (
 	github.com/go-chi/chi/v5 v5.3.1
 	github.com/jackc/pgx/v5 v5.10.0
+	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728
+	github.com/pgvector/pgvector-go v0.4.1
+	github.com/pgvector/pgvector-go/pgx v0.4.1
 	github.com/pressly/goose/v3 v3.27.3
 	github.com/tencentyun/cos-go-sdk-v5 v0.7.59
 	golang.org/x/crypto v0.54.0
@@ -21,6 +24,7 @@ require (
 	github.com/mitchellh/mapstructure v1.4.3 // indirect
 	github.com/mozillazg/go-httpheader v0.2.1 // indirect
 	github.com/sethvargo/go-retry v0.4.0 // indirect
+	github.com/x448/float16 v0.8.4 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect

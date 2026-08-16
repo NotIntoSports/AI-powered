@@ -20,7 +20,7 @@ From this directory:
 ```powershell
 docker compose up -d postgres
 docker compose run --rm control-api-admin admin create --username owner
-docker compose up -d control-api
+docker compose up -d control-api embedding
 go test ./...
 go vet ./...
 ```
@@ -28,6 +28,11 @@ go vet ./...
 `admin create` and `admin reset-password` read the password from an interactive
 terminal or two matching stdin lines. Never pass the password as a flag,
 argument, or environment variable.
+
+Resume indexing uses the `embedding` service (TEI `cpu-1.9` + `BAAI/bge-m3`) on
+the compose network only. It does not publish a host port. `control-api` starts
+even if the model weights are still downloading; interview follow-ups degrade to
+empty knowledge until the index is ready.
 
 Optional LiveKit line (default `activeProvider` stays `volcengine`):
 
@@ -77,6 +82,9 @@ go test ./integration -run TestSmoke -v
 | `COOKIE_SECURE` | no | `true` | Compose sets `false` for local HTTP. Production must use `true` behind TLS. |
 | `TRUSTED_PROXY_CIDRS` | no | empty | Comma-separated CIDRs. Forwarded client IPs are trusted only when the TCP peer matches. |
 | `SETTINGS_MASTER_KEY` | no | empty | 64 hex characters (32 bytes). Encrypts AI API keys and RTC secrets in PostgreSQL. Required before saving settings; GET of empty config still works without it. |
+| `KNOWLEDGE_PROVIDER` | no | `local-pgvector` | Knowledge backend. Unknown values fail startup. Phase one only registers `local-pgvector`. |
+| `EMBEDDING_BASE_URL` | no | `http://127.0.0.1:8090` | OpenAI-compatible TEI base URL. Compose sets `http://embedding:80` on the internal network and does not publish a host port. |
+| `EMBEDDING_MODEL` | no | `BAAI/bge-m3` | Embedding model id stored with chunks. Changing it requires a full reindex. |
 
 The HTTP server applies embedded goose migrations on start. Empty databases are
 created and upgraded automatically; keep a backup before upgrading a populated
@@ -85,7 +93,7 @@ store.
 ## PostgreSQL backup and restore
 
 Keep dumps off the image and out of git. Run these from the compose directory
-after the database is healthy. The official `postgres:16` container already has
+after the database is healthy. The `pgvector/pgvector:pg16` container already has
 `POSTGRES_USER` and `POSTGRES_DB`; do not put `DATABASE_URL` or the password on
 the command line.
 

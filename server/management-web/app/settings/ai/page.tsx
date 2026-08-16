@@ -10,6 +10,7 @@ import {
   type AITestResult,
   type PublicAISettings
 } from "../../../lib/control-api";
+import { ConfigStatus, SecretField } from "../config-status";
 
 export default function AISettingsPage() {
   const { me, error, setError } = useAdminSession();
@@ -103,10 +104,16 @@ export default function AISettingsPage() {
       {error ? <p className="error">{error}</p> : null}
       {notice ? <p className="ok">{notice}</p> : null}
       <form className="card" onSubmit={save} autoComplete="off">
-        <h2>AI 模型</h2>
+        <div className="card-head">
+          <h2>AI 模型</h2>
+          <ConfigStatus
+            ready={Boolean(config?.available)}
+            readyText="已配置并可用"
+            waitText="尚未配齐模型或密钥"
+          />
+        </div>
         <p className="muted">
-          配置写入 PostgreSQL。API Key 使用服务器主密钥加密存储，读取接口不会返回密钥。
-          {config?.apiKeyConfigured ? " 当前已保存密钥。" : " 远程模型需要提供密钥。"}
+          配置写入 PostgreSQL。API Key 使用服务器主密钥加密存储，读取接口不会返回明文。
         </p>
         <label>
           Base URL
@@ -116,15 +123,12 @@ export default function AISettingsPage() {
           模型 ID
           <input value={model} onChange={(event) => setModel(event.target.value)} required />
         </label>
-        <label>
-          API Key{config?.apiKeyConfigured ? "（留空则保留已保存密钥）" : ""}
-          <input
-            type="password"
-            value={apiKey}
-            onChange={(event) => setApiKey(event.target.value)}
-            autoComplete="new-password"
-          />
-        </label>
+        <SecretField
+          label="API Key"
+          configured={Boolean(config?.apiKeyConfigured)}
+          value={apiKey}
+          onChange={setApiKey}
+        />
         <div className="row">
           <label>
             追问超时（毫秒）

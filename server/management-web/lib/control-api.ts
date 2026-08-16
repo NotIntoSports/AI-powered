@@ -110,9 +110,10 @@ export type ResumeRecord = {
   originalFilename: string;
   contentType: string;
   sizeBytes: number;
-  objectKey: string;
-  sha256: string;
   createdAt: string;
+  indexStatus?: string;
+  indexError?: string;
+  indexedAt?: string;
 };
 
 export type APIError = {
@@ -168,7 +169,21 @@ export function publicUserFromUnknown(payload: unknown): PublicUser | null {
 }
 
 export function displayError(error: APIError): string {
-  return error.message;
+  switch (error.code) {
+    case "INVALID_CREDENTIALS":
+    case "LOGIN_FAILED":
+      return "登录失败";
+    case "RATE_LIMITED":
+      return "尝试次数过多，请稍后再试";
+    case "LAST_ADMIN_REQUIRED":
+      return "不能停用最后一位启用中的管理员";
+    case "CANNOT_DISABLE_SELF":
+      return "不能禁用当前登录的管理员";
+    case "RESUME_NOT_FOUND":
+      return "简历不存在或已删除";
+    default:
+      return error.message;
+  }
 }
 
 export async function readJSON(response: Response): Promise<unknown> {

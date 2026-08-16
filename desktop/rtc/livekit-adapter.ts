@@ -3,6 +3,24 @@ import { SUBTITLE_DATA_TOPIC } from "../../lib/subtitles/contract.ts";
 import { mapLiveKitDataPacket, mapLiveKitSegment } from "../../lib/subtitles/map-livekit.ts";
 import type { SubtitleSink } from "../../lib/subtitles/sink.ts";
 import type { SubtitleConnectConfig, SubtitleTransport } from "../../lib/subtitles/transport.ts";
+import { summarizeRtcStats, type RtcNetworkStats } from "../../lib/webrtc-stats.ts";
+
+type StatsCapableTrack = {
+  getRTCStatsReport?: () => Promise<RTCStatsReport | undefined>;
+  sender?: { getStats(): Promise<RTCStatsReport> };
+  receiver?: { getStats(): Promise<RTCStatsReport> };
+};
+
+async function statsFromTrack(track: StatsCapableTrack | undefined) {
+  if (!track) return null;
+  if (track.getRTCStatsReport) {
+    const report = await track.getRTCStatsReport();
+    return report || null;
+  }
+  if (track.sender?.getStats) return track.sender.getStats();
+  if (track.receiver?.getStats) return track.receiver.getStats();
+  return null;
+}
 
 export class LiveKitRtcAdapter implements SubtitleTransport {
   readonly provider = "livekit" as const;
@@ -43,6 +61,24 @@ export class LiveKitRtcAdapter implements SubtitleTransport {
       dtx: false,
       red: false
     });
+  }
+
+  async getNetworkStats(): Promise<RtcNetworkStats | null> {
+    const room = this.room;
+    if (!room) return null;
+    const reports: RTCStatsReport[] = [];
+    for (const publication of room.localParticipant.audioTrackPublications.values()) {
+      const report = await statsFromTrack(publication.track as StatsCapableTrack | undefined);
+      if (report) reports.push(report);
+    }
+    for (const participant of room.remoteParticipants.values()) {
+      for (const publication of participant.audioTrackPublications.values()) {
+        const report = await statsFromTrack(publication.track as StatsCapableTrack | undefined);
+        if (report) reports.push(report);
+      }
+    }
+    if (!reports.length) return { rttMs: null, packetLossPct: null, packetsLost: 0, packetsSentOrReceived: 0 };
+    return summarizeRtcStats(reports);
   }
 
   async disconnect(): Promise<void> {

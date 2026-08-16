@@ -17,7 +17,9 @@ export type ModelRuntimeConfig = {
   apiKey: string;
   baseUrl: string;
   model: string;
-  source: "settings" | "environment" | "default";
+  source: "management" | "settings" | "environment" | "default";
+  questionTimeoutMs?: number;
+  reportTimeoutMs?: number;
 };
 
 const dataDirectory = process.env.INTERVIEW_DATA_DIR
@@ -29,6 +31,7 @@ const dpapiScript = path.join(process.cwd(), "scripts", "dpapi-secret.ps1");
 const globalConfig = globalThis as typeof globalThis & {
   modelSettingsPromise?: Promise<StoredSettings | null>;
   decryptedModelKey?: string;
+  managementModelCache?: { token: string; at: number; config: ModelRuntimeConfig };
 };
 
 function runDpapi(mode: "Protect" | "Unprotect", value: string) {
@@ -62,7 +65,81 @@ async function getStoredSettings() {
   return globalConfig.modelSettingsPromise;
 }
 
+const TOKEN_COOKIE = "control_api_token";
+
+export function controlApiOrigin() {
+  return (process.env.CONTROL_API_ORIGIN || "http://175.27.132.61").replace(/\/$/, "");
+}
+
+async function readDesktopToken() {
+  try {
+    const { cookies } = await import("next/headers");
+    return (await cookies()).get(TOKEN_COOKIE)?.value || "";
+  } catch {
+    return "";
+  }
+}
+
+export async function fetchDesktopControlJson<T>(path: string): Promise<T | null> {
+  const token = await readDesktopToken();
+  if (!token) return null;
+  try {
+    const response = await fetch(`${controlApiOrigin()}${path}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+      signal: AbortSignal.timeout(5_000)
+    });
+    if (!response.ok) return null;
+    return await response.json() as T;
+  } catch {
+    return null;
+  }
+}
+
+export async function pingControlApi() {
+  const started = Date.now();
+  try {
+    const response = await fetch(`${controlApiOrigin()}/healthz`, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(1_500)
+    });
+    return { reachable: response.ok, rttMs: Date.now() - started };
+  } catch {
+    return { reachable: false, rttMs: Date.now() - started };
+  }
+}
+
+async function getManagementModelConfig(): Promise<ModelRuntimeConfig | null> {
+  const token = await readDesktopToken();
+  if (!token) return null;
+  const cached = globalConfig.managementModelCache;
+  if (cached && cached.token === token && Date.now() - cached.at < 5_000) {
+    return cached.config;
+  }
+  const data = await fetchDesktopControlJson<{
+    available?: boolean;
+    baseUrl?: string;
+    model?: string;
+    apiKey?: string;
+    questionTimeoutMs?: number;
+    reportTimeoutMs?: number;
+  }>("/api/v1/client/settings/ai");
+  if (!data) return null;
+  const config: ModelRuntimeConfig = {
+    apiKey: typeof data.apiKey === "string" ? data.apiKey : "",
+    baseUrl: String(data.baseUrl || "").replace(/\/$/, ""),
+    model: String(data.model || ""),
+    source: "management",
+    questionTimeoutMs: Number(data.questionTimeoutMs || 0) || undefined,
+    reportTimeoutMs: Number(data.reportTimeoutMs || 0) || undefined
+  };
+  globalConfig.managementModelCache = { token, at: Date.now(), config };
+  return config;
+}
+
 export async function getModelRuntimeConfig(): Promise<ModelRuntimeConfig> {
+  const management = await getManagementModelConfig();
+  if (management) return management;
   const stored = await getStoredSettings();
   if (stored) {
     if (stored.disabled) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { ConsoleShell, formatTime } from "../console-shell";
 import { useAdminSession } from "../use-admin-session";
 import {
@@ -13,10 +13,8 @@ import {
 export default function ResumesPage() {
   const { me, error, setError } = useAdminSession();
   const [items, setItems] = useState<ResumeRecord[]>([]);
-  const [candidateName, setCandidateName] = useState("");
-  const [file, setFile] = useState<File | null>(null);
-  const [notice, setNotice] = useState("");
-  const [busy, setBusy] = useState(false);
+
+  const [busyId, setBusyId] = useState("");
 
   async function load() {
     const result = await requestJSON("/api/v1/admin/resumes");
@@ -32,38 +30,6 @@ export default function ResumesPage() {
     if (me) void load();
   }, [me]);
 
-  async function upload(event: FormEvent) {
-    event.preventDefault();
-    if (!file) {
-      setError("请选择 PDF 或 Word 简历");
-      return;
-    }
-    setBusy(true);
-    setNotice("");
-    setError("");
-    try {
-      const body = new FormData();
-      body.set("candidateName", candidateName.trim());
-      body.set("file", file);
-      const response = await fetch("/api/v1/admin/resumes", {
-        method: "POST",
-        credentials: "include",
-        cache: "no-store",
-        body
-      });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) {
-        setError(displayError(parseAPIError(payload, "上传失败")));
-        return;
-      }
-      setFile(null);
-      setNotice("简历已上传到腾讯云 COS。");
-      await load();
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function download(id: string) {
     const result = await requestJSON(`/api/v1/admin/resumes/${encodeURIComponent(id)}/download`);
     if (!result.response.ok) {
@@ -74,27 +40,46 @@ export default function ResumesPage() {
     if (url) window.open(url, "_blank", "noopener,noreferrer");
   }
 
+  async function remove(id: string) {
+    if (!window.confirm("确定删除这份简历？删除后客户端可以重新上传。")) {
+      return;
+    }
+    const result = await requestJSON(`/api/v1/admin/resumes/${encodeURIComponent(id)}`, { method: "DELETE" });
+    if (!result.response.ok) {
+      setError(displayError(parseAPIError(result.body, "无法删除简历")));
+      return;
+    }
+    setError("");
+    await load();
+  }
+
+  async function reindex(id: string) {
+    setBusyId(id);
+    const result = await requestJSON(`/api/v1/admin/resumes/${encodeURIComponent(id)}/reindex`, { method: "POST" });
+    setBusyId("");
+    if (!result.response.ok) {
+      setError(displayError(parseAPIError(result.body, "无法重新索引")));
+      return;
+    }
+    setError("");
+    await load();
+  }
+
+  const indexLabel: Record<string, string> = {
+    pending: "等待索引",
+    indexing: "正在索引",
+    ready: "已索引",
+    failed: "索引失败",
+    skipped: "已跳过"
+  };
+
   return (
     <ConsoleShell me={me}>
       {error ? <p className="error">{error}</p> : null}
-      {notice ? <p className="ok">{notice}</p> : null}
-      <form className="card" onSubmit={upload}>
-        <h2>上传简历</h2>
-        <p className="muted">文件保存到腾讯云 COS，不经过客户端本地长期存储。仅支持 PDF / Word，最大 10MB。</p>
-        <label>
-          候选人姓名
-          <input value={candidateName} onChange={(event) => setCandidateName(event.target.value)} placeholder="可选" />
-        </label>
-        <label>
-          简历文件
-          <input
-            type="file"
-            accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            onChange={(event) => setFile(event.target.files?.[0] || null)}
-          />
-        </label>
-        <button type="submit" disabled={busy}>{busy ? "上传中…" : "上传到 COS"}</button>
-      </form>
+      <section className="card">
+        <h2>简历</h2>
+        <p className="muted">上传在 Windows 客户端完成。管理员可以查看、下载和删除；对象存储密钥不会下发到客户端。</p>
+      </section>
       <section className="card">
         <h2>已上传</h2>
         <table>
@@ -105,12 +90,13 @@ export default function ResumesPage() {
               <th>大小</th>
               <th>上传者</th>
               <th>时间</th>
+              <th>索引</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
             {items.length === 0 ? (
-              <tr><td colSpan={6} className="muted">还没有简历</td></tr>
+              <tr><td colSpan={7} className="muted">还没有简历</td></tr>
             ) : items.map((item) => (
               <tr key={item.id}>
                 <td>{item.candidateName || "—"}</td>
@@ -118,7 +104,14 @@ export default function ResumesPage() {
                 <td>{Math.max(1, Math.round(item.sizeBytes / 1024))} KB</td>
                 <td>{item.uploadedByUsername || "—"}</td>
                 <td>{formatTime(item.createdAt)}</td>
-                <td><button className="secondary" type="button" onClick={() => void download(item.id)}>下载</button></td>
+                <td>{indexLabel[item.indexStatus || ""] || item.indexStatus || "—"}</td>
+                <td>
+                  <div className="tableActions">
+                    <button className="secondary" type="button" onClick={() => void download(item.id)}>查看</button>
+                    <button className="secondary" type="button" disabled={busyId === item.id} onClick={() => void reindex(item.id)}>重新索引</button>
+                    <button className="danger" type="button" onClick={() => void remove(item.id)}>删除</button>
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>

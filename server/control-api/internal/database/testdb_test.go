@@ -61,7 +61,7 @@ func openTestPool(t *testing.T) *testPool {
 	if poolConfig.ConnConfig.RuntimeParams == nil {
 		poolConfig.ConnConfig.RuntimeParams = make(map[string]string)
 	}
-	poolConfig.ConnConfig.RuntimeParams["search_path"] = schema
+	poolConfig.ConnConfig.RuntimeParams["search_path"] = schema + ", public"
 
 	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {

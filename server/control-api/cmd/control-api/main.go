@@ -12,8 +12,11 @@ import (
 
 	"github.com/ai-interviewer/ai-powered/control-api/internal/config"
 	"github.com/ai-interviewer/ai-powered/control-api/internal/database"
+	"github.com/ai-interviewer/ai-powered/control-api/internal/embeddings"
 	"github.com/ai-interviewer/ai-powered/control-api/internal/httpapi"
 	"github.com/ai-interviewer/ai-powered/control-api/internal/identity"
+	"github.com/ai-interviewer/ai-powered/control-api/internal/knowledge"
+	"github.com/ai-interviewer/ai-powered/control-api/internal/knowledge/localpg"
 	"github.com/ai-interviewer/ai-powered/control-api/internal/presence"
 	"github.com/ai-interviewer/ai-powered/control-api/internal/resumes"
 	"github.com/ai-interviewer/ai-powered/control-api/internal/secretbox"
@@ -30,10 +33,21 @@ func main() {
 	if err != nil {
 		log.Fatalf("open database: %v", err)
 	}
-	defer pool.Close()
 	if err := database.Migrate(context.Background(), pool); err != nil {
+		pool.Close()
 		log.Fatalf("migrate database: %v", err)
 	}
+	pool, err = database.ReopenWithVector(context.Background(), cfg.DatabaseURL, pool)
+	if err != nil {
+		log.Fatalf("open database: %v", err)
+	}
+	defer pool.Close()
+
+	providerName, err := knowledge.NormalizeProviderName(cfg.KnowledgeProvider)
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	authentication, err := httpapi.NewDatabaseAuthentication(pool, cfg.SessionTTL)
 	if err != nil {
 		log.Fatal("initialize authentication service")
@@ -47,6 +61,20 @@ func main() {
 		}
 	}
 
+	resumeAdmin := resumes.NewService(pool, box, nil)
+	var knowledgeAdmin httpapi.KnowledgeAdmin
+	switch providerName {
+	case knowledge.ProviderLocalPGVector:
+		knowledgeAdmin = knowledge.NewService(
+			context.Background(),
+			pool,
+			resumeAdmin,
+			localpg.New(pool, embeddings.NewClient(cfg.EmbeddingBaseURL, cfg.EmbeddingModel), resumeAdmin.FetchObject),
+		)
+	default:
+		log.Fatal(knowledge.ErrUnknownProvider)
+	}
+
 	server := &http.Server{
 		Addr:              cfg.ListenAddress,
 		ReadHeaderTimeout: 10 * time.Second,
@@ -58,7 +86,8 @@ func main() {
 			UserAdmin:         identity.NewService(pool),
 			SettingsAdmin:     settings.NewService(pool, box, nil),
 			PresenceAdmin:     presence.NewStore(pool),
-			ResumeAdmin:       resumes.NewService(pool, box, nil),
+			ResumeAdmin:       resumeAdmin,
+			KnowledgeAdmin:    knowledgeAdmin,
 			SessionTTL:        cfg.SessionTTL,
 			CookieSecure:      cfg.CookieSecure,
 			TrustedProxyCIDRs: cfg.TrustedProxyCIDRs,

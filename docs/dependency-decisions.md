@@ -429,6 +429,14 @@
 - 未采用：在 Electron 里接入 `cos-js-sdk-v5`（会把密钥或临时密钥下发到桌面）；未采用 MinIO/AWS SDK，因为当前明确是腾讯云 COS。
 - 限制：需要先在腾讯云创建 Bucket 并在管理后台填写地域/桶名。密钥曾在聊天中明文提供，上线后应在腾讯云轮换 SecretKey。
 
+# 2026-08-16：客户端查看、删除并重新上传简历
+
+- 目标：Windows 客户端登录后能看到自己已上传的简历，打开原文件，删除后重新上传；管理后台同步支持删除。
+- 采用：复用已接入的官方 [tencentyun/cos-go-sdk-v5](https://github.com/tencentyun/cos-go-sdk-v5) `Object.Delete`（Apache-2.0）和现有预签名 `Get`。不新增 SDK、不把 COS 密钥下发到客户端。
+- 权限：客户端 `GET/DELETE /api/v1/client/resumes` 只操作当前账号上传的文件；管理员走 `/api/v1/admin/resumes` 可查看全部并删除。对象不存在时按官方 `cos.IsNotFoundError` 视为已删除，再删元数据，便于重试。
+- 未采用：前端直连 COS、静默覆盖旧文件、引入新的文件预览组件。PDF 用浏览器打开预签名链接；Word 由浏览器下载。
+- 限制：查看依赖 COS 预签名 URL（1 小时有效）；删除后索引/知识库若后续接入需另行清理。
+
 # 2026-08-16：火山 RTC 与 LiveKit 双线路，共用字幕 v1
 
 - 目标：候选人仍走腾讯会议/飞书。字幕 UI 只消费 `ai.interviewer.subtitle.v1`。管理端按压力在火山云 RTC 与自建 LiveKit 之间切换，两边配置都保留。
@@ -438,4 +446,48 @@
 - Token：Go control-api 用标准库 HMAC-SHA256 签发 LiveKit JWT，不引入 `server-sdk-go`（会带入 pion/WebRTC，对只签发 Token 明显过重）。火山正式模式仍请求已配置的 HTTPS Token 服务。
 - 未采用：同机 FunASR/whisper 作为 LiveKit STT；删除火山 RTC；把两家字段混在一个表单。
 - 限制：4 核 8G 可合部 SFU + 轻量 Agent + 管理栈，前提是 STT 走远程 API。公网需要 UDP/TURN 与 TLS；当前管理入口仍可走 HTTP 80，LiveKit 默认不启动（compose profile `livekit`）。默认 `activeProvider=volcengine`。
+
+# 2026-08-16：客户端独立登录页
+
+- 目标：把工作台「候选人简历」里的账号/密码表单移走，改成独立登录界面。
+- 采用：复用现有 Next.js App Router 的 `/login`、已有 `/api/control-session` Cookie 会话，以及管理后台登录页的布局节奏。不新增 UI 套件、状态管理库或身份 SDK。
+- 原因：设计文档已要求客户端有独立登录窗口；在简历卡片里塞登录表单会把鉴权和上传混在一起。
+- 未采用：把整个工作台强制跳到登录页（本地互动、设置和舞台仍可离线使用）；未改 Electron `safeStorage` 会话（仍走本机 httpOnly Cookie）。
+- 限制：登录只连接管理端客户端账号；管理后台继续用 `server/management-web` 的管理员登录页。
+- 登录失败：客户端只显示「登录失败」，不转发管理 API 的英文原文。桌面登录暂不发送 `deviceId`，因为设备登记尚未实现；若带上未登记的固定设备 ID，新建客户端账号即使用对密码也会被当成凭证错误。
+- 管理员保护：当前登录的管理员不能禁用自己；最后一位启用中的管理员也不能被禁用。用户列表「状态」列不再叫「账号」，避免和登录用户名混淆。
+
+# 2026-08-16：AI 模型改为管理端配置
+
+- 目标：Windows 客户端不再提供 AI 模型设置表单；地址、模型名和 API Key 只在管理后台配置。
+- 采用：复用已有管理端 `/settings/ai`、PostgreSQL 加密存储和 `GET /models` 探测。客户端登录后由本机 Next 服务用桌面会话向 `GET /api/v1/client/settings/ai` 拉取运行时配置；密钥只留在本机 Node 内存，不写 `model.json`、不回传到浏览器。
+- 未采用：把追问/纪要 HTTP 调用整段迁到 Go（当前 llm.ts 已能工作）；未删除本机环境变量/旧 DPAPI 回退，避免未登录或管理端暂不可达时完全不能跑本地冒烟。
+- 限制：该客户端接口需部署新版 control-api 后才生效。浏览器管理会话不能读取 API Key。
+
+# 2026-08-16：语音转写改由管理端下发，客户端展示网络质量
+
+- 目标：客户端不再配置本地 whisper/OpenAI 转写；转写地址、模型和密钥与 AI 一样由管理端提供。同时让操作员在客户端看到管理端延时，以及实时字幕线路的丢包。
+- 采用：复用管理端 RTC 页已有的 ASR 字段和 AES-256-GCM 存储。新增桌面专用 `GET /api/v1/client/settings/asr`，密钥只进本机 Node 内存。未单独配置 ASR 时回退到管理端 AI 的 OpenAI-compatible 地址。网络延时用已有 `CONTROL_API_ORIGIN/healthz` 往返；丢包/线路 RTT 用官方 [`livekit-client`](https://www.npmjs.com/package/livekit-client) 的 `getRTCStatsReport` / `RTCRtpSender.getStats`，以及火山 [`@volcengine/rtc`](https://www.npmjs.com/package/@volcengine/rtc) 的 `getStats`。不新增探测库或 UI 套件。
+- 未采用：在客户端保留 whisper.cpp 配置表单；用 ICMP ping 测丢包（浏览器不可用，且与 WebRTC 线路无关）；把转写 HTTP 整段迁到 Go。
+- 限制：丢包数字要在启动实时字幕、WebRTC 连通后才有。未登录或新 ASR 接口未部署时，本机环境变量/whisper 仍可作冒烟回退。浏览器管理会话不能读取 ASR 密钥。
+
+# 2026-08-16：简历知识库 RAG（local-pgvector）
+
+- 目标：上传简历后异步索引，追问时按 `resumeId` 检索经历片段并注入 `generateNextQuestion`。检索失败或未就绪时继续提问，不挡面试。
+- 稳定面：HTTP `POST /api/v1/client/knowledge/search` 与 Go `knowledge.Provider`。一期只实现 `local-pgvector`；换云知识库或 RAGFlow 时只加适配器，不改面试客户端。
+- 向量存储：[pgvector](https://github.com/pgvector/pgvector) PostgreSQL 扩展，镜像 `pgvector/pgvector:pg16`（PostgreSQL 许可证）。Go 侧 [pgvector-go](https://github.com/pgvector/pgvector-go)（MIT）通过 `AfterConnect` 注册类型。知识留在管理端库，不在客户端建向量库。
+- Embedding：Compose 内网 [Text Embeddings Inference](https://github.com/huggingface/text-embeddings-inference) `cpu-1.9`（Apache-2.0）加载 [BAAI/bge-m3](https://huggingface.co/BAAI/bge-m3)（MIT，1024 维）。走官方 OpenAI-compatible `POST /v1/embeddings`，不把推理写进 Go 二进制，不映射宿主端口。
+- 解析：PDF 用 [ledongthuc/pdf](https://github.com/ledongthuc/pdf)（MIT）；docx 用标准库 `archive/zip` + `encoding/xml`。`.doc` 标记 skipped；无字层扫描件标记 failed。不接 OCR。
+- 切块：自写「章节标题 + 日期经历整段」，每块带 `[候选人 | 章节 | 公司或项目]` 前缀。不用固定字数滑动窗，也不用英文 `.` 当句界。该逻辑关在 `local-pgvector` 适配器内，换供应商后可整段丢掉。
+- 未采用：RAGFlow / Dify / WeKnora（独立产品，RAM 或权限模型不合）；langchaingo 整框架（默认滑动窗切块，且再包一层 HTTP/pgx）；chromem-go（向量不进现有 PostgreSQL）；云 embedding（密钥与数据出管理端内网）。
+- 限制：TEI CPU 常驻约 2–4GB，权重首次约 1.2–2GB。维度相同也不能混用向量空间，换模型必须整库重索引。一期不做 rerank、稀疏检索、题库 UI、报告注入或第二套 Provider。
+
+# 2026-08-16：真实摄像头与虚拟摄像头二选一
+
+- 目标：虚拟摄像头改为可选。默认用会议软件里的真实摄像头当助手；只有选择 OBS 虚拟摄像头时才输出数字人。
+- 采用：复用现有 OBS Virtual Camera、舞台默认 CSS 形象、浏览器 `localStorage` 保存 `real` / `virtual`。不新增虚拟摄像头驱动、上传 SDK 或会议软件自动化。
+- 真实摄像头：会议软件选普通摄像头和麦克风；本软件只做字幕、追问和记录。开始门禁只保留管理端已配置的 AI 模型。
+- 虚拟摄像头：仍走 OBS 场景、`/stage`、Virtual Camera、虚拟音频和入会确认。不再把上传图片/视频当作硬门禁；默认形象即可，素材上传仅作可选美化。
+- 未采用：自研虚拟摄像头；把真实摄像头接到舞台再经 OBS 输出；自动改腾讯会议/飞书的设备选项。
+- 限制：本机无法替用户改第三方会议软件里的摄像头选择。真实摄像头路径不替换对方面看到的画面。
 

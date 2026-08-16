@@ -13,6 +13,7 @@ import {
   setInterviewReport
 } from "../../../lib/interview";
 import { generateInterviewReport, generateNextQuestion } from "../../../lib/llm";
+import { buildKnowledgeQuery, searchResumeKnowledge } from "../../../lib/knowledge";
 import {
   getModelRuntimeConfig,
   isModelRuntimeConfigured
@@ -27,7 +28,8 @@ const actionSchema = z.discriminatedUnion("action", [
     jobDescription: z.string().trim().max(3000).default(""),
     interviewFocus: z.string().trim().max(500).default(""),
     maxQuestions: z.number().int().min(2).max(20).default(6),
-    consentConfirmed: z.literal(true)
+    consentConfirmed: z.literal(true),
+    resumeId: z.string().trim().max(64).optional().default("")
   }),
   z.object({
     action: z.literal("answer"),
@@ -49,6 +51,31 @@ const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("finish") }),
   z.object({ action: z.literal("generateReport") })
 ]);
+
+function lastInterviewerText(transcript: { role: string; text: string }[]) {
+  for (let index = transcript.length - 1; index >= 0; index -= 1) {
+    if (transcript[index].role === "interviewer") {
+      return transcript[index].text;
+    }
+  }
+  return "";
+}
+
+async function knowledgeContextFor(resumeId: string | undefined, transcript: { role: string; text: string }[], answer: string) {
+  if (!resumeId) {
+    return "";
+  }
+  return searchResumeKnowledge(resumeId, buildKnowledgeQuery(lastInterviewerText(transcript), answer));
+}
+
+function lastCandidateText(transcript: { role: string; text: string }[]) {
+  for (let index = transcript.length - 1; index >= 0; index -= 1) {
+    if (transcript[index].role === "candidate") {
+      return transcript[index].text;
+    }
+  }
+  return "";
+}
 
 export async function GET() {
   return NextResponse.json(await getSession(), {
@@ -129,7 +156,12 @@ export async function POST(request: Request) {
         roleName: session.roleName,
         jobDescription: session.jobDescription,
         interviewFocus: session.interviewFocus,
-        transcript: session.transcript.slice(0, -1)
+        transcript: session.transcript.slice(0, -1),
+        knowledgeContext: await knowledgeContextFor(
+          session.resumeId,
+          session.transcript.slice(0, -1),
+          lastCandidateText(session.transcript.slice(0, -1))
+        )
       });
       return NextResponse.json(await replaceLastInterviewerQuestion({
         question,
@@ -159,7 +191,8 @@ export async function POST(request: Request) {
         roleName: session.roleName,
         jobDescription: session.jobDescription,
         interviewFocus: session.interviewFocus,
-        transcript: correctedTranscript
+        transcript: correctedTranscript,
+        knowledgeContext: await knowledgeContextFor(session.resumeId, correctedTranscript, parsed.data.answer)
       });
       return NextResponse.json(await replaceLastExchange({
         answer: parsed.data.answer,
@@ -214,7 +247,8 @@ export async function POST(request: Request) {
       roleName: session.roleName,
       jobDescription: session.jobDescription,
       interviewFocus: session.interviewFocus,
-      transcript: transcriptWithAnswer
+      transcript: transcriptWithAnswer,
+      knowledgeContext: await knowledgeContextFor(session.resumeId, session.transcript, parsed.data.answer)
     });
     return NextResponse.json(await appendAnswerAndQuestion({
       answer: parsed.data.answer,

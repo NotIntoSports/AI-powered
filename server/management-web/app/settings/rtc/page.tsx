@@ -10,6 +10,7 @@ import {
   type PublicRTCSettings,
   type RTCTestResult
 } from "../../../lib/control-api";
+import { ConfigStatus, SecretField } from "../config-status";
 
 export default function RTCSettingsPage() {
   const { me, error, setError } = useAdminSession();
@@ -136,7 +137,14 @@ export default function RTCSettingsPage() {
       {notice ? <p className="ok">{notice}</p> : null}
       <form onSubmit={save} autoComplete="off">
         <section className="card">
-          <h2>当前字幕线路</h2>
+          <div className="card-head">
+            <h2>当前字幕线路</h2>
+            <ConfigStatus
+              ready={Boolean(config?.available)}
+              readyText={activeProvider === "livekit" ? "已配置 · LiveKit 可用" : "已配置 · 火山云可用"}
+              waitText="当前线路尚未就绪"
+            />
+          </div>
           <p className="muted">火山云 RTC 与自建 LiveKit 配置同时保存。切换只改当前线路，一场面试中途不会热切。自建压力大时切回火山云。</p>
           <label>
             当前线路
@@ -157,17 +165,23 @@ export default function RTCSettingsPage() {
             </select>
           </label>
           <p className="muted">
-            当前可用：{config?.available ? "是" : "否"}
-            {config?.volcengineAvailable ? " · 火山就绪" : " · 火山未就绪"}
+            当前线路：{config?.available ? "已配置并可用" : "未就绪"}
+            {config?.volcengineAvailable ? " · 火山就绪" : " · 火山未作为备用线路"}
             {config?.livekitAvailable ? " · LiveKit 就绪" : " · LiveKit 未就绪"}
           </p>
         </section>
 
         <section className="card">
-          <h2>火山 RTC</h2>
+          <div className="card-head">
+            <h2>火山 RTC</h2>
+            <ConfigStatus
+              ready={Boolean(config?.volcengineAvailable)}
+              readyText="备用线路已就绪"
+              waitText="备用线路，当前未使用"
+            />
+          </div>
           <p className="muted">
-            AppID、模式和加密 Secret 写入数据库，读取接口不会返回 Secret。
-            {config?.secretConfigured ? " 当前已保存火山密钥。" : " 试用模式需要 Token，正式模式可保存 Token 服务地址或 App Secret。"}
+            与 LiveKit 同时保存。当前线路是 LiveKit 时，这里可以留空。
           </p>
           <label>
             RTC AppID
@@ -217,10 +231,16 @@ export default function RTCSettingsPage() {
         </section>
 
         <section className="card">
-          <h2>LiveKit</h2>
+          <div className="card-head">
+            <h2>LiveKit</h2>
+            <ConfigStatus
+              ready={Boolean(config?.livekitAvailable)}
+              readyText="已配置并可用"
+              waitText="尚未配齐 URL、API Key 和 Secret"
+            />
+          </div>
           <p className="muted">
-            自建 SFU 地址、API Key 和 API Secret。Secret 加密存储，不会回传。
-            {config?.livekitSecretConfigured ? " 当前已保存 LiveKit Secret。" : " 选为当前线路前必须填完整。"}
+            自建 SFU 地址、API Key 和 API Secret。Secret 加密存储，页面不会回显明文。
           </p>
           <label>
             LiveKit URL
@@ -230,22 +250,31 @@ export default function RTCSettingsPage() {
             API Key
             <input value={livekitApiKey} onChange={(event) => setLivekitApiKey(event.target.value)} />
           </label>
-          <label>
-            API Secret{config?.livekitSecretConfigured ? "（留空则保留已保存密钥）" : ""}
-            <input type="password" value={livekitApiSecret} onChange={(event) => setLivekitApiSecret(event.target.value)} autoComplete="new-password" />
-          </label>
-          <label>
-            流式 ASR 地址（OpenAI-compatible，可选）
-            <input value={asrBaseUrl} onChange={(event) => setAsrBaseUrl(event.target.value)} placeholder="https://api.example.com/v1" />
-          </label>
-          <label>
-            ASR 模型
-            <input value={asrModel} onChange={(event) => setAsrModel(event.target.value)} />
-          </label>
-          <label>
-            ASR API Key{config?.asrKeyConfigured ? "（留空则保留已保存密钥）" : "（可选）"}
-            <input type="password" value={asrApiKey} onChange={(event) => setAsrApiKey(event.target.value)} autoComplete="new-password" />
-          </label>
+          <SecretField
+            label="API Secret"
+            configured={Boolean(config?.livekitSecretConfigured)}
+            value={livekitApiSecret}
+            onChange={setLivekitApiSecret}
+          />
+          <details className="muted">
+            <summary>流式 ASR（可选，不填也不影响 LiveKit 推流）</summary>
+            <div className="stack" style={{ marginTop: 12 }}>
+              <label>
+                ASR 地址（OpenAI-compatible）
+                <input value={asrBaseUrl} onChange={(event) => setAsrBaseUrl(event.target.value)} placeholder="未使用" />
+              </label>
+              <label>
+                ASR 模型
+                <input value={asrModel} onChange={(event) => setAsrModel(event.target.value)} placeholder="未使用" />
+              </label>
+              <SecretField
+                label="ASR API Key"
+                configured={Boolean(config?.asrKeyConfigured)}
+                value={asrApiKey}
+                onChange={setAsrApiKey}
+              />
+            </div>
+          </details>
           <div className="row">
             <button className="secondary" type="button" disabled={busy} onClick={() => void test("livekit")}>测试 LiveKit</button>
           </div>

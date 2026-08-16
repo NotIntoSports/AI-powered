@@ -53,29 +53,29 @@ type AIRecord struct {
 }
 
 type RTCRecord struct {
-	AppID                      string
-	Language                   string
-	Mode                       string
-	TokenServiceURL            string
-	EncryptedSecret            []byte
-	TrialExpiresAt             *time.Time
-	TrialRoomID                string
-	TrialUserID                string
-	Enabled                    bool
-	ActiveProvider             string
-	LiveKitURL                 string
-	LiveKitAPIKey              string
-	EncryptedLiveKitAPISecret  []byte
-	LiveKitASRBaseURL          string
-	LiveKitASRModel            string
-	EncryptedASRAPIKey         []byte
-	LiveKitKeyVersion          int
-	KeyVersion                 int
-	ConfigVersion              int
-	UpdatedByUserID            string
-	UpdatedByUsername          string
-	CreatedAt                  time.Time
-	UpdatedAt                  time.Time
+	AppID                     string
+	Language                  string
+	Mode                      string
+	TokenServiceURL           string
+	EncryptedSecret           []byte
+	TrialExpiresAt            *time.Time
+	TrialRoomID               string
+	TrialUserID               string
+	Enabled                   bool
+	ActiveProvider            string
+	LiveKitURL                string
+	LiveKitAPIKey             string
+	EncryptedLiveKitAPISecret []byte
+	LiveKitASRBaseURL         string
+	LiveKitASRModel           string
+	EncryptedASRAPIKey        []byte
+	LiveKitKeyVersion         int
+	KeyVersion                int
+	ConfigVersion             int
+	UpdatedByUserID           string
+	UpdatedByUsername         string
+	CreatedAt                 time.Time
+	UpdatedAt                 time.Time
 }
 
 type AIInput struct {
@@ -128,31 +128,46 @@ type PublicAI struct {
 	UpdatedByUsername string     `json:"updatedByUsername,omitempty"`
 }
 
+type ClientAI struct {
+	PublicAI
+	APIKey string `json:"apiKey,omitempty"`
+}
+
+type ClientASR struct {
+	Configured bool   `json:"configured"`
+	Available  bool   `json:"available"`
+	BaseURL    string `json:"baseUrl"`
+	Model      string `json:"model"`
+	Language   string `json:"language"`
+	APIKey     string `json:"apiKey,omitempty"`
+	Source     string `json:"source,omitempty"`
+}
+
 type PublicRTC struct {
-	Configured               bool       `json:"configured"`
-	Available                bool       `json:"available"`
-	ActiveProvider           string     `json:"activeProvider"`
-	AppID                    string     `json:"appId"`
-	Language                 string     `json:"language"`
-	Mode                     string     `json:"mode"`
-	TokenServiceURL          string     `json:"tokenServiceUrl"`
-	SecretConfigured         bool       `json:"secretConfigured"`
-	TrialExpiresAt           *time.Time `json:"trialExpiresAt,omitempty"`
-	TrialRoomID              string     `json:"trialRoomId"`
-	TrialUserID              string     `json:"trialUserId"`
-	VolcengineAvailable      bool       `json:"volcengineAvailable"`
-	LiveKitURL               string     `json:"livekitUrl"`
-	LiveKitAPIKey            string     `json:"livekitApiKey"`
-	LiveKitSecretConfigured  bool       `json:"livekitSecretConfigured"`
-	LiveKitConfigured        bool       `json:"livekitConfigured"`
-	LiveKitAvailable         bool       `json:"livekitAvailable"`
-	ASRBaseURL               string     `json:"asrBaseUrl"`
-	ASRModel                 string     `json:"asrModel"`
-	ASRKeyConfigured         bool       `json:"asrKeyConfigured"`
-	Enabled                  bool       `json:"enabled"`
-	ConfigVersion            int        `json:"configVersion"`
-	UpdatedAt                *time.Time `json:"updatedAt,omitempty"`
-	UpdatedByUsername        string     `json:"updatedByUsername,omitempty"`
+	Configured              bool       `json:"configured"`
+	Available               bool       `json:"available"`
+	ActiveProvider          string     `json:"activeProvider"`
+	AppID                   string     `json:"appId"`
+	Language                string     `json:"language"`
+	Mode                    string     `json:"mode"`
+	TokenServiceURL         string     `json:"tokenServiceUrl"`
+	SecretConfigured        bool       `json:"secretConfigured"`
+	TrialExpiresAt          *time.Time `json:"trialExpiresAt,omitempty"`
+	TrialRoomID             string     `json:"trialRoomId"`
+	TrialUserID             string     `json:"trialUserId"`
+	VolcengineAvailable     bool       `json:"volcengineAvailable"`
+	LiveKitURL              string     `json:"livekitUrl"`
+	LiveKitAPIKey           string     `json:"livekitApiKey"`
+	LiveKitSecretConfigured bool       `json:"livekitSecretConfigured"`
+	LiveKitConfigured       bool       `json:"livekitConfigured"`
+	LiveKitAvailable        bool       `json:"livekitAvailable"`
+	ASRBaseURL              string     `json:"asrBaseUrl"`
+	ASRModel                string     `json:"asrModel"`
+	ASRKeyConfigured        bool       `json:"asrKeyConfigured"`
+	Enabled                 bool       `json:"enabled"`
+	ConfigVersion           int        `json:"configVersion"`
+	UpdatedAt               *time.Time `json:"updatedAt,omitempty"`
+	UpdatedByUsername       string     `json:"updatedByUsername,omitempty"`
 }
 
 type RTCConnection struct {

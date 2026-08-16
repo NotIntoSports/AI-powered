@@ -35,6 +35,7 @@ export type InterviewSession = {
   finishedAt: string | null;
   transcript: TranscriptItem[];
   report: InterviewReport | null;
+  resumeId: string;
 };
 
 const transcriptItemSchema = z.object({
@@ -59,7 +60,8 @@ const sessionSchema = z.object({
   startedAt: z.string().nullable().default(null),
   finishedAt: z.string().nullable().default(null),
   transcript: z.array(transcriptItemSchema),
-  report: interviewReportSchema.nullable().default(null)
+  report: interviewReportSchema.nullable().default(null),
+  resumeId: z.string().max(64).default("")
 });
 
 const initialSession: InterviewSession = {
@@ -77,7 +79,8 @@ const initialSession: InterviewSession = {
   startedAt: null,
   finishedAt: null,
   transcript: [],
-  report: null
+  report: null,
+  resumeId: ""
 };
 
 const dataDirectory = path.join(dataRoot, "interviews");
@@ -239,6 +242,7 @@ export function resetSession(input: {
   interviewFocus: string;
   maxQuestions: number;
   consentConfirmed: true;
+  resumeId?: string;
 }): Promise<InterviewSession> {
   return mutateSession((previous) => {
     if (previous.status === "running") throw new Error("SESSION_ALREADY_RUNNING");
@@ -259,7 +263,8 @@ export function resetSession(input: {
       startedAt: timestamp,
       finishedAt: null,
       transcript: [{ role: "interviewer", kind: "opening", text: opening, at: timestamp }],
-      report: null
+      report: null,
+      resumeId: input.resumeId?.trim() || ""
     };
   });
 }

@@ -53,7 +53,7 @@ func TestAuthenticationSecuritySchemesAreExact(t *testing.T) {
 
 func TestAdminUserErrorsAreDocumented(t *testing.T) {
 	spec := readSpec(t)
-	for _, code := range []string{"USERNAME_TAKEN", "LAST_ADMIN_REQUIRED", "USER_NOT_FOUND", "INVALID_INPUT", "UNAUTHENTICATED", "FORBIDDEN"} {
+	for _, code := range []string{"USERNAME_TAKEN", "LAST_ADMIN_REQUIRED", "CANNOT_DISABLE_SELF", "USER_NOT_FOUND", "INVALID_INPUT", "UNAUTHENTICATED", "FORBIDDEN"} {
 		if !strings.Contains(spec, "code: "+code) && !strings.Contains(spec, "example: {code: "+code) {
 			t.Fatalf("missing documented error code %s", code)
 		}
@@ -83,6 +83,21 @@ func TestAdminMutationsDocumentInvalidInputAndTooLarge(t *testing.T) {
 				t.Fatal("admin mutation must document REQUEST_TOO_LARGE 413")
 			}
 		})
+	}
+}
+
+func TestKnowledgeSearchContractHidesVectors(t *testing.T) {
+	spec := readSpec(t)
+	section := sectionBetween(t, spec, "  /api/v1/client/knowledge/search:", "components:")
+	if !strings.Contains(section, "operationId: searchClientKnowledge") {
+		t.Fatal("missing searchClientKnowledge")
+	}
+	if strings.Contains(section, "embedding") || strings.Contains(section, "objectKey") || strings.Contains(section, "provider") {
+		t.Fatal("search contract must not expose embedding, objectKey, or provider fields")
+	}
+	resume := sectionBetween(t, spec, "    Resume:", "    ResumeIndexStatus:")
+	if strings.Contains(resume, "objectKey") || strings.Contains(resume, "sha256") {
+		t.Fatal("Resume schema must not expose objectKey or sha256")
 	}
 }
 

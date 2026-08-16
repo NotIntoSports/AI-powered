@@ -3,6 +3,12 @@
 import { useEffect, useRef, useState } from "react";
 import VERTC from "@volcengine/rtc";
 import { createSubtitleTransport } from "../../desktop/rtc/create-transport.ts";
+import {
+  describeNetwork,
+  getNetworkQuality,
+  setRtcNetwork,
+  subscribeNetworkQuality
+} from "./network-quality.ts";
 import { subtitleSink } from "../../lib/subtitles/sink.ts";
 import type { SubtitleProvider, SubtitleTransport } from "../../lib/subtitles/transport.ts";
 
@@ -58,7 +64,11 @@ export function RtcBridgeControl() {
   const [status, setStatus] = useState("请选择正在通话的会议软件进程。");
   const [running, setRunning] = useState(false);
   const [provider, setProvider] = useState<SubtitleProvider>("volcengine");
+  const [network, setNetwork] = useState(getNetworkQuality);
   const cleanupRef = useRef<null | (() => Promise<void>)>(null);
+  const transportRef = useRef<SubtitleTransport | null>(null);
+
+  useEffect(() => subscribeNetworkQuality(() => setNetwork(getNetworkQuality())), []);
 
   async function refresh() {
     const bridge = window.aiInterviewerDesktop;
@@ -108,6 +118,7 @@ export function RtcBridgeControl() {
       appId: token.appId,
       url: token.url
     });
+    transportRef.current = transport;
     const removePcm = bridge.onAudioPcm(pcm.push);
     const removeEvent = bridge.onAudioEvent((event) => {
       const value = event as { type?: string; peak?: number; message?: string };
@@ -119,6 +130,8 @@ export function RtcBridgeControl() {
     cleanupRef.current = async () => {
       removePcm();
       removeEvent();
+      transportRef.current = null;
+      setRtcNetwork({ connected: false });
       await bridge.stopAudioCapture().catch(() => undefined);
       await transport.disconnect().catch(() => undefined);
       if (engine) VERTC.destroyEngine(engine);
@@ -130,6 +143,29 @@ export function RtcBridgeControl() {
     setRunning(true);
     setStatus(`${providerLabel(activeProvider)} 运行中；监听声音仍由会议软件直接播放。`);
   }
+
+  useEffect(() => {
+    if (!running) {
+      setRtcNetwork({ connected: false });
+      return;
+    }
+    let active = true;
+    async function poll() {
+      const stats = await transportRef.current?.getNetworkStats?.().catch(() => null);
+      if (!active) return;
+      setRtcNetwork({
+        connected: true,
+        rttMs: stats?.rttMs ?? null,
+        packetLossPct: stats?.packetLossPct ?? null
+      });
+    }
+    void poll();
+    const timer = window.setInterval(() => void poll(), 2_000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [running]);
 
   async function stop() {
     const cleanup = cleanupRef.current;
@@ -154,6 +190,7 @@ export function RtcBridgeControl() {
         <button className="ghost" disabled={running} onClick={() => void refresh()}>刷新进程</button>
       </div>
       <p>{status}</p>
+      <p className="networkMeter">{describeNetwork(network)}</p>
       <p className="muted">只捕获所选会议进程及其子进程；PCM 不落盘。线路由管理端 current provider 决定，一场面试中途不切换。若会议软件重启，请重新选择进程。</p>
     </article>
   );

@@ -12,10 +12,13 @@ import (
 )
 
 const (
-	defaultListenAddress = "127.0.0.1:8080"
-	defaultSessionTTL    = 8 * time.Hour
-	minimumSessionTTL    = 15 * time.Minute
-	maximumSessionTTL    = 30 * 24 * time.Hour
+	defaultListenAddress     = "127.0.0.1:8080"
+	defaultSessionTTL        = 8 * time.Hour
+	minimumSessionTTL        = 15 * time.Minute
+	maximumSessionTTL        = 30 * 24 * time.Hour
+	defaultKnowledgeProvider = "local-pgvector"
+	defaultEmbeddingBaseURL  = "http://127.0.0.1:8090"
+	defaultEmbeddingModel    = "BAAI/bge-m3"
 )
 
 var (
@@ -32,14 +35,20 @@ type Config struct {
 	CookieSecure      bool
 	TrustedProxyCIDRs []netip.Prefix
 	SettingsMasterKey []byte
+	KnowledgeProvider string
+	EmbeddingBaseURL  string
+	EmbeddingModel    string
 }
 
 func Load(getenv func(string) string) (Config, error) {
 	cfg := Config{
-		ListenAddress: defaultListenAddress,
-		DatabaseURL:   getenv("DATABASE_URL"),
-		SessionTTL:    defaultSessionTTL,
-		CookieSecure:  true,
+		ListenAddress:     defaultListenAddress,
+		DatabaseURL:       getenv("DATABASE_URL"),
+		SessionTTL:        defaultSessionTTL,
+		CookieSecure:      true,
+		KnowledgeProvider: defaultKnowledgeProvider,
+		EmbeddingBaseURL:  defaultEmbeddingBaseURL,
+		EmbeddingModel:    defaultEmbeddingModel,
 	}
 	if cfg.DatabaseURL == "" {
 		return Config{}, ErrDatabaseURLRequired
@@ -77,6 +86,15 @@ func Load(getenv func(string) string) (Config, error) {
 			return Config{}, err
 		}
 		cfg.SettingsMasterKey = key
+	}
+	if value := strings.TrimSpace(getenv("KNOWLEDGE_PROVIDER")); value != "" {
+		cfg.KnowledgeProvider = value
+	}
+	if value := strings.TrimSpace(getenv("EMBEDDING_BASE_URL")); value != "" {
+		cfg.EmbeddingBaseURL = strings.TrimRight(value, "/")
+	}
+	if value := strings.TrimSpace(getenv("EMBEDDING_MODEL")); value != "" {
+		cfg.EmbeddingModel = value
 	}
 
 	return cfg, nil

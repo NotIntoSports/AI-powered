@@ -39,7 +39,9 @@ test("error parser uses server message and ignores password-shaped fields", asyn
   assert.equal(error.code, "INVALID_CREDENTIALS");
   assert.equal(error.message, "invalid username or password");
   assert.equal(error.requestId, "req-1");
+  assert.equal(api.displayError(error), "登录失败");
   assert.equal(api.displayError(error).includes("should-not-display"), false);
+  assert.equal(api.displayError({ code: "RESUME_NOT_FOUND", message: "resume not found" }), "简历不存在或已删除");
 });
 
 test("public user parser keeps online presence fields", async () => {
@@ -65,4 +67,14 @@ test("login page has no registration or password-recovery entry", () => {
   assert.match(loginPage, /buildLoginBody/);
   assert.match(loginPage, /没有公开注册/);
   assert.doesNotMatch(loginPage, /<a[\s\S]{0,80}注册|找回密码|forgot password|sign up/i);
+});
+
+test("resume admin page can view, reindex, and delete uploaded files", () => {
+  const page = readFileSync(join(root, "..", "app", "resumes", "page.tsx"), "utf8");
+  assert.match(page, /\/api\/v1\/admin\/resumes/);
+  assert.match(page, /method: "DELETE"/);
+  assert.match(page, /\/reindex/);
+  assert.match(page, />查看</);
+  assert.match(page, />重新索引</);
+  assert.match(page, />删除</);
 });

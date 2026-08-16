@@ -43,6 +43,23 @@ func (s *Service) GetAI(ctx context.Context) (PublicAI, error) {
 	return PublicAIFrom(record, decryptErr), nil
 }
 
+func (s *Service) GetClientAI(ctx context.Context) (ClientAI, error) {
+	store := NewStore(s.db, s.box)
+	record, err := store.GetAI(ctx)
+	if errors.Is(err, ErrNotConfigured) {
+		return ClientAI{PublicAI: EmptyPublicAI()}, nil
+	}
+	if err != nil {
+		return ClientAI{}, err
+	}
+	apiKey, decryptErr := store.DecryptAPIKey(record)
+	public := PublicAIFrom(record, decryptErr)
+	if decryptErr != nil {
+		return ClientAI{PublicAI: public}, decryptErr
+	}
+	return ClientAI{PublicAI: public, APIKey: apiKey}, nil
+}
+
 func (s *Service) PutAI(ctx context.Context, actor users.User, requestID string, input AIInput) (PublicAI, error) {
 	var public PublicAI
 	err := pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
@@ -113,6 +130,58 @@ func (s *Service) TestAI(ctx context.Context, actor users.User, requestID string
 		},
 	})
 	return result, nil
+}
+
+func (s *Service) GetClientASR(ctx context.Context) (ClientASR, error) {
+	store := NewStore(s.db, s.box)
+	language := "zh"
+	rtc, rtcErr := store.GetRTC(ctx)
+	if rtcErr != nil && !errors.Is(rtcErr, ErrNotConfigured) {
+		return ClientASR{}, rtcErr
+	}
+	if rtcErr == nil && strings.TrimSpace(rtc.Language) != "" {
+		language = strings.TrimSpace(rtc.Language)
+	}
+	if rtcErr == nil && strings.TrimSpace(rtc.LiveKitASRBaseURL) != "" {
+		apiKey, decryptErr := store.DecryptASRAPIKey(rtc)
+		baseURL := strings.TrimRight(strings.TrimSpace(rtc.LiveKitASRBaseURL), "/")
+		model := strings.TrimSpace(rtc.LiveKitASRModel)
+		if model == "" {
+			model = "whisper-1"
+		}
+		available := isSecureEndpoint(baseURL) && decryptErr == nil && (apiKey != "" || isLocalEndpoint(baseURL))
+		result := ClientASR{
+			Configured: true,
+			Available:  available,
+			BaseURL:    baseURL,
+			Model:      model,
+			Language:   language,
+			APIKey:     apiKey,
+			Source:     "asr",
+		}
+		if decryptErr != nil {
+			result.APIKey = ""
+			result.Available = false
+			return result, decryptErr
+		}
+		return result, nil
+	}
+	ai, err := s.GetClientAI(ctx)
+	if err != nil {
+		return ClientASR{}, err
+	}
+	if !ai.Configured {
+		return ClientASR{Language: language}, nil
+	}
+	return ClientASR{
+		Configured: ai.Configured,
+		Available:  ai.Available,
+		BaseURL:    ai.BaseURL,
+		Model:      "whisper-1",
+		Language:   language,
+		APIKey:     ai.APIKey,
+		Source:     "ai",
+	}, nil
 }
 
 func (s *Service) GetRTC(ctx context.Context) (PublicRTC, error) {

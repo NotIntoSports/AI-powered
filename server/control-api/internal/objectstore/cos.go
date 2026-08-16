@@ -94,6 +94,22 @@ func (c *COS) PutObject(ctx context.Context, creds Credentials, key, contentType
 	return err
 }
 
+func (c *COS) GetObject(ctx context.Context, creds Credentials, key string) ([]byte, error) {
+	response, err := c.client(creds, true).Object.Get(ctx, key, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	payload, err := io.ReadAll(io.LimitReader(response.Body, (10<<20)+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(payload) > 10<<20 {
+		return nil, fmt.Errorf("object exceeds resume size limit")
+	}
+	return payload, nil
+}
+
 func (c *COS) PresignGet(ctx context.Context, creds Credentials, key string, expiry time.Duration) (string, error) {
 	presigned, err := c.client(creds, true).Object.GetPresignedURL(
 		ctx,
@@ -108,4 +124,12 @@ func (c *COS) PresignGet(ctx context.Context, creds Credentials, key string, exp
 		return "", err
 	}
 	return presigned.String(), nil
+}
+
+func (c *COS) DeleteObject(ctx context.Context, creds Credentials, key string) error {
+	_, err := c.client(creds, true).Object.Delete(ctx, key)
+	if err == nil || cos.IsNotFoundError(err) {
+		return nil
+	}
+	return err
 }

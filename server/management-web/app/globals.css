@@ -17,6 +17,11 @@ h2 { margin: 0; font-size: 18px; }
 .row > * { flex: 1; min-width: 160px; }
 .error { color: #f3b4b4; font-size: 13px; }
 .ok { color: #8ee0b5; font-size: 13px; }
+.status-pill { margin: 0; font-size: 13px; font-weight: 700; }
+.ok-pill { color: #8ee0b5; }
+.wait-pill { color: #e6c07b; }
+.card-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.card-head h2 { margin: 0; }
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
 th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid #262c36; vertical-align: top; }
 .topbar { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 12px; }
@@ -24,6 +29,8 @@ th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid #262c36; 
 .nav { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 22px; }
 .nav a { color: #d6dce5; text-decoration: none; padding: 8px 12px; border-radius: 999px; background: #171b24; font-size: 13px; font-weight: 600; }
 .nav a.active { background: #eef4ff; color: #10141b; }
+.tableActions { display: flex; flex-wrap: wrap; gap: 8px; }
+.tableActions button { padding: 8px 11px; font-size: 12px; }
 .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 16px; }
 .stat { border: 1px solid #262c36; border-radius: 14px; padding: 16px; background: #10131a; }
 .stat b { display: block; font-size: 28px; margin-top: 6px; }

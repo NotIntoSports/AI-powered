@@ -190,6 +190,33 @@ func TestMigrateCreatesIdentityTables(t *testing.T) {
 	}
 }
 
+func TestMigrateCreatesKnowledgeTables(t *testing.T) {
+	testPool := openTestPool(t)
+	if err := Migrate(context.Background(), testPool.Pool); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"knowledge_chunks", "resumes"} {
+		var exists bool
+		err := testPool.QueryRow(context.Background(), `select to_regclass($1 || '.' || $2) is not null`, testPool.schema, table).Scan(&exists)
+		if err != nil || !exists {
+			t.Fatalf("table %s: exists=%v err=%v", table, exists, err)
+		}
+	}
+	var statusDefault string
+	if err := testPool.QueryRow(context.Background(), `
+		select column_default
+		from information_schema.columns
+		where table_schema = current_schema()
+		  and table_name = 'resumes'
+		  and column_name = 'index_status'
+	`).Scan(&statusDefault); err != nil {
+		t.Fatalf("index_status default: %v", err)
+	}
+	if statusDefault == "" {
+		t.Fatal("resumes.index_status missing default")
+	}
+}
+
 func TestMigrateRejectsNonSHA256TokenDigest(t *testing.T) {
 	testPool := openTestPool(t)
 	ctx := context.Background()

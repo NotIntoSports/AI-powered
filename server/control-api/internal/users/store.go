@@ -18,14 +18,15 @@ import (
 )
 
 var (
-	ErrInvalidUsername = errors.New("invalid username")
-	ErrInvalidRole     = errors.New("invalid user role")
-	ErrInvalidStatus   = errors.New("invalid user status")
-	ErrInvalidPassword = errors.New("invalid encoded password")
-	ErrUsernameTaken   = errors.New("username is already taken")
-	ErrUserNotFound    = errors.New("user not found")
-	ErrLastAdmin       = errors.New("last active administrator is required")
-	ErrStore           = errors.New("user store unavailable")
+	ErrInvalidUsername   = errors.New("invalid username")
+	ErrInvalidRole       = errors.New("invalid user role")
+	ErrInvalidStatus     = errors.New("invalid user status")
+	ErrInvalidPassword   = errors.New("invalid encoded password")
+	ErrUsernameTaken     = errors.New("username is already taken")
+	ErrUserNotFound      = errors.New("user not found")
+	ErrLastAdmin         = errors.New("last active administrator is required")
+	ErrCannotDisableSelf = errors.New("cannot disable the current administrator")
+	ErrStore             = errors.New("user store unavailable")
 )
 
 const (

@@ -15,8 +15,10 @@ import { LiveSubtitles } from "../features/subtitles/live-subtitles";
 import { RtcBridgeControl } from "../features/rtc/rtc-bridge-control";
 import { getInterviewReadiness } from "../features/readiness/interview-readiness";
 import { getSnapshotReadiness, invalidateDeviceReadiness, loadReadinessSnapshot } from "../features/readiness/readiness-snapshot";
+import { loadOutputMode, subscribeOutputMode, type OutputMode } from "../features/readiness/output-mode";
 import { AppNavigation } from "../features/settings/app-navigation";
 import { ResumeUpload } from "../features/resume/resume-upload";
+import { setManagementNetwork } from "../features/rtc/network-quality";
 
 type Diagnostics = {
   server: boolean;
@@ -32,7 +34,7 @@ type Diagnostics = {
   mediaReady: boolean;
   transcriptionConfigured: boolean;
   transcriptionReady: boolean;
-  transcriptionProvider: "openai" | "whisper-cpp";
+  transcriptionSource: "management" | "environment" | "whisper-cpp" | "none";
 };
 
 const emptySession: InterviewSession = {
@@ -50,7 +52,8 @@ const emptySession: InterviewSession = {
   startedAt: null,
   finishedAt: null,
   transcript: [],
-  report: null
+  report: null,
+  resumeId: ""
 };
 
 async function sessionAction(payload: object): Promise<InterviewSession> {
@@ -71,6 +74,7 @@ export default function ConsolePage() {
   const [interviewFocus, setInterviewFocus] = useState("");
   const [maxQuestions, setMaxQuestions] = useState(6);
   const [consentConfirmed, setConsentConfirmed] = useState(false);
+  const [resumeId, setResumeId] = useState("");
   const [answer, setAnswer] = useState("");
   const [manualText, setManualText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -88,7 +92,7 @@ export default function ConsolePage() {
     mediaReady: false,
     transcriptionConfigured: false,
     transcriptionReady: false,
-    transcriptionProvider: "openai"
+    transcriptionSource: "none"
   });
   const captureActiveRef = useRef(false);
   const captureStreamRef = useRef<MediaStream | null>(null);
@@ -110,8 +114,10 @@ export default function ConsolePage() {
   const [echoGuardActive, setEchoGuardActive] = useState(false);
   const [candidateSpeaking, setCandidateSpeaking] = useState(false);
   const [error, setError] = useState("");
+  const [outputMode, setOutputMode] = useState<OutputMode>("real");
   const [snapshotReadiness, setSnapshotReadiness] = useState(() => getSnapshotReadiness({}));
   const readiness = getInterviewReadiness({
+    outputMode,
     modelConfigured: diagnostics.modelConfigured,
     stageConnected: diagnostics.stageConnected,
     mediaReady: diagnostics.mediaReady,
@@ -124,6 +130,8 @@ export default function ConsolePage() {
       .then(setSession)
       .catch(() => setError("无法读取当前互动会话"));
     setSnapshotReadiness(getSnapshotReadiness(loadReadinessSnapshot()));
+    setOutputMode(loadOutputMode());
+    return subscribeOutputMode(() => setOutputMode(loadOutputMode()));
   }, []);
 
   useEffect(() => {
@@ -240,10 +248,17 @@ export default function ConsolePage() {
           mediaReady: Boolean(stage.mediaReady),
           transcriptionConfigured: Boolean(health.transcriptionConfigured),
           transcriptionReady: Boolean(health.transcriptionReady),
-          transcriptionProvider: health.transcriptionProvider === "whisper-cpp" ? "whisper-cpp" : "openai"
+          transcriptionSource: health.transcriptionSource === "management" || health.transcriptionSource === "environment" || health.transcriptionSource === "whisper-cpp" ? health.transcriptionSource : "none"
+        });
+        setManagementNetwork({
+          reachable: Boolean(health.managementReachable),
+          rttMs: Number.isFinite(Number(health.managementRttMs)) ? Number(health.managementRttMs) : null
         });
       } catch {
-        if (active) setDiagnostics((current) => ({ ...current, server: false, stageConnected: false }));
+        if (active) {
+          setDiagnostics((current) => ({ ...current, server: false, stageConnected: false }));
+          setManagementNetwork({ reachable: false, rttMs: null });
+        }
       }
     }
     void refreshDiagnostics();
@@ -525,7 +540,7 @@ export default function ConsolePage() {
       </header>
 
       {error && <p className="error" role="alert">{error}</p>}
-      <section className={`readinessBanner ${readiness.ready ? "ready" : ""}`} aria-live="polite"><div><strong>{readiness.ready ? "数字人环境已就绪" : `开始前还需完成 ${readiness.missing.length} 项设置`}</strong><span>{readiness.ready ? "画面、声音和 AI 检查均已通过。" : readiness.missing.slice(0, 3).map((item) => item.label).join("、")}</span></div>{!readiness.ready && <a className="buttonLink" href="/settings">前往设置完成检测</a>}</section>
+      <section className={`readinessBanner ${readiness.ready ? "ready" : ""}`} aria-live="polite"><div><strong>{readiness.ready ? (outputMode === "virtual" ? "数字人环境已就绪" : "助手环境已就绪") : `开始前还需完成 ${readiness.missing.length} 项设置`}</strong><span>{readiness.ready ? (outputMode === "virtual" ? "声音、虚拟摄像头和 AI 检查均已通过。" : "AI 已配置。会议软件请使用你自己的摄像头，本软件提供字幕和追问。") : readiness.missing.slice(0, 3).map((item) => item.label).join("、")}</span></div>{!readiness.ready && <a className="buttonLink" href="/settings">前往设置完成检测</a>}</section>
 
       <section className="consoleGrid">
         <article className="card setup">
@@ -534,7 +549,7 @@ export default function ConsolePage() {
             <span className={`pill ${session.status}`}>{session.status}</span>
           </div>
           <label>互动对象<input value={candidateName} onChange={(e) => setCandidateName(e.target.value)} placeholder="例如：张同学" /></label>
-          <ResumeUpload candidateName={candidateName} />
+          <ResumeUpload candidateName={candidateName} selectedId={resumeId} onSelect={setResumeId} />
           <label>对话主题<input value={roleName} onChange={(e) => setRoleName(e.target.value)} placeholder="例如：项目交流" /></label>
           <label>
             背景资料
@@ -571,10 +586,12 @@ export default function ConsolePage() {
             />
             <span>我已向对方说明本次互动由 AI 协助、会保存记录，并提供人工复核渠道。</span>
           </label>
-          {readiness.ready ? <button disabled={busy || !consentConfirmed || session.status === "running"} onClick={() => act({ action: "start", candidateName, roleName, jobDescription, interviewFocus, maxQuestions, consentConfirmed })}>{session.status === "running" ? "当前互动进行中" : "开始新互动"}</button> : <a className="buttonLink primary" href="/settings">前往设置完成检测</a>}
+          {readiness.ready ? <button disabled={busy || !consentConfirmed || session.status === "running"} onClick={() => act({ action: "start", candidateName, roleName, jobDescription, interviewFocus, maxQuestions, consentConfirmed, resumeId: resumeId || undefined })}>{session.status === "running" ? "当前互动进行中" : "开始新互动"}</button> : <a className="buttonLink primary" href="/settings">前往设置完成检测</a>}
           {diagnostics.modelConfigured && session.status !== "running" && (
             <p className="muted">
-              输出门禁全部通过后才能开始；开始时还会用 GET /models 做一次无推理连接检查，不产生模型调用费用。
+              {outputMode === "virtual"
+                ? "虚拟摄像头相关检测通过后才能开始；开始时还会用 GET /models 做一次无推理连接检查，不产生模型调用费用。"
+                : "AI 模型已配置后即可开始；开始时还会用 GET /models 做一次无推理连接检查，不产生模型调用费用。"}
             </p>
           )}
           <button className="secondary" disabled={busy || session.status !== "running"} onClick={() => act({ action: "finish" })}>结束互动</button>

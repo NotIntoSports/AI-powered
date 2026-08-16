@@ -157,6 +157,9 @@ func (s *Service) ListUsers(ctx context.Context, actor users.User) ([]users.User
 }
 
 func (s *Service) SetUserStatus(ctx context.Context, actor users.User, userID string, status users.Status) error {
+	if status == users.StatusDisabled && actor.ID == userID {
+		return users.ErrCannotDisableSelf
+	}
 	requestID, err := newRequestID()
 	if err != nil {
 		return ErrService
@@ -303,6 +306,7 @@ func userError(err error) error {
 		users.ErrUsernameTaken,
 		users.ErrUserNotFound,
 		users.ErrLastAdmin,
+		users.ErrCannotDisableSelf,
 	} {
 		if errors.Is(err, known) {
 			return known
@@ -327,6 +331,7 @@ func identityError(err error) error {
 		users.ErrUsernameTaken,
 		users.ErrUserNotFound,
 		users.ErrLastAdmin,
+		users.ErrCannotDisableSelf,
 	} {
 		if errors.Is(err, known) {
 			return known
