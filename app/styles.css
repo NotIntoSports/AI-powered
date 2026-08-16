@@ -123,7 +123,15 @@ h2 { margin: 0; font-size: 17px; }
 .sectionIntro h2 { margin: 2px 0 6px; }
 .sectionIntro p { margin: 0; color: #7f8b9b; font-size: 12px; line-height: 1.55; }
 .settingsPair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
-.settingsPage .modelSettings, .settingsPage .obsControl, .settingsPage .audioRoute, .settingsPage .meetingHandoff { grid-column: auto; }
+.settingsPage .modelSettings, .settingsPage .obsControl, .settingsPage .audioRoute, .settingsPage .meetingHandoff, .settingsPage .voiceClone { grid-column: auto; }
+.voiceClone { display: grid; gap: 12px; }
+.voiceClone .cardHeading span { color: #c8a75e; font-size: 12px; }
+.voiceClone .cardHeading span.ready { color: #72e5a7; }
+.voiceCloneTips { margin: 0; color: #8fa5c7; font-size: 13px; line-height: 1.55; }
+.voiceCloneScript { margin: 0; padding: 16px 18px; border: 1px solid #344052; border-radius: 12px; background: #101826; color: #e8eef7; font-size: 18px; line-height: 1.75; font-weight: 600; }
+.voiceCloneActions { display: flex; flex-wrap: wrap; gap: 8px; }
+.voiceClonePreview { width: 100%; }
+.voiceClone label { display: grid; gap: 6px; color: #8d99aa; font-size: 12px; }
 .recordsGrid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(360px, .9fr); gap: 16px; align-items: start; }
 .recordsLoading { min-height: 180px; display: grid; place-items: center; }
 .currentReport { min-height: 280px; }

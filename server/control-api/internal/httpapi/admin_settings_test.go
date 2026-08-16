@@ -12,13 +12,17 @@ import (
 )
 
 type fakeSettingsAdmin struct {
-	ai        settings.PublicAI
-	clientAI  settings.ClientAI
-	clientASR settings.ClientASR
-	rtc       settings.PublicRTC
-	storage   settings.PublicStorage
-	putAI     settings.AIInput
-	putRTC    settings.RTCInput
+	ai          settings.PublicAI
+	clientAI    settings.ClientAI
+	clientASR   settings.ClientASR
+	clientSpeech settings.ClientSpeech
+	speech      settings.PublicSpeech
+	rtc         settings.PublicRTC
+	storage     settings.PublicStorage
+	putAI       settings.AIInput
+	putRTC      settings.RTCInput
+	putSpeech   settings.SpeechInput
+	speakerID   string
 }
 
 func (fake *fakeSettingsAdmin) GetAI(context.Context) (settings.PublicAI, error) {
@@ -132,6 +136,46 @@ func (fake *fakeSettingsAdmin) PutStorage(_ context.Context, _ users.User, _ str
 
 func (fake *fakeSettingsAdmin) TestStorage(context.Context, users.User, string, *settings.StorageInput) (settings.StorageTestResult, error) {
 	return settings.StorageTestResult{Reachable: true, Message: "Bucket 可访问"}, nil
+}
+
+func (fake *fakeSettingsAdmin) GetSpeech(context.Context) (settings.PublicSpeech, error) {
+	return fake.speech, nil
+}
+
+func (fake *fakeSettingsAdmin) GetClientSpeech(context.Context) (settings.ClientSpeech, error) {
+	if fake.clientSpeech.APIKey != "" || fake.clientSpeech.AccessToken != "" || fake.clientSpeech.Configured {
+		return fake.clientSpeech, nil
+	}
+	return settings.ClientSpeech{PublicSpeech: fake.speech}, nil
+}
+
+func (fake *fakeSettingsAdmin) PutSpeech(_ context.Context, _ users.User, _ string, input settings.SpeechInput) (settings.PublicSpeech, error) {
+	fake.putSpeech = input
+	fake.speech = settings.PublicSpeech{
+		Configured:            true,
+		Available:             true,
+		AppID:                 input.AppID,
+		SpeakerID:             input.SpeakerID,
+		TTSResourceID:         input.TTSResourceID,
+		ASRResourceID:         input.ASRResourceID,
+		APIKeyConfigured:      input.APIKey != "",
+		AccessTokenConfigured: input.AccessToken != "",
+		SecretKeyConfigured:   input.SecretKey != "",
+		Enabled:               true,
+		ConfigVersion:         1,
+	}
+	return fake.speech, nil
+}
+
+func (fake *fakeSettingsAdmin) PutClientSpeechSpeakerID(_ context.Context, speakerID string) (settings.PublicSpeech, error) {
+	fake.speakerID = speakerID
+	fake.speech.SpeakerID = speakerID
+	fake.speech.TTSAvailable = speakerID != ""
+	return fake.speech, nil
+}
+
+func (fake *fakeSettingsAdmin) TestSpeech(context.Context, users.User, string, *settings.SpeechInput) (settings.SpeechTestResult, error) {
+	return settings.SpeechTestResult{Reachable: true, Message: "豆包语音鉴权可用"}, nil
 }
 
 func TestAdminSettingsRequireAdministratorAndOmitSecrets(t *testing.T) {
@@ -379,5 +423,135 @@ func TestClientASRSettingsRejectsBrowserSession(t *testing.T) {
 	assertAPIError(t, response, http.StatusForbidden, "FORBIDDEN")
 	if strings.Contains(response.Body.String(), "sk-asr-should-not-leak") {
 		t.Fatal("browser session received client ASR key")
+	}
+}
+
+func TestAdminSpeechSettingsOmitSecrets(t *testing.T) {
+	router := NewRouter(Dependencies{
+		Authentication: adminBrowserAuth(),
+		UserAdmin:      &fakeUserAdmin{list: func(users.User) ([]users.User, error) { return nil, nil }},
+		SettingsAdmin: &fakeSettingsAdmin{speech: settings.PublicSpeech{
+			Configured:       true,
+			Available:        true,
+			AppID:            "8358554445",
+			APIKeyConfigured: true,
+		}},
+	})
+	response := performAdminCookieRequest(t, router, http.MethodGet, "/api/v1/admin/settings/speech", "")
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	body := strings.ToLower(response.Body.String())
+	if strings.Contains(body, `"apikey":"`) || strings.Contains(body, `"accesstoken":"`) || strings.Contains(body, `"secretkey":"`) {
+		t.Fatalf("response leaked secret: %s", response.Body.String())
+	}
+	assertNoStore(t, response)
+}
+
+func TestAdminSettingsPutSpeechDoesNotEchoSubmittedKey(t *testing.T) {
+	admin := &fakeSettingsAdmin{}
+	router := NewRouter(Dependencies{
+		Authentication: adminBrowserAuth(),
+		UserAdmin:      &fakeUserAdmin{list: func(users.User) ([]users.User, error) { return nil, nil }},
+		SettingsAdmin:  admin,
+	})
+	response := performAdminCookieRequest(t, router, http.MethodPut, "/api/v1/admin/settings/speech", `{"appId":"8358554445","apiKey":"volc-secret-key","accessToken":"volc-access-token"}`)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if strings.Contains(response.Body.String(), "volc-secret-key") || strings.Contains(response.Body.String(), "volc-access-token") {
+		t.Fatal("put response echoed speech secrets")
+	}
+	if admin.putSpeech.APIKey != "volc-secret-key" || admin.putSpeech.AccessToken != "volc-access-token" || admin.putSpeech.AppID != "8358554445" {
+		t.Fatalf("stored input=%#v", admin.putSpeech)
+	}
+	var public settings.PublicSpeech
+	decodeJSON(t, response, &public)
+	if !public.APIKeyConfigured || !public.AccessTokenConfigured || public.AppID != "8358554445" {
+		t.Fatalf("public=%#v", public)
+	}
+}
+
+func TestClientSpeechSettingsReturnsRuntimeKeyForDesktop(t *testing.T) {
+	router := NewRouter(Dependencies{
+		Authentication: &fakeAuthentication{
+			authenticate: func(rawToken, purpose string) (AuthenticatedSession, error) {
+				if rawToken != "desktop-token" || purpose != sessions.PurposeDesktop {
+					return AuthenticatedSession{}, ErrUnauthenticated
+				}
+				return AuthenticatedSession{
+					User:     users.User{ID: "op", Username: "admin", Role: users.RoleOperator, Status: users.StatusActive},
+					Session:  sessions.Session{ID: "session-desktop", UserID: "op", Purpose: sessions.PurposeDesktop},
+					RawToken: rawToken,
+				}, nil
+			},
+		},
+		SettingsAdmin: &fakeSettingsAdmin{clientSpeech: settings.ClientSpeech{
+			PublicSpeech: settings.PublicSpeech{
+				Configured:   true,
+				Available:    true,
+				AppID:        "8358554445",
+				SpeakerID:    "custom_zh_interviewer",
+				TTSAvailable: true,
+				ASRAvailable: true,
+			},
+			APIKey:      "volc-client-runtime",
+			AccessToken: "volc-client-token",
+		}},
+	})
+	response := performRequest(t, router, http.MethodGet, "/api/v1/client/settings/speech", "", map[string]string{
+		"Authorization": "Bearer desktop-token",
+	})
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var body settings.ClientSpeech
+	decodeJSON(t, response, &body)
+	if body.APIKey != "volc-client-runtime" || body.AccessToken != "volc-client-token" || body.SpeakerID != "custom_zh_interviewer" {
+		t.Fatalf("client speech=%#v", body)
+	}
+}
+
+func TestClientSpeechSettingsRejectsBrowserSession(t *testing.T) {
+	router := NewRouter(Dependencies{
+		Authentication: adminBrowserAuth(),
+		SettingsAdmin: &fakeSettingsAdmin{clientSpeech: settings.ClientSpeech{
+			APIKey:      "volc-should-not-leak",
+			AccessToken: "token-should-not-leak",
+		}},
+	})
+	response := performAdminCookieRequest(t, router, http.MethodGet, "/api/v1/client/settings/speech", "")
+	assertAPIError(t, response, http.StatusForbidden, "FORBIDDEN")
+	if strings.Contains(response.Body.String(), "volc-should-not-leak") || strings.Contains(response.Body.String(), "token-should-not-leak") {
+		t.Fatal("browser session received client speech secrets")
+	}
+}
+
+func TestClientSpeechPatchSpeakerIDRequiresDesktop(t *testing.T) {
+	admin := &fakeSettingsAdmin{speech: settings.PublicSpeech{Configured: true, Available: true}}
+	router := NewRouter(Dependencies{
+		Authentication: &fakeAuthentication{
+			authenticate: func(rawToken, purpose string) (AuthenticatedSession, error) {
+				if rawToken != "desktop-token" || purpose != sessions.PurposeDesktop {
+					return AuthenticatedSession{}, ErrUnauthenticated
+				}
+				return AuthenticatedSession{
+					User:     users.User{ID: "op", Username: "admin", Role: users.RoleOperator, Status: users.StatusActive},
+					Session:  sessions.Session{ID: "session-desktop", UserID: "op", Purpose: sessions.PurposeDesktop},
+					RawToken: rawToken,
+				}, nil
+			},
+		},
+		SettingsAdmin: admin,
+	})
+	response := performRequest(t, router, http.MethodPatch, "/api/v1/client/settings/speech", `{"speakerId":"custom_zh_interviewer"}`, map[string]string{
+		"Authorization": "Bearer desktop-token",
+		"Content-Type":  "application/json",
+	})
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if admin.speakerID != "custom_zh_interviewer" {
+		t.Fatalf("speakerID=%q", admin.speakerID)
 	}
 }

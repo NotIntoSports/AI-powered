@@ -309,6 +309,148 @@ func (s *Service) TestRTC(ctx context.Context, actor users.User, requestID strin
 	return result, nil
 }
 
+func (s *Service) GetSpeech(ctx context.Context) (PublicSpeech, error) {
+	store := NewStore(s.db, s.box)
+	record, err := store.GetSpeech(ctx)
+	if errors.Is(err, ErrNotConfigured) {
+		return EmptyPublicSpeech(), nil
+	}
+	if err != nil {
+		return PublicSpeech{}, err
+	}
+	_, apiErr := store.DecryptSpeechAPIKey(record)
+	_, tokenErr := store.DecryptSpeechAccessToken(record)
+	decryptErr := firstDecryptErr(apiErr, tokenErr)
+	return PublicSpeechFrom(record, decryptErr), nil
+}
+
+func (s *Service) GetClientSpeech(ctx context.Context) (ClientSpeech, error) {
+	store := NewStore(s.db, s.box)
+	record, err := store.GetSpeech(ctx)
+	if errors.Is(err, ErrNotConfigured) {
+		return ClientSpeech{PublicSpeech: EmptyPublicSpeech()}, nil
+	}
+	if err != nil {
+		return ClientSpeech{}, err
+	}
+	apiKey, apiErr := store.DecryptSpeechAPIKey(record)
+	accessToken, tokenErr := store.DecryptSpeechAccessToken(record)
+	decryptErr := firstDecryptErr(apiErr, tokenErr)
+	public := PublicSpeechFrom(record, decryptErr)
+	if decryptErr != nil {
+		return ClientSpeech{PublicSpeech: public}, decryptErr
+	}
+	return ClientSpeech{PublicSpeech: public, APIKey: apiKey, AccessToken: accessToken}, nil
+}
+
+func (s *Service) PutSpeech(ctx context.Context, actor users.User, requestID string, input SpeechInput) (PublicSpeech, error) {
+	var public PublicSpeech
+	err := pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
+		store := NewStore(tx, s.box)
+		record, err := store.PutSpeech(ctx, actor, input)
+		if err != nil {
+			return err
+		}
+		_, apiErr := store.DecryptSpeechAPIKey(record)
+		_, tokenErr := store.DecryptSpeechAccessToken(record)
+		public = PublicSpeechFrom(record, firstDecryptErr(apiErr, tokenErr))
+		return audit.NewStore(tx).Append(ctx, audit.Event{
+			ActorUserID: actor.ID,
+			Action:      audit.ActionSpeechSettingsUpdated,
+			TargetType:  "speech_config",
+			TargetID:    singletonID,
+			Result:      audit.ResultSuccess,
+			RequestID:   requestID,
+			Metadata:    AuditMetadata(record.ConfigVersion, public.Available),
+		})
+	})
+	return public, err
+}
+
+func (s *Service) PutClientSpeechSpeakerID(ctx context.Context, speakerID string) (PublicSpeech, error) {
+	store := NewStore(s.db, s.box)
+	record, err := store.PutSpeechSpeakerID(ctx, speakerID)
+	if err != nil {
+		return PublicSpeech{}, err
+	}
+	_, apiErr := store.DecryptSpeechAPIKey(record)
+	_, tokenErr := store.DecryptSpeechAccessToken(record)
+	return PublicSpeechFrom(record, firstDecryptErr(apiErr, tokenErr)), nil
+}
+
+func (s *Service) TestSpeech(ctx context.Context, actor users.User, requestID string, input *SpeechInput) (SpeechTestResult, error) {
+	store := NewStore(s.db, s.box)
+	record, err := store.GetSpeech(ctx)
+	stored := err == nil
+	if err != nil && !errors.Is(err, ErrNotConfigured) {
+		return SpeechTestResult{}, err
+	}
+	apiKey := ""
+	accessToken := ""
+	var decryptErr error
+	if stored {
+		apiKey, decryptErr = store.DecryptSpeechAPIKey(record)
+		if decryptErr == nil {
+			accessToken, decryptErr = store.DecryptSpeechAccessToken(record)
+		}
+	}
+	if input != nil {
+		normalized, normErr := normalizeSpeechInput(*input)
+		if normErr != nil {
+			return SpeechTestResult{}, normErr
+		}
+		if normalized.AppID != "" {
+			record.AppID = normalized.AppID
+		}
+		if normalized.SpeakerID != "" {
+			record.SpeakerID = normalized.SpeakerID
+		}
+		if normalized.TTSResourceID != "" {
+			record.TTSResourceID = normalized.TTSResourceID
+		}
+		if normalized.ASRResourceID != "" {
+			record.ASRResourceID = normalized.ASRResourceID
+		}
+		if normalized.Enabled != nil {
+			record.Enabled = *normalized.Enabled
+		} else {
+			record.Enabled = true
+		}
+		if strings.TrimSpace(normalized.APIKey) != "" {
+			apiKey = strings.TrimSpace(normalized.APIKey)
+			record.EncryptedAPIKey = []byte("pending")
+			decryptErr = nil
+		}
+		if strings.TrimSpace(normalized.AccessToken) != "" {
+			accessToken = strings.TrimSpace(normalized.AccessToken)
+			record.EncryptedAccessToken = []byte("pending")
+			decryptErr = nil
+		}
+	} else if !stored {
+		return SpeechTestResult{Message: "尚未配置豆包语音"}, nil
+	}
+	result := ProbeSpeech(ctx, s.client, record, apiKey, accessToken, decryptErr)
+	_ = audit.NewStore(s.db).Append(ctx, audit.Event{
+		ActorUserID: actor.ID,
+		Action:      audit.ActionSpeechSettingsTested,
+		TargetType:  "speech_config",
+		TargetID:    singletonID,
+		Result:      audit.ResultSuccess,
+		RequestID:   requestID,
+		Metadata:    map[string]any{"reachable": result.Reachable},
+	})
+	return result, nil
+}
+
+func firstDecryptErr(errs ...error) error {
+	for _, err := range errs {
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Service) GetStorage(ctx context.Context) (PublicStorage, error) {
 	store := NewStore(s.db, s.box)
 	record, err := store.GetStorage(ctx)

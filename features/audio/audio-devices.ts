@@ -79,3 +79,14 @@ export function classifyAudioDevices(devices: AudioDeviceCandidate[]) {
     ignoredRemoteAudio
   };
 }
+
+const unwantedCloneMicrophone = /vb-audio|cable\s+(?:output|input)|voicemeeter|virtual\s+(?:mic|microphone|audio)|todesk|sunshine|parsec|remote desktop/i;
+
+export function isUnwantedCloneMicrophone(label: string) {
+  return unwantedCloneMicrophone.test(label);
+}
+
+export function pickCloneMicrophone(devices: AudioDeviceCandidate[]) {
+  const inputs = devices.filter((device) => device.kind === "audioinput" && device.deviceId && device.deviceId !== "default");
+  return inputs.find((device) => !isUnwantedCloneMicrophone(device.label)) || null;
+}

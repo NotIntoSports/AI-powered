@@ -80,16 +80,20 @@ async function readDesktopToken() {
   }
 }
 
-export async function fetchDesktopControlJson<T>(path: string): Promise<T | null> {
+export async function fetchDesktopControlJson<T>(path: string, init?: RequestInit): Promise<T | null> {
   const token = await readDesktopToken();
   if (!token) return null;
   try {
+    const headers = new Headers(init?.headers);
+    headers.set("Authorization", `Bearer ${token}`);
     const response = await fetch(`${controlApiOrigin()}${path}`, {
-      headers: { Authorization: `Bearer ${token}` },
+      ...init,
+      headers,
       cache: "no-store",
-      signal: AbortSignal.timeout(5_000)
+      signal: init?.signal ?? AbortSignal.timeout(5_000)
     });
     if (!response.ok) return null;
+    if (response.status === 204) return null;
     return await response.json() as T;
   } catch {
     return null;
@@ -226,4 +230,16 @@ export function isLocalModelEndpoint(value: string) {
 
 export function isModelRuntimeConfigured(config: ModelRuntimeConfig) {
   return Boolean(config.model) && (Boolean(config.apiKey) || isLocalModelEndpoint(config.baseUrl));
+}
+
+export function protectLocalSecret(value: string) {
+  return runDpapi("Protect", value);
+}
+
+export function unprotectLocalSecret(value: string) {
+  return runDpapi("Unprotect", value);
+}
+
+export function localSettingsDirectory() {
+  return dataDirectory;
 }

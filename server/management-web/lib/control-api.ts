@@ -102,6 +102,29 @@ export type StorageTestResult = {
   buckets?: { name: string; region: string }[];
 };
 
+export type PublicSpeechSettings = {
+  configured: boolean;
+  available: boolean;
+  ttsAvailable: boolean;
+  asrAvailable: boolean;
+  appId: string;
+  speakerId: string;
+  ttsResourceId: string;
+  asrResourceId: string;
+  apiKeyConfigured: boolean;
+  accessTokenConfigured: boolean;
+  secretKeyConfigured: boolean;
+  enabled: boolean;
+  configVersion: number;
+  updatedAt?: string;
+  updatedByUsername?: string;
+};
+
+export type SpeechTestResult = {
+  reachable: boolean;
+  message: string;
+};
+
 export type ResumeRecord = {
   id: string;
   uploadedByUserId: string;

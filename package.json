@@ -28,6 +28,7 @@
     "test:transcription-security-route": "node scripts/smoke-transcription-security-route.mjs",
     "test:transcription-turn": "node scripts/test-transcription-turn.mjs",
     "test:audio": "node scripts/test-audio-devices.mjs",
+    "test:speech": "node scripts/test-volcengine-speech.mjs",
     "test:audio-signal": "node scripts/test-audio-signal.mjs",
     "test:tts-error": "node scripts/test-tts-error.mjs",
     "test:echo-guard": "node scripts/test-echo-guard.mjs",

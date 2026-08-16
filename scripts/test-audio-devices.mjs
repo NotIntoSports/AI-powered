@@ -10,7 +10,7 @@ const compiled = ts.transpileModule(source, {
   }
 }).outputText;
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`;
-const { classifyAudioDevices } = await import(moduleUrl);
+const { classifyAudioDevices, isUnwantedCloneMicrophone, pickCloneMicrophone } = await import(moduleUrl);
 
 const toDesk = classifyAudioDevices([
   { kind: "audioinput", label: "默认 - 麦克风", deviceId: "default" },
@@ -73,5 +73,15 @@ const mismatchedCable = classifyAudioDevices([
   { kind: "audiooutput", label: "CABLE-B Input", deviceId: "cable-b-in" }
 ]);
 assert.deepEqual(mismatchedCable.routes, []);
+
+const cloneMic = pickCloneMicrophone([
+  { kind: "audioinput", label: "CABLE Output (VB-Audio Virtual Cable)", deviceId: "cable-out" },
+  { kind: "audioinput", label: "麦克风 (ToDesk Virtual Audio)", deviceId: "todesk-mic" },
+  { kind: "audioinput", label: "Realtek Microphone", deviceId: "real-mic" }
+]);
+assert.equal(cloneMic?.deviceId, "real-mic");
+assert.equal(isUnwantedCloneMicrophone("CABLE Output (VB-Audio Virtual Cable)"), true);
+assert.equal(isUnwantedCloneMicrophone("Virtual Mic Driver"), true);
+assert.equal(isUnwantedCloneMicrophone("Realtek Microphone"), false);
 
 process.stdout.write("audio device classification test passed\n");

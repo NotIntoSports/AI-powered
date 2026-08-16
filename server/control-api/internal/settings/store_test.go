@@ -169,6 +169,61 @@ func TestNormalizeRTCRejectsSelectingLiveKitWithoutURL(t *testing.T) {
 	}
 }
 
+func TestPublicSpeechOmitsSecretsAndRequiresSpeakerForTTS(t *testing.T) {
+	record := SpeechRecord{
+		Enabled:              true,
+		AppID:                "8358554445",
+		SpeakerID:            "custom_zh_interviewer",
+		TTSResourceID:        defaultTTSResourceID,
+		ASRResourceID:        defaultASRResourceID,
+		EncryptedAPIKey:      []byte("cipher-api"),
+		EncryptedAccessToken: []byte("cipher-token"),
+		EncryptedSecretKey:   []byte("cipher-secret"),
+	}
+	public := PublicSpeechFrom(record, nil)
+	encoded := fmt.Sprintf("%#v", public)
+	if strings.Contains(encoded, "cipher") {
+		t.Fatalf("leaked: %s", encoded)
+	}
+	if !public.Available || !public.TTSAvailable || !public.ASRAvailable {
+		t.Fatalf("public=%#v", public)
+	}
+	record.SpeakerID = ""
+	public = PublicSpeechFrom(record, nil)
+	if !public.Available || public.TTSAvailable || !public.ASRAvailable {
+		t.Fatalf("without speaker=%#v", public)
+	}
+}
+
+func TestValidSpeakerID(t *testing.T) {
+	if !validSpeakerID("custom_zh_interviewer") || !validSpeakerID("S_abc12345") {
+		t.Fatal("expected valid speaker ids")
+	}
+	if validSpeakerID("custom_speaker_id") || validSpeakerID("short") || validSpeakerID("_leading_underscore") {
+		t.Fatal("expected invalid speaker ids")
+	}
+}
+
+func TestPutSpeechKeepsExistingKeyWhenOmitted(t *testing.T) {
+	pool := openSettingsTestPool(t)
+	store := NewStore(pool, mustBox(t))
+	ctx := context.Background()
+	actor := createSettingsUser(t, pool)
+	if _, err := store.PutSpeech(ctx, actor, SpeechInput{
+		AppID: "8358554445", APIKey: "first-speech-key", SpeakerID: "custom_zh_interviewer",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := store.PutSpeech(ctx, actor, SpeechInput{AppID: "8358554445"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, err := store.DecryptSpeechAPIKey(updated)
+	if err != nil || plain != "first-speech-key" || updated.SpeakerID != "custom_zh_interviewer" || updated.ConfigVersion != 2 {
+		t.Fatalf("updated speaker=%s key=%s version=%d err=%v", updated.SpeakerID, plain, updated.ConfigVersion, err)
+	}
+}
+
 func mustBox(t *testing.T) *secretbox.Box {
 	t.Helper()
 	key, err := secretbox.ParseMasterKey(strings.Repeat("ab", 32))

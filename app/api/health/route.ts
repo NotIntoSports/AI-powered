@@ -12,15 +12,17 @@ import {
   pingControlApi
 } from "../../../lib/runtime-config";
 import { listWindowsSpeechVoices } from "../../../lib/windows-tts";
+import { getSpeechRuntimeConfig } from "../../../lib/speech-runtime";
 import { SERVICE_ID } from "../../../lib/service-identity";
 
 export async function GET() {
-  const [runtime, transcriptionConfigured, ttsVoices, transcriptionSource, management] = await Promise.all([
+  const [runtime, transcriptionConfigured, ttsVoices, transcriptionSource, management, speech] = await Promise.all([
     getModelRuntimeConfig(),
     isTranscriptionConfigured(),
     listWindowsSpeechVoices().catch(() => []),
     getTranscriptionSource(),
-    pingControlApi()
+    pingControlApi(),
+    getSpeechRuntimeConfig()
   ]);
   return NextResponse.json({
     service: SERVICE_ID,
@@ -30,8 +32,9 @@ export async function GET() {
     modelLocalEndpoint: isLocalModelEndpoint(runtime.baseUrl),
     modelSource: runtime.source,
     modelName: runtime.model,
-    ttsConfigured: ttsVoices.length > 0,
+    ttsConfigured: speech.ttsAvailable || ttsVoices.length > 0,
     ttsVoiceCount: ttsVoices.length,
+    ttsSource: speech.ttsAvailable ? "volcengine" : ttsVoices.length > 0 ? "sapi" : "none",
     transcriptionProvider: getTranscriptionProvider(),
     transcriptionSource,
     transcriptionConfigured,

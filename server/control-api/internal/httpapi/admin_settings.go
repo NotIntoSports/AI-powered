@@ -23,6 +23,11 @@ type SettingsAdmin interface {
 	PutRTC(ctx context.Context, actor users.User, requestID string, input settings.RTCInput) (settings.PublicRTC, error)
 	TestRTC(ctx context.Context, actor users.User, requestID string, input *settings.RTCInput) (settings.RTCTestResult, error)
 	IssueRTC(ctx context.Context, roomID, userID string) (settings.RTCConnection, error)
+	GetSpeech(ctx context.Context) (settings.PublicSpeech, error)
+	GetClientSpeech(ctx context.Context) (settings.ClientSpeech, error)
+	PutSpeech(ctx context.Context, actor users.User, requestID string, input settings.SpeechInput) (settings.PublicSpeech, error)
+	PutClientSpeechSpeakerID(ctx context.Context, speakerID string) (settings.PublicSpeech, error)
+	TestSpeech(ctx context.Context, actor users.User, requestID string, input *settings.SpeechInput) (settings.SpeechTestResult, error)
 	GetStorage(ctx context.Context) (settings.PublicStorage, error)
 	PutStorage(ctx context.Context, actor users.User, requestID string, input settings.StorageInput) (settings.PublicStorage, error)
 	TestStorage(ctx context.Context, actor users.User, requestID string, input *settings.StorageInput) (settings.StorageTestResult, error)
@@ -70,6 +75,20 @@ type storageSettingsRequest struct {
 	SecretKey      string `json:"secretKey"`
 	ClearSecretKey bool   `json:"clearSecretKey"`
 	Enabled        *bool  `json:"enabled"`
+}
+
+type speechSettingsRequest struct {
+	AppID            string `json:"appId"`
+	SpeakerID        string `json:"speakerId"`
+	TTSResourceID    string `json:"ttsResourceId"`
+	ASRResourceID    string `json:"asrResourceId"`
+	APIKey           string `json:"apiKey"`
+	AccessToken      string `json:"accessToken"`
+	SecretKey        string `json:"secretKey"`
+	ClearAPIKey      bool   `json:"clearApiKey"`
+	ClearAccessToken bool   `json:"clearAccessToken"`
+	ClearSecretKey   bool   `json:"clearSecretKey"`
+	Enabled          *bool  `json:"enabled"`
 }
 
 type adminSettingsHandler struct {
@@ -251,6 +270,101 @@ func (handler *adminSettingsHandler) issueRTC(w http.ResponseWriter, request *ht
 	writeJSON(w, http.StatusOK, connection)
 }
 
+func (handler *adminSettingsHandler) getSpeech(w http.ResponseWriter, request *http.Request) {
+	if _, ok := requestActor(w, request); !ok {
+		return
+	}
+	public, err := handler.admin.GetSpeech(request.Context())
+	if !writeSettingsError(w, request, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, public)
+}
+
+func (handler *adminSettingsHandler) getClientSpeech(w http.ResponseWriter, request *http.Request) {
+	authenticated, ok := request.Context().Value(authenticatedSessionKey{}).(AuthenticatedSession)
+	if !ok {
+		writeSessionError(w, request)
+		return
+	}
+	if authenticated.Session.Purpose != sessions.PurposeDesktop {
+		writeAPIError(w, request, http.StatusForbidden, "FORBIDDEN", "desktop session is required")
+		return
+	}
+	clientSpeech, err := handler.admin.GetClientSpeech(request.Context())
+	if !writeSettingsError(w, request, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, clientSpeech)
+}
+
+func (handler *adminSettingsHandler) putSpeech(w http.ResponseWriter, request *http.Request) {
+	actor, ok := requestActor(w, request)
+	if !ok {
+		return
+	}
+	input := speechSettingsRequest{}
+	if err := decodeBoundedJSON(w, request, &input); err != nil {
+		writeJSONDecodeError(w, request, err)
+		return
+	}
+	public, err := handler.admin.PutSpeech(request.Context(), actor, middleware.GetReqID(request.Context()), speechInputFromRequest(input))
+	if !writeSettingsError(w, request, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, public)
+}
+
+func (handler *adminSettingsHandler) patchClientSpeech(w http.ResponseWriter, request *http.Request) {
+	authenticated, ok := request.Context().Value(authenticatedSessionKey{}).(AuthenticatedSession)
+	if !ok {
+		writeSessionError(w, request)
+		return
+	}
+	if authenticated.Session.Purpose != sessions.PurposeDesktop {
+		writeAPIError(w, request, http.StatusForbidden, "FORBIDDEN", "desktop session is required")
+		return
+	}
+	var input struct {
+		SpeakerID string `json:"speakerId"`
+	}
+	if err := decodeBoundedJSON(w, request, &input); err != nil {
+		writeJSONDecodeError(w, request, err)
+		return
+	}
+	public, err := handler.admin.PutClientSpeechSpeakerID(request.Context(), strings.TrimSpace(input.SpeakerID))
+	if errors.Is(err, settings.ErrNotConfigured) {
+		writeAPIError(w, request, http.StatusServiceUnavailable, "SPEECH_UNAVAILABLE", "请先在管理后台配置豆包语音")
+		return
+	}
+	if !writeSettingsError(w, request, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, public)
+}
+
+func (handler *adminSettingsHandler) testSpeech(w http.ResponseWriter, request *http.Request) {
+	actor, ok := requestActor(w, request)
+	if !ok {
+		return
+	}
+	var payload *settings.SpeechInput
+	if request.Body != nil && request.ContentLength != 0 {
+		input := speechSettingsRequest{}
+		if err := decodeBoundedJSON(w, request, &input); err != nil {
+			writeJSONDecodeError(w, request, err)
+			return
+		}
+		converted := speechInputFromRequest(input)
+		payload = &converted
+	}
+	result, err := handler.admin.TestSpeech(request.Context(), actor, middleware.GetReqID(request.Context()), payload)
+	if !writeSettingsError(w, request, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 func (handler *adminSettingsHandler) getStorage(w http.ResponseWriter, request *http.Request) {
 	if _, ok := requestActor(w, request); !ok {
 		return
@@ -334,6 +448,22 @@ func writeSettingsError(w http.ResponseWriter, request *http.Request, err error)
 		writeAPIError(w, request, http.StatusInternalServerError, "INTERNAL_ERROR", "settings service unavailable")
 	}
 	return false
+}
+
+func speechInputFromRequest(input speechSettingsRequest) settings.SpeechInput {
+	return settings.SpeechInput{
+		AppID:            input.AppID,
+		SpeakerID:        input.SpeakerID,
+		TTSResourceID:    input.TTSResourceID,
+		ASRResourceID:    input.ASRResourceID,
+		APIKey:           input.APIKey,
+		AccessToken:      input.AccessToken,
+		SecretKey:        input.SecretKey,
+		ClearAPIKey:      input.ClearAPIKey,
+		ClearAccessToken: input.ClearAccessToken,
+		ClearSecretKey:   input.ClearSecretKey,
+		Enabled:          input.Enabled,
+	}
 }
 
 func rtcInputFromRequest(input rtcSettingsRequest) settings.RTCInput {

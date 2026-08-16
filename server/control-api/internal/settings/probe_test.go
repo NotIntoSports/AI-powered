@@ -48,6 +48,47 @@ func TestProbeAIReportsMissingModelWithoutUpstreamBody(t *testing.T) {
 	}
 }
 
+func TestProbeSpeechUsesApiKeyAndTreatsUnauthorizedAsAuthFailure(t *testing.T) {
+	var sawKey, sawApp, sawToken string
+	client := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		sawKey = request.Header.Get("X-Api-Key")
+		sawApp = request.Header.Get("X-Api-App-Key")
+		sawToken = request.Header.Get("X-Api-Access-Key")
+		return &http.Response{
+			StatusCode: http.StatusUnauthorized,
+			Body:       io.NopCloser(strings.NewReader(`{"message":"unauthorized"}`)),
+			Header:     make(http.Header),
+		}, nil
+	})
+	record := SpeechRecord{Enabled: true, EncryptedAPIKey: []byte("pending"), SpeakerID: "custom_zh_interviewer"}
+	result := ProbeSpeech(context.Background(), client, record, "volc-secret-key", "", nil)
+	if result.Reachable || sawKey != "volc-secret-key" || sawApp != "" || sawToken != "" {
+		t.Fatalf("result=%#v key=%q app=%q token=%q", result, sawKey, sawApp, sawToken)
+	}
+	if strings.Contains(result.Message, "volc-secret-key") {
+		t.Fatalf("message leaked key: %s", result.Message)
+	}
+}
+
+func TestProbeSpeechFallsBackToAppIdToken(t *testing.T) {
+	var sawKey, sawApp, sawToken string
+	client := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		sawKey = request.Header.Get("X-Api-Key")
+		sawApp = request.Header.Get("X-Api-App-Key")
+		sawToken = request.Header.Get("X-Api-Access-Key")
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"status":0}`)),
+			Header:     make(http.Header),
+		}, nil
+	})
+	record := SpeechRecord{Enabled: true, AppID: "8358554445", EncryptedAccessToken: []byte("pending")}
+	result := ProbeSpeech(context.Background(), client, record, "", "volc-access-token", nil)
+	if !result.Reachable || sawKey != "" || sawApp != "8358554445" || sawToken != "volc-access-token" {
+		t.Fatalf("result=%#v key=%q app=%q token=%q", result, sawKey, sawApp, sawToken)
+	}
+}
+
 func TestProbeLiveKitTreatsHTTPResponseAsReachable(t *testing.T) {
 	client := roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		if request.URL.Scheme != "http" || request.URL.Host != "127.0.0.1:7880" {

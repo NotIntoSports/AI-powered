@@ -4,11 +4,19 @@ import {
   isSecureEndpoint,
   selectScopedApiKey
 } from "./endpoint-security";
+import { getSpeechRuntimeConfig } from "./speech-runtime";
+import {
+  buildFlashAsrBody,
+  mapTranscriptionFormat,
+  parseFlashAsrText,
+  VOLCENGINE_ASR_URL,
+  volcengineJsonRequest
+} from "./volcengine-speech";
 
 export const MAX_AUDIO_BYTES = 15 * 1024 * 1024;
 
 export type TranscriptionProvider = "openai" | "whisper-cpp";
-export type TranscriptionSource = "management" | "environment" | "whisper-cpp" | "none";
+export type TranscriptionSource = "volcengine" | "management" | "environment" | "whisper-cpp" | "none";
 
 type TranscriptionResult = {
   text?: string;
@@ -115,6 +123,7 @@ export function getTranscriptionProvider(): TranscriptionProvider {
 }
 
 export async function getTranscriptionSource(): Promise<TranscriptionSource> {
+  if ((await getSpeechRuntimeConfig()).asrAvailable) return "volcengine";
   if (await getManagementASRConfig()) return "management";
   if (getTranscriptionProvider() === "whisper-cpp") return "whisper-cpp";
   if (await isLocalTranscriptionConfigured()) return "environment";
@@ -140,11 +149,13 @@ async function isLocalTranscriptionConfigured() {
 }
 
 export async function isTranscriptionConfigured() {
+  if ((await getSpeechRuntimeConfig()).asrAvailable) return true;
   if (await getManagementASRConfig()) return true;
   return isLocalTranscriptionConfigured();
 }
 
 export async function isTranscriptionReady() {
+  if ((await getSpeechRuntimeConfig()).asrAvailable) return true;
   const management = await getManagementASRConfig();
   if (management) return true;
   if (!await isLocalTranscriptionConfigured()) return false;
@@ -174,10 +185,33 @@ export async function validateAudioFile(file: File) {
 
 export async function transcribeAudio(file: File) {
   await validateAudioFile(file);
+  if ((await getSpeechRuntimeConfig()).asrAvailable) {
+    try {
+      const text = await transcribeWithVolcengine(file);
+      if (text) return text;
+    } catch {
+      // Fall back to OpenAI-compatible or whisper.cpp.
+    }
+  }
   if (await getManagementASRConfig() || getTranscriptionProvider() !== "whisper-cpp") {
     return transcribeWithOpenAI(file);
   }
   return transcribeWithWhisperCpp(file);
+}
+
+async function transcribeWithVolcengine(file: File) {
+  const speech = await getSpeechRuntimeConfig();
+  const bytes = Buffer.from(await file.arrayBuffer());
+  const { response, text } = await volcengineJsonRequest({
+    url: VOLCENGINE_ASR_URL,
+    auth: speech,
+    body: buildFlashAsrBody(bytes.toString("base64"), mapTranscriptionFormat(file.type)),
+    resourceId: speech.asrResourceId,
+    timeoutMs: 30_000
+  });
+  const payload = JSON.parse(text) as unknown;
+  if (!response.ok) throw new Error(`TRANSCRIPTION_UPSTREAM_${response.status}`);
+  return parseFlashAsrText(payload);
 }
 
 async function transcribeWithWhisperCpp(file: File) {

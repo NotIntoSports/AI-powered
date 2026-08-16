@@ -491,3 +491,12 @@
 - 未采用：自研虚拟摄像头；把真实摄像头接到舞台再经 OBS 输出；自动改腾讯会议/飞书的设备选项。
 - 限制：本机无法替用户改第三方会议软件里的摄像头选择。真实摄像头路径不替换对方面看到的画面。
 
+# 2026-08-16：豆包语音声音刻录 / TTS / 极速 ASR
+
+- 目标：在桌面客户端用真实麦克风录面试官声音，复刻后用于舞台 TTS；候选人 VAD 切片优先走火山极速转写。
+- 采用：官方 OpenSpeech HTTP。复刻 `POST https://openspeech.bytedance.com/api/v3/tts/voice_clone`；TTS `POST .../api/v3/tts/unidirectional` 且 `X-Api-Resource-Id: seed-icl-2.0`；ASR 录音文件极速版 `POST .../api/v3/auc/bigmodel/recognize/flash` 且默认 `volc.bigasr.auc_turbo`（同步、可传音频字节）。鉴权优先 `X-Api-Key`，旧控制台 `AppID` + Access Token 备用。
+- 依赖：现有 `fetch`、`MediaRecorder`/`AudioContext`、`getUserMedia`。不引入 `@volcengine/openapi`、Python 示例包或移动 SDK。
+- 密钥：管理端 `speech_configs` 用 AES-256-GCM 加密 API Key / Access Token / Secret Key；桌面专用 `GET /api/v1/client/settings/speech` 才下发明文。本机回退 `data/settings/speech.json` + DPAPI，以及 `.env.example` 空模板。Secret Key 只保存，本轮不实现 HMAC。
+- 未采用：Piper / CosyVoice（本地模型体积与许可证不适合默认捆绑）；火山移动 SDK；把录音放到管理网页（麦克风在面试官本机）；改 LiveKit Agent STT（协议不兼容，本轮仍走 OpenAI-compatible）。
+- 限制：实时字幕仍走现有火山 RTC / LiveKit；复刻音频最长约 25 秒、最大 10MB；后付费自定义 `speaker_id` 首次正式合成可能产生音色槽位费用。
+

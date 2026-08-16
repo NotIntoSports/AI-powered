@@ -514,6 +514,80 @@ paths:
           $ref: '#/components/responses/Unauthenticated'
         '403':
           $ref: '#/components/responses/Forbidden'
+  /api/v1/admin/settings/speech:
+    get:
+      operationId: getAdminSpeechSettings
+      summary: Return public Doubao speech settings. Secrets are never included.
+      security:
+        - cookieAuth: []
+      responses:
+        '200':
+          description: Public speech settings.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PublicSpeechSettings'}
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    put:
+      operationId: putAdminSpeechSettings
+      summary: Save Doubao speech settings. Empty secrets keep the stored values.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PutSpeechSettingsRequest'}
+      responses:
+        '200':
+          description: Saved public speech settings.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PublicSpeechSettings'}
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          $ref: '#/components/responses/InvalidInputUnprocessable'
+        '503':
+          $ref: '#/components/responses/SettingsUnavailable'
+  /api/v1/admin/settings/speech/test:
+    post:
+      operationId: testAdminSpeechSettings
+      summary: Probe Doubao speech authentication without returning secrets.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PutSpeechSettingsRequest'}
+      responses:
+        '200':
+          description: Probe result without secrets.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SpeechTestResult'}
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /api/v1/admin/resumes:
     get:
       operationId: listAdminResumes
@@ -688,6 +762,59 @@ paths:
           $ref: '#/components/responses/Unauthenticated'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/SettingsUnavailable'
+  /api/v1/client/settings/speech:
+    get:
+      operationId: getClientSpeechSettings
+      summary: Return decrypted Doubao speech runtime settings for a desktop session. Secrets are not stored on the client disk.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Desktop runtime speech settings, including API key and access token for in-memory use.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ClientSpeechSettings'}
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/SettingsUnavailable'
+    patch:
+      operationId: patchClientSpeechSpeaker
+      summary: Persist a cloned speaker_id from the desktop client. Does not accept secrets.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [speakerId]
+              properties:
+                speakerId: {type: string}
+      responses:
+        '200':
+          description: Updated public speech settings.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PublicSpeechSettings'}
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/InvalidInputUnprocessable'
         '503':
           $ref: '#/components/responses/SettingsUnavailable'
   /api/v1/client/rtc/token:
@@ -1273,6 +1400,67 @@ components:
             properties:
               name: {type: string}
               region: {type: string}
+    PublicSpeechSettings:
+      type: object
+      required: [configured, available, ttsAvailable, asrAvailable, appId, speakerId, enabled]
+      properties:
+        configured: {type: boolean}
+        available: {type: boolean}
+        ttsAvailable: {type: boolean}
+        asrAvailable: {type: boolean}
+        appId: {type: string}
+        speakerId: {type: string}
+        ttsResourceId: {type: string}
+        asrResourceId: {type: string}
+        apiKeyConfigured: {type: boolean}
+        accessTokenConfigured: {type: boolean}
+        secretKeyConfigured: {type: boolean}
+        enabled: {type: boolean}
+        configVersion: {type: integer}
+        updatedAt: {type: string, format: date-time}
+        updatedByUsername: {type: string}
+    ClientSpeechSettings:
+      type: object
+      required: [configured, available, ttsAvailable, asrAvailable, appId, speakerId, enabled]
+      properties:
+        configured: {type: boolean}
+        available: {type: boolean}
+        ttsAvailable: {type: boolean}
+        asrAvailable: {type: boolean}
+        appId: {type: string}
+        speakerId: {type: string}
+        ttsResourceId: {type: string}
+        asrResourceId: {type: string}
+        apiKeyConfigured: {type: boolean}
+        accessTokenConfigured: {type: boolean}
+        secretKeyConfigured: {type: boolean}
+        enabled: {type: boolean}
+        configVersion: {type: integer}
+        updatedAt: {type: string, format: date-time}
+        updatedByUsername: {type: string}
+        apiKey: {type: string, format: password}
+        accessToken: {type: string, format: password}
+    PutSpeechSettingsRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        appId: {type: string}
+        speakerId: {type: string}
+        ttsResourceId: {type: string}
+        asrResourceId: {type: string}
+        enabled: {type: boolean}
+        apiKey: {type: string, format: password}
+        accessToken: {type: string, format: password}
+        secretKey: {type: string, format: password}
+        clearApiKey: {type: boolean}
+        clearAccessToken: {type: boolean}
+        clearSecretKey: {type: boolean}
+    SpeechTestResult:
+      type: object
+      required: [reachable, message]
+      properties:
+        reachable: {type: boolean}
+        message: {type: string}
     Resume:
       type: object
       required: [id, uploadedByUserId, originalFilename, contentType, sizeBytes, createdAt, indexStatus]

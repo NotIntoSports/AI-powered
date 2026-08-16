@@ -11,6 +11,7 @@ const links = [
   { href: "/sessions", label: "当前线路" },
   { href: "/settings/ai", label: "AI 配置" },
   { href: "/settings/rtc", label: "RTC 配置" },
+  { href: "/settings/speech", label: "语音" },
   { href: "/settings/storage", label: "对象存储" },
   { href: "/resumes", label: "简历" }
 ];

@@ -91,6 +91,9 @@ func NewRouter(dependencies Dependencies) http.Handler {
 					r.Get("/storage", adminSettings.getStorage)
 					r.Put("/storage", adminSettings.putStorage)
 					r.Post("/storage/test", adminSettings.testStorage)
+					r.Get("/speech", adminSettings.getSpeech)
+					r.Put("/speech", adminSettings.putSpeech)
+					r.Post("/speech/test", adminSettings.testSpeech)
 				})
 			}
 			if dependencies.ResumeAdmin != nil {
@@ -128,6 +131,8 @@ func NewRouter(dependencies Dependencies) http.Handler {
 				clientSettings := newAdminSettingsHandler(dependencies.SettingsAdmin)
 				r.Get("/settings/ai", clientSettings.getClientAI)
 				r.Get("/settings/asr", clientSettings.getClientASR)
+				r.Get("/settings/speech", clientSettings.getClientSpeech)
+				r.Patch("/settings/speech", clientSettings.patchClientSpeech)
 				r.Post("/rtc/token", clientSettings.issueRTC)
 			}
 		})
