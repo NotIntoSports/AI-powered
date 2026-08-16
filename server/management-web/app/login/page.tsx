@@ -31,7 +31,7 @@ export default function LoginPage() {
         setError("需要管理员账号才能进入管理后台");
         return;
       }
-      router.replace("/users");
+      router.replace("/overview");
       router.refresh();
     } finally {
       setBusy(false);

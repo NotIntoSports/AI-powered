@@ -43,7 +43,7 @@ try {
     const csp = response.headers.get("content-security-policy") || "";
     assert.match(csp, /default-src 'self'/);
     assert.match(csp, /script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'/);
-    assert.match(csp, /connect-src 'self' ws:\/\/127\.0\.0\.1:\* ws:\/\/localhost:\*/);
+    assert.match(csp, /connect-src 'self' ws: wss: http:\/\/127\.0\.0\.1:\* http:\/\/localhost:\* https:/);
     assert.match(csp, /media-src 'self' blob:/);
     assert.match(csp, /frame-ancestors 'none'/);
     assert.equal(response.headers.get("x-content-type-options"), "nosniff");

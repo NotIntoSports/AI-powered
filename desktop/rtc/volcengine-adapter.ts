@@ -1,3 +1,7 @@
+import { mapVolcengineSubtitles } from "../../lib/subtitles/map-volcengine.ts";
+import type { SubtitleSink } from "../../lib/subtitles/sink.ts";
+import type { SubtitleConnectConfig, SubtitleTransport } from "../../lib/subtitles/transport.ts";
+
 type RtcEnginePort = {
   on(name: string, listener: (event: unknown) => void): unknown;
   joinRoom(token: string, roomId: string, user: { userId: string }): Promise<void>;
@@ -9,27 +13,26 @@ type RtcEnginePort = {
   leaveRoom(): unknown;
 };
 
-export type RtcConnectConfig = {
-  token: string;
-  roomId: string;
-  userId: string;
-  language: string;
-  track: unknown;
-};
-
-export class VolcengineRtcAdapter {
+export class VolcengineRtcAdapter implements SubtitleTransport {
+  readonly provider = "volcengine" as const;
   private readonly engine: RtcEnginePort;
-  private readonly onSubtitle: (event: unknown) => void;
+  private readonly sink: SubtitleSink;
+  private sessionId = "";
+  private language = "zh";
+  private readonly onSubtitle = (payload: unknown) => {
+    for (const event of mapVolcengineSubtitles(payload, this.sessionId, this.language)) {
+      this.sink.publish(event);
+    }
+  };
 
-  constructor(
-    engine: RtcEnginePort,
-    onSubtitle: (event: unknown) => void = () => undefined
-  ) {
+  constructor(engine: RtcEnginePort, sink: SubtitleSink) {
     this.engine = engine;
-    this.onSubtitle = onSubtitle;
+    this.sink = sink;
   }
 
-  async connect(config: RtcConnectConfig): Promise<void> {
+  async connect(config: SubtitleConnectConfig): Promise<void> {
+    this.sessionId = config.sessionId;
+    this.language = config.language;
     this.engine.on("onSubtitleMessageReceived", this.onSubtitle);
     await this.engine.setAudioSourceType(0, 0);
     await this.engine.setExternalAudioTrack(0, config.track);

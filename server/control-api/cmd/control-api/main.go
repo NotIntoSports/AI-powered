@@ -14,6 +14,10 @@ import (
 	"github.com/ai-interviewer/ai-powered/control-api/internal/database"
 	"github.com/ai-interviewer/ai-powered/control-api/internal/httpapi"
 	"github.com/ai-interviewer/ai-powered/control-api/internal/identity"
+	"github.com/ai-interviewer/ai-powered/control-api/internal/presence"
+	"github.com/ai-interviewer/ai-powered/control-api/internal/resumes"
+	"github.com/ai-interviewer/ai-powered/control-api/internal/secretbox"
+	"github.com/ai-interviewer/ai-powered/control-api/internal/settings"
 )
 
 func main() {
@@ -35,14 +39,26 @@ func main() {
 		log.Fatal("initialize authentication service")
 	}
 
+	var box *secretbox.Box
+	if len(cfg.SettingsMasterKey) > 0 {
+		box, err = secretbox.New(cfg.SettingsMasterKey)
+		if err != nil {
+			log.Fatal("initialize settings encryption")
+		}
+	}
+
 	server := &http.Server{
 		Addr:              cfg.ListenAddress,
 		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       15 * time.Second,
+		ReadTimeout:       2 * time.Minute,
+		WriteTimeout:      2 * time.Minute,
 		IdleTimeout:       60 * time.Second,
 		Handler: httpapi.NewRouter(httpapi.Dependencies{
 			Authentication:    authentication,
 			UserAdmin:         identity.NewService(pool),
+			SettingsAdmin:     settings.NewService(pool, box, nil),
+			PresenceAdmin:     presence.NewStore(pool),
+			ResumeAdmin:       resumes.NewService(pool, box, nil),
 			SessionTTL:        cfg.SessionTTL,
 			CookieSecure:      cfg.CookieSecure,
 			TrustedProxyCIDRs: cfg.TrustedProxyCIDRs,

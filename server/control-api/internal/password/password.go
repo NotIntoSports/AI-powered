@@ -21,7 +21,7 @@ var (
 const (
 	formatName       = "argon2id"
 	formatVersion    = 19
-	passwordMinRunes = 12
+	passwordMinRunes = 8
 	passwordMaxBytes = 1024
 
 	saltSize = 16

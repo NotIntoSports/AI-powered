@@ -8,15 +8,25 @@ button.danger { background: #7b2f39; color: #fff; }
 button:disabled { opacity: .45; cursor: not-allowed; }
 input, select { width: 100%; border: 1px solid #303744; border-radius: 10px; padding: 11px 12px; background: #11151d; color: #f6f8fb; }
 label { display: grid; gap: 6px; color: #8d99aa; font-size: 13px; }
-.shell { width: min(960px, calc(100% - 40px)); margin: auto; padding: 48px 0; }
+.shell { width: min(1100px, calc(100% - 40px)); margin: auto; padding: 40px 0 64px; }
 .eyebrow { margin: 0; color: #7892bb; font-size: 12px; letter-spacing: .16em; }
-h1 { margin: 8px 0 24px; font-size: 36px; letter-spacing: -.04em; }
-.card { border: 1px solid #262c36; border-radius: 17px; padding: 22px; background: #10131a; display: grid; gap: 14px; }
+h1 { margin: 8px 0 16px; font-size: 32px; letter-spacing: -.04em; }
+h2 { margin: 0; font-size: 18px; }
+.card { border: 1px solid #262c36; border-radius: 17px; padding: 22px; background: #10131a; display: grid; gap: 14px; margin-bottom: 16px; }
 .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
 .row > * { flex: 1; min-width: 160px; }
 .error { color: #f3b4b4; font-size: 13px; }
 .ok { color: #8ee0b5; font-size: 13px; }
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
-th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid #262c36; }
-.topbar { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 20px; }
+th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid #262c36; vertical-align: top; }
+.topbar { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 12px; }
 .muted { color: #8d99aa; font-size: 13px; }
+.nav { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 22px; }
+.nav a { color: #d6dce5; text-decoration: none; padding: 8px 12px; border-radius: 999px; background: #171b24; font-size: 13px; font-weight: 600; }
+.nav a.active { background: #eef4ff; color: #10141b; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.stat { border: 1px solid #262c36; border-radius: 14px; padding: 16px; background: #10131a; }
+.stat b { display: block; font-size: 28px; margin-top: 6px; }
+.online { color: #8ee0b5; font-weight: 700; }
+.offline { color: #8d99aa; }
+.stack { display: grid; gap: 12px; }

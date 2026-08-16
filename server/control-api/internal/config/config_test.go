@@ -75,6 +75,40 @@ func TestLoadAcceptsConfiguredValuesAtMaximumTTL(t *testing.T) {
 	}
 }
 
+func TestLoadAcceptsSettingsMasterKey(t *testing.T) {
+	key := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	cfg, err := Load(func(keyName string) string {
+		if keyName == "DATABASE_URL" {
+			return "postgres://test"
+		}
+		if keyName == "SETTINGS_MASTER_KEY" {
+			return key
+		}
+		return ""
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.SettingsMasterKey) != 32 {
+		t.Fatalf("key length=%d", len(cfg.SettingsMasterKey))
+	}
+}
+
+func TestLoadRejectsInvalidSettingsMasterKey(t *testing.T) {
+	_, err := Load(func(keyName string) string {
+		if keyName == "DATABASE_URL" {
+			return "postgres://test"
+		}
+		if keyName == "SETTINGS_MASTER_KEY" {
+			return "too-short"
+		}
+		return ""
+	})
+	if !errors.Is(err, ErrSettingsMasterKey) {
+		t.Fatalf("error=%v", err)
+	}
+}
+
 func TestLoadRejectsInvalidTrustedProxyCIDR(t *testing.T) {
 	env := map[string]string{
 		"DATABASE_URL":        "postgres://test",

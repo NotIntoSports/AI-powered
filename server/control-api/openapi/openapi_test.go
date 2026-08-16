@@ -72,7 +72,7 @@ func TestAdminMutationsDocumentInvalidInputAndTooLarge(t *testing.T) {
 		{name: "create", yaml: sectionBetween(t, spec, "      operationId: createAdminUser", "  /api/v1/admin/users/{id}:")},
 		{name: "patch", yaml: sectionBetween(t, spec, "      operationId: patchAdminUser", "  /api/v1/admin/users/{id}/reset-password:")},
 		{name: "reset-password", yaml: sectionBetween(t, spec, "      operationId: resetAdminUserPassword", "  /api/v1/admin/users/{id}/revoke-sessions:")},
-		{name: "revoke-sessions", yaml: sectionBetween(t, spec, "      operationId: revokeAdminUserSessions", "components:\n  securitySchemes:")},
+		{name: "revoke-sessions", yaml: sectionBetween(t, spec, "      operationId: revokeAdminUserSessions", "  /api/v1/admin/sessions:")},
 	}
 	for _, section := range sections {
 		t.Run(section.name, func(t *testing.T) {

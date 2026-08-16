@@ -9,6 +9,110 @@ export type PublicUser = {
   createdAt: string;
   updatedAt: string;
   lastLoginAt?: string;
+  online?: boolean;
+  lastSeenAt?: string;
+  activeSessionCount?: number;
+};
+
+export type SessionLine = {
+  id: string;
+  userId: string;
+  username: string;
+  purpose: "browser" | "desktop" | string;
+  deviceId?: string;
+  createdAt: string;
+  expiresAt: string;
+  lastUsedAt?: string;
+  online: boolean;
+};
+
+export type PublicAISettings = {
+  configured: boolean;
+  available: boolean;
+  provider: string;
+  baseUrl: string;
+  model: string;
+  questionTimeoutMs: number;
+  reportTimeoutMs: number;
+  enabled: boolean;
+  apiKeyConfigured: boolean;
+  localEndpoint: boolean;
+  configVersion: number;
+  updatedAt?: string;
+  updatedByUsername?: string;
+};
+
+export type PublicRTCSettings = {
+  configured: boolean;
+  available: boolean;
+  activeProvider: "volcengine" | "livekit" | string;
+  appId: string;
+  language: string;
+  mode: "production" | "trial" | string;
+  tokenServiceUrl: string;
+  secretConfigured: boolean;
+  trialExpiresAt?: string;
+  trialRoomId: string;
+  trialUserId: string;
+  volcengineAvailable?: boolean;
+  livekitUrl?: string;
+  livekitApiKey?: string;
+  livekitSecretConfigured?: boolean;
+  livekitConfigured?: boolean;
+  livekitAvailable?: boolean;
+  asrBaseUrl?: string;
+  asrModel?: string;
+  asrKeyConfigured?: boolean;
+  enabled: boolean;
+  configVersion: number;
+  updatedAt?: string;
+  updatedByUsername?: string;
+};
+
+export type AITestResult = {
+  reachable: boolean;
+  modelFound: boolean;
+  models?: string[];
+  message: string;
+};
+
+export type RTCTestResult = {
+  reachable: boolean;
+  provider?: string;
+  message: string;
+};
+
+export type PublicStorageSettings = {
+  configured: boolean;
+  available: boolean;
+  provider: string;
+  region: string;
+  bucket: string;
+  secretId: string;
+  secretKeyConfigured: boolean;
+  enabled: boolean;
+  configVersion: number;
+  updatedAt?: string;
+  updatedByUsername?: string;
+};
+
+export type StorageTestResult = {
+  reachable: boolean;
+  message: string;
+  buckets?: { name: string; region: string }[];
+};
+
+export type ResumeRecord = {
+  id: string;
+  uploadedByUserId: string;
+  uploadedByUsername?: string;
+  candidateName: string;
+  originalFilename: string;
+  contentType: string;
+  sizeBytes: number;
+  objectKey: string;
+  sha256: string;
+  createdAt: string;
 };
 
 export type APIError = {
@@ -56,7 +160,10 @@ export function publicUserFromUnknown(payload: unknown): PublicUser | null {
     status: record.status,
     createdAt: typeof record.createdAt === "string" ? record.createdAt : "",
     updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : "",
-    lastLoginAt: typeof record.lastLoginAt === "string" ? record.lastLoginAt : undefined
+    lastLoginAt: typeof record.lastLoginAt === "string" ? record.lastLoginAt : undefined,
+    online: record.online === true,
+    lastSeenAt: typeof record.lastSeenAt === "string" ? record.lastSeenAt : undefined,
+    activeSessionCount: typeof record.activeSessionCount === "number" ? record.activeSessionCount : 0
   };
 }
 

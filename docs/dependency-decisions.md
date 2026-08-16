@@ -410,3 +410,32 @@
 - 原因：设计文档已选择 Caddy 或 Nginx 做反向代理；用户明确要求前端走 80。现有开发 Compose 只绑定 `127.0.0.1:3001`，不能直接作为公网入口。
 - 未采用：Caddy 自动 HTTPS（会把 80 跳到 443，与“前端用 80 口”冲突）；未把宿主机已有公网 `5432` PostgreSQL 当作应用库（该实例对 `0.0.0.0` 开放，且与容器网络隔离目标不一致）。
 - 限制：当前按用户要求使用明文 HTTP，因此 `COOKIE_SECURE=false`。没有 TLS 时会话 Cookie 可被网络侧截获；上线公网前应改为 443 并恢复 `COOKIE_SECURE=true`。
+
+# 2026-08-16：管理端在线状态、当前线路与 AI/RTC 配置入库
+
+- 目标：让管理后台能看到账户在线、当前会话线路，并允许管理员通过网页把 AI/RTC 配置写入 PostgreSQL；密钥不回传到前端。
+- 采用：继续复用已锁定的 Go 标准库 `crypto/aes` + `crypto/cipher` GCM、`net/http` 探测 OpenAI-compatible `GET /models`、chi/pgx/goose、以及现有 Next.js 管理端。不新增 UI 套件、ORM、AI SDK 或 RTC Token SDK。
+- 加密：`SETTINGS_MASTER_KEY` 为 32 字节 hex 主密钥，只存在进程环境；数据库只保存 AES-256-GCM 密文和密钥版本。读取接口只返回 `apiKeyConfigured` / `secretConfigured`。
+- 在线判定：复用已有 `user_sessions.last_used_at`（5 分钟节流更新）和未撤销未过期会话；15 分钟内有活动视为在线。不引入 WebSocket。客户端心跳和设备上报仍属后续阶段，当前线路以活动会话为准。
+- 未采用：Ory、Vault SDK、Volcengine Token SDK。本阶段只保存和测试配置，不把远程 AI 追问或 RTC Token 签发切到 Go。
+- 限制：没有主密钥时仍可查看空配置和用户在线，但不能保存密钥；Windows 客户端尚未登录/心跳时，desktop 线路不会出现。
+
+# 2026-08-16：腾讯云 COS 简历上传
+
+- 目标：Windows 客户端上传候选人简历，文件保存在腾讯云对象存储；管理端保存 COS 配置并查看/下载简历。密钥不进客户端、前端源码或 Git。
+- 采用：官方 [tencentyun/cos-go-sdk-v5](https://github.com/tencentyun/cos-go-sdk-v5) `v0.7.59`（Apache-2.0）。管理 API 用该 SDK 列出 Bucket、PutObject 和预签名下载。
+- 存储：`object_storage_configs` 保存地域、Bucket、SecretId，SecretKey 继续用已有 AES-256-GCM `SETTINGS_MASTER_KEY` 加密。`resumes` 只存元数据和 object key。
+- 客户端：本地 Next.js `/api/resume` 用桌面会话 Bearer 转发到 control-api，不接触云密钥。仅接受 PDF/Word，最大 10MB。
+- 未采用：在 Electron 里接入 `cos-js-sdk-v5`（会把密钥或临时密钥下发到桌面）；未采用 MinIO/AWS SDK，因为当前明确是腾讯云 COS。
+- 限制：需要先在腾讯云创建 Bucket 并在管理后台填写地域/桶名。密钥曾在聊天中明文提供，上线后应在腾讯云轮换 SecretKey。
+
+# 2026-08-16：火山 RTC 与 LiveKit 双线路，共用字幕 v1
+
+- 目标：候选人仍走腾讯会议/飞书。字幕 UI 只消费 `ai.interviewer.subtitle.v1`。管理端按压力在火山云 RTC 与自建 LiveKit 之间切换，两边配置都保留。
+- 字幕契约：客户端 `lib/subtitles` 的 Sink 是唯一入口。火山 `sequence`/`definite` 和 LiveKit segment/data packet 只存在映射器。不新增 UI 套件。
+- 火山线路：继续官方 [`@volcengine/rtc` 4.69.0](https://www.npmjs.com/package/@volcengine/rtc)（BSD-3-Clause）和 `startSubtitle`。不删除 SDK。
+- LiveKit 线路：官方 [`livekit-client`](https://www.npmjs.com/package/livekit-client)（Apache-2.0）推 PCM；自建镜像 [`livekit/livekit-server`](https://github.com/livekit/livekit)（Apache-2.0）；字幕 Agent 用官方 Python [`livekit-agents`](https://github.com/livekit/agents) + `livekit-plugins-openai` 调远程 OpenAI-compatible STT，经 data topic `subtitle.v1` 回写 v1 JSON。
+- Token：Go control-api 用标准库 HMAC-SHA256 签发 LiveKit JWT，不引入 `server-sdk-go`（会带入 pion/WebRTC，对只签发 Token 明显过重）。火山正式模式仍请求已配置的 HTTPS Token 服务。
+- 未采用：同机 FunASR/whisper 作为 LiveKit STT；删除火山 RTC；把两家字段混在一个表单。
+- 限制：4 核 8G 可合部 SFU + 轻量 Agent + 管理栈，前提是 STT 走远程 API。公网需要 UDP/TURN 与 TLS；当前管理入口仍可走 HTTP 80，LiveKit 默认不启动（compose profile `livekit`）。默认 `activeProvider=volcengine`。
+

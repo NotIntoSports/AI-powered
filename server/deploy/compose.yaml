@@ -27,6 +27,7 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       LISTEN_ADDRESS: 0.0.0.0:8080
       COOKIE_SECURE: "false"
+      SETTINGS_MASTER_KEY: ${SETTINGS_MASTER_KEY}
     depends_on:
       postgres:
         condition: service_healthy
@@ -64,6 +65,32 @@ services:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       - management-web
+    restart: unless-stopped
+
+  livekit:
+    image: livekit/livekit-server:v1.9.6
+    profiles: ["livekit"]
+    command: ["--dev", "--bind", "0.0.0.0"]
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      - "7882:7882/udp"
+    restart: unless-stopped
+
+  livekit-agent:
+    image: livekit-agent:local
+    build: ../livekit-agent
+    profiles: ["livekit"]
+    environment:
+      LIVEKIT_URL: ws://livekit:7880
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-secret}
+      STT_BASE_URL: ${LIVEKIT_ASR_BASE_URL:-}
+      STT_API_KEY: ${LIVEKIT_ASR_API_KEY:-}
+      STT_MODEL: ${LIVEKIT_ASR_MODEL:-whisper-1}
+      STT_LANGUAGE: ${LIVEKIT_ASR_LANGUAGE:-zh}
+    depends_on:
+      - livekit
     restart: unless-stopped
 
 volumes:

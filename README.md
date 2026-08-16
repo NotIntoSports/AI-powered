@@ -15,12 +15,12 @@
 - Windows 客户端内置官方 OBS 32.2.1，并由 Electron 主进程通过 OBS WebSocket 一键创建场景、浏览器源并启停虚拟摄像头。
 - 控制台提供服务、模型、舞台、系统语音和画面素材五项自动自检。
 - 可从任意会议窗口或整个屏幕采集系统音频，分段转写为候选人回答。
-- Windows 客户端使用火山引擎 RTC 获取实时字幕，模型和 RTC 凭据由使用者在本机填写。
+- Windows 客户端通过统一字幕接口显示实时字幕；管理端可在火山云 RTC 与自建 LiveKit 之间切换线路，默认仍是火山 RTC。
 - 按住说话可暂停 AI，并由 OBS 将本机默认麦克风切入同一虚拟麦克风线路。
 
 Windows 客户端安装、接线和已知限制见 [docs/windows-client.md](docs/windows-client.md)。
 
-独立的管理 API 在 [server/control-api](server/control-api/README.md)：它与本面试客户端分离，没有公开注册入口。管理员网页控制台在 [server/management-web](server/management-web/README.md)（`http://127.0.0.1:3001`）。
+独立的管理 API 在 [server/control-api](server/control-api/README.md)：它与本面试客户端分离，没有公开注册入口。管理员网页控制台在 [server/management-web](server/management-web/README.md)（`http://127.0.0.1:3001`），用于查看账户在线/当前线路，以及把 AI、RTC 配置写入数据库。自建 LiveKit 默认不启动；需要时在 `server/control-api` 执行 `docker compose --profile livekit up -d`，再用 `npm run test:livekit-smoke` / `npm run test:livekit-load` 做 1 路和 10 路纯音频检查。默认 `activeProvider` 仍是火山 RTC。
 
 ## 运行
 

@@ -7,6 +7,7 @@ import (
 
 	"github.com/ai-interviewer/ai-powered/control-api/internal/identity"
 	"github.com/ai-interviewer/ai-powered/control-api/internal/password"
+	"github.com/ai-interviewer/ai-powered/control-api/internal/presence"
 	"github.com/ai-interviewer/ai-powered/control-api/internal/users"
 	"github.com/go-chi/chi/v5"
 )
@@ -38,11 +39,12 @@ type revokeSessionsRequest struct {
 }
 
 type adminUsersHandler struct {
-	admin UserAdmin
+	admin    UserAdmin
+	presence PresenceAdmin
 }
 
-func newAdminUsersHandler(admin UserAdmin) *adminUsersHandler {
-	return &adminUsersHandler{admin: admin}
+func newAdminUsersHandler(admin UserAdmin, presence PresenceAdmin) *adminUsersHandler {
+	return &adminUsersHandler{admin: admin, presence: presence}
 }
 
 func requireAdministrator(next http.Handler) http.Handler {
@@ -69,11 +71,15 @@ func (handler *adminUsersHandler) list(w http.ResponseWriter, request *http.Requ
 	if !writeAdminError(w, request, err) {
 		return
 	}
-	public := make([]publicUser, 0, len(listed))
-	for _, user := range listed {
-		public = append(public, toPublicUser(user))
+	var presenceByUser map[string]presence.UserPresence
+	if handler.presence != nil {
+		presenceByUser, err = handler.presence.ListUserPresence(request.Context())
+		if err != nil {
+			writeAPIError(w, request, http.StatusInternalServerError, "INTERNAL_ERROR", "administrator service unavailable")
+			return
+		}
 	}
-	writeJSON(w, http.StatusOK, public)
+	writeJSON(w, http.StatusOK, mergeAdminUsers(listed, presenceByUser))
 }
 
 func (handler *adminUsersHandler) create(w http.ResponseWriter, request *http.Request) {

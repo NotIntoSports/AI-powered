@@ -87,6 +87,7 @@ export async function issueRtcToken(roomId: string, userId: string) {
       throw new Error("RTC_TRIAL_TOKEN_EXPIRED");
     }
     return {
+      provider: "volcengine" as const,
       appId: settings.appId,
       token: runDpapi("Unprotect", settings.encryptedTrialToken),
       expiresAt: settings.trialExpiresAt,
@@ -104,7 +105,7 @@ export async function issueRtcToken(roomId: string, userId: string) {
   });
   if (!response.ok) throw new Error("RTC_TOKEN_SERVICE_FAILED");
   const payload = z.object({ token: z.string().min(1), expiresAt: z.string().datetime() }).parse(await response.json());
-  return { appId: settings.appId, token: payload.token, expiresAt: payload.expiresAt, language: settings.language, roomId, userId };
+  return { provider: "volcengine" as const, appId: settings.appId, token: payload.token, expiresAt: payload.expiresAt, language: settings.language, roomId, userId };
 }
 
 export function publicRtcSettings(settings: Awaited<ReturnType<typeof loadRtcSettings>>) {

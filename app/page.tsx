@@ -16,6 +16,7 @@ import { RtcBridgeControl } from "../features/rtc/rtc-bridge-control";
 import { getInterviewReadiness } from "../features/readiness/interview-readiness";
 import { getSnapshotReadiness, invalidateDeviceReadiness, loadReadinessSnapshot } from "../features/readiness/readiness-snapshot";
 import { AppNavigation } from "../features/settings/app-navigation";
+import { ResumeUpload } from "../features/resume/resume-upload";
 
 type Diagnostics = {
   server: boolean;
@@ -533,6 +534,7 @@ export default function ConsolePage() {
             <span className={`pill ${session.status}`}>{session.status}</span>
           </div>
           <label>互动对象<input value={candidateName} onChange={(e) => setCandidateName(e.target.value)} placeholder="例如：张同学" /></label>
+          <ResumeUpload candidateName={candidateName} />
           <label>对话主题<input value={roleName} onChange={(e) => setRoleName(e.target.value)} placeholder="例如：项目交流" /></label>
           <label>
             背景资料

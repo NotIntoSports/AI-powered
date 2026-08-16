@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: AI Interviewer Control API
-  version: 0.2.0
+  version: 0.3.0
 servers:
   - url: http://127.0.0.1:8080
 paths:
@@ -238,6 +238,432 @@ paths:
           $ref: '#/components/responses/UserNotFound'
         '413':
           $ref: '#/components/responses/RequestTooLarge'
+  /api/v1/admin/sessions:
+    get:
+      operationId: listAdminSessions
+      summary: List current unrevoked session lines and online state.
+      security:
+        - cookieAuth: []
+      responses:
+        '200':
+          description: Active session lines.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/SessionLine'}
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/admin/devices:
+    get:
+      operationId: listAdminDevices
+      summary: List registered client devices.
+      security:
+        - cookieAuth: []
+      responses:
+        '200':
+          description: Devices.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Device'}
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/admin/settings/ai:
+    get:
+      operationId: getAdminAISettings
+      summary: Return public AI settings. Secrets are never included.
+      security:
+        - cookieAuth: []
+      responses:
+        '200':
+          description: Public AI settings.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PublicAISettings'}
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    put:
+      operationId: putAdminAISettings
+      summary: Save AI settings. Empty apiKey keeps the stored key.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PutAISettingsRequest'}
+      responses:
+        '200':
+          description: Saved public AI settings.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PublicAISettings'}
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          $ref: '#/components/responses/InvalidInputUnprocessable'
+        '503':
+          $ref: '#/components/responses/SettingsUnavailable'
+  /api/v1/admin/settings/ai/test:
+    post:
+      operationId: testAdminAISettings
+      summary: Probe the configured or submitted OpenAI-compatible /models endpoint.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PutAISettingsRequest'}
+      responses:
+        '200':
+          description: Probe result without upstream bodies or secrets.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AITestResult'}
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          $ref: '#/components/responses/InvalidInputUnprocessable'
+  /api/v1/admin/settings/rtc:
+    get:
+      operationId: getAdminRTCSettings
+      summary: Return public RTC settings. Secrets are never included.
+      security:
+        - cookieAuth: []
+      responses:
+        '200':
+          description: Public RTC settings.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PublicRTCSettings'}
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    put:
+      operationId: putAdminRTCSettings
+      summary: Save RTC settings. Empty secret keeps the stored secret.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PutRTCSettingsRequest'}
+      responses:
+        '200':
+          description: Saved public RTC settings.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PublicRTCSettings'}
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          $ref: '#/components/responses/InvalidInputUnprocessable'
+        '503':
+          $ref: '#/components/responses/SettingsUnavailable'
+  /api/v1/admin/settings/rtc/test:
+    post:
+      operationId: testAdminRTCSettings
+      summary: Validate stored or submitted RTC settings without returning secrets.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PutRTCSettingsRequest'}
+      responses:
+        '200':
+          description: Validation result.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RTCTestResult'}
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          $ref: '#/components/responses/InvalidInputUnprocessable'
+  /api/v1/admin/settings/storage:
+    get:
+      operationId: getAdminStorageSettings
+      summary: Return public Tencent COS settings. SecretKey is never included.
+      security:
+        - cookieAuth: []
+      responses:
+        '200':
+          description: Public object storage settings.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PublicStorageSettings'}
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    put:
+      operationId: putAdminStorageSettings
+      summary: Save Tencent COS settings. Empty secretKey keeps the stored key.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PutStorageSettingsRequest'}
+      responses:
+        '200':
+          description: Saved public object storage settings.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PublicStorageSettings'}
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          $ref: '#/components/responses/InvalidInputUnprocessable'
+        '503':
+          $ref: '#/components/responses/SettingsUnavailable'
+  /api/v1/admin/settings/storage/test:
+    post:
+      operationId: testAdminStorageSettings
+      summary: List COS buckets with stored or submitted credentials. Secrets are never returned.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PutStorageSettingsRequest'}
+      responses:
+        '200':
+          description: Probe result without secrets.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StorageTestResult'}
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/admin/resumes:
+    get:
+      operationId: listAdminResumes
+      summary: List uploaded resumes. Object contents are not returned.
+      security:
+        - cookieAuth: []
+      responses:
+        '200':
+          description: Resume metadata.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Resume'}
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      operationId: uploadAdminResume
+      summary: Upload a PDF or Word resume to Tencent COS.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                candidateName: {type: string}
+                file: {type: string, format: binary}
+      responses:
+        '201':
+          description: Stored resume metadata.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Resume'}
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '415':
+          $ref: '#/components/responses/InvalidInput'
+        '503':
+          $ref: '#/components/responses/SettingsUnavailable'
+  /api/v1/admin/resumes/{id}/download:
+    get:
+      operationId: downloadAdminResume
+      summary: Return a short-lived COS download URL. The secret key is never included.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Presigned download URL.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [url]
+                properties:
+                  url: {type: string}
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/UserNotFound'
+  /api/v1/client/rtc/token:
+    post:
+      operationId: issueClientRTCToken
+      summary: Issue a short-lived connection for the active RTC provider.
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [roomId, userId]
+              properties:
+                roomId: {type: string}
+                userId: {type: string}
+      responses:
+        '200':
+          description: Provider-specific connection. Token is single-use short lived.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RTCConnection'}
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '422':
+          $ref: '#/components/responses/InvalidInputUnprocessable'
+        '503':
+          $ref: '#/components/responses/SettingsUnavailable'
+  /api/v1/client/resumes:
+    post:
+      operationId: uploadClientResume
+      summary: Operator or administrator upload of a PDF or Word resume to Tencent COS.
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                candidateName: {type: string}
+                file: {type: string, format: binary}
+      responses:
+        '201':
+          description: Stored resume metadata.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Resume'}
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '503':
+          $ref: '#/components/responses/SettingsUnavailable'
 components:
   securitySchemes:
     cookieAuth:
@@ -327,7 +753,7 @@ components:
           schema: {$ref: '#/components/schemas/APIError'}
           example: {code: USER_NOT_FOUND, message: user was not found, requestId: request-id}
     InvalidInputUnprocessable:
-      description: Role, status, username, or password is invalid.
+      description: Role, status, username, password, or settings input is invalid.
       headers:
         Cache-Control:
           schema: {type: string, const: no-store}
@@ -335,6 +761,15 @@ components:
         application/json:
           schema: {$ref: '#/components/schemas/APIError'}
           example: {code: INVALID_INPUT, message: request body is invalid, requestId: request-id}
+    SettingsUnavailable:
+      description: Settings master key is missing or stored secrets cannot be decrypted.
+      headers:
+        Cache-Control:
+          schema: {type: string, const: no-store}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/APIError'}
+          example: {code: SETTINGS_KEY_MISSING, message: settings master key is not configured, requestId: request-id}
   schemas:
     APIError:
       type: object
@@ -355,6 +790,9 @@ components:
         createdAt: {type: string, format: date-time}
         updatedAt: {type: string, format: date-time}
         lastLoginAt: {type: string, format: date-time}
+        online: {type: boolean}
+        lastSeenAt: {type: string, format: date-time}
+        activeSessionCount: {type: integer}
     LoginRequest:
       type: object
       additionalProperties: false
@@ -404,3 +842,194 @@ components:
       additionalProperties: false
       properties:
         preserveCurrent: {type: boolean}
+    SessionLine:
+      type: object
+      required: [id, userId, username, purpose, createdAt, expiresAt, online]
+      properties:
+        id: {type: string}
+        userId: {type: string}
+        username: {type: string}
+        purpose: {type: string, enum: [browser, desktop]}
+        deviceId: {type: string}
+        createdAt: {type: string, format: date-time}
+        expiresAt: {type: string, format: date-time}
+        lastUsedAt: {type: string, format: date-time}
+        online: {type: boolean}
+    Device:
+      type: object
+      required: [id, userId, username, clientVersion, os, osVersion, lastSeenAt, disabled, online]
+      properties:
+        id: {type: string}
+        userId: {type: string}
+        username: {type: string}
+        clientVersion: {type: string}
+        os: {type: string}
+        osVersion: {type: string}
+        lastSeenAt: {type: string, format: date-time}
+        disabled: {type: boolean}
+        online: {type: boolean}
+    PublicAISettings:
+      type: object
+      required: [configured, available, provider, baseUrl, model, enabled, apiKeyConfigured]
+      properties:
+        configured: {type: boolean}
+        available: {type: boolean}
+        provider: {type: string}
+        baseUrl: {type: string}
+        model: {type: string}
+        questionTimeoutMs: {type: integer}
+        reportTimeoutMs: {type: integer}
+        enabled: {type: boolean}
+        apiKeyConfigured: {type: boolean}
+        localEndpoint: {type: boolean}
+        configVersion: {type: integer}
+        updatedAt: {type: string, format: date-time}
+        updatedByUsername: {type: string}
+    PutAISettingsRequest:
+      type: object
+      additionalProperties: false
+      required: [baseUrl, model]
+      properties:
+        provider: {type: string}
+        baseUrl: {type: string}
+        model: {type: string}
+        questionTimeoutMs: {type: integer}
+        reportTimeoutMs: {type: integer}
+        enabled: {type: boolean}
+        apiKey: {type: string, format: password}
+        clearApiKey: {type: boolean}
+    AITestResult:
+      type: object
+      required: [reachable, modelFound, message]
+      properties:
+        reachable: {type: boolean}
+        modelFound: {type: boolean}
+        models:
+          type: array
+          items: {type: string}
+        message: {type: string}
+    PublicRTCSettings:
+      type: object
+      required: [configured, available, activeProvider, appId, language, mode, secretConfigured, enabled]
+      properties:
+        configured: {type: boolean}
+        available: {type: boolean}
+        activeProvider: {type: string, enum: [volcengine, livekit]}
+        appId: {type: string}
+        language: {type: string}
+        mode: {type: string, enum: [production, trial]}
+        tokenServiceUrl: {type: string}
+        secretConfigured: {type: boolean}
+        trialExpiresAt: {type: string, format: date-time}
+        trialRoomId: {type: string}
+        trialUserId: {type: string}
+        volcengineAvailable: {type: boolean}
+        livekitUrl: {type: string}
+        livekitApiKey: {type: string}
+        livekitSecretConfigured: {type: boolean}
+        livekitConfigured: {type: boolean}
+        livekitAvailable: {type: boolean}
+        asrBaseUrl: {type: string}
+        asrModel: {type: string}
+        asrKeyConfigured: {type: boolean}
+        enabled: {type: boolean}
+        configVersion: {type: integer}
+        updatedAt: {type: string, format: date-time}
+        updatedByUsername: {type: string}
+    PutRTCSettingsRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        appId: {type: string}
+        language: {type: string}
+        mode: {type: string, enum: [production, trial]}
+        tokenServiceUrl: {type: string}
+        secret: {type: string, format: password}
+        clearSecret: {type: boolean}
+        trialExpiresAt: {type: string, format: date-time}
+        trialRoomId: {type: string}
+        trialUserId: {type: string}
+        enabled: {type: boolean}
+        activeProvider: {type: string, enum: [volcengine, livekit]}
+        livekitUrl: {type: string}
+        livekitApiKey: {type: string}
+        livekitApiSecret: {type: string, format: password}
+        clearLivekitSecret: {type: boolean}
+        asrBaseUrl: {type: string}
+        asrModel: {type: string}
+        asrApiKey: {type: string, format: password}
+        clearAsrApiKey: {type: boolean}
+        testProvider: {type: string, enum: [volcengine, livekit]}
+    RTCTestResult:
+      type: object
+      required: [reachable, message]
+      properties:
+        reachable: {type: boolean}
+        provider: {type: string}
+        message: {type: string}
+    RTCConnection:
+      type: object
+      required: [provider, token, roomId, userId, language, expiresAt]
+      properties:
+        provider: {type: string, enum: [volcengine, livekit]}
+        token: {type: string}
+        appId: {type: string}
+        url: {type: string}
+        roomId: {type: string}
+        userId: {type: string}
+        language: {type: string}
+        expiresAt: {type: string, format: date-time}
+    PublicStorageSettings:
+      type: object
+      required: [configured, available, provider, region, bucket, secretId, secretKeyConfigured, enabled]
+      properties:
+        configured: {type: boolean}
+        available: {type: boolean}
+        provider: {type: string}
+        region: {type: string}
+        bucket: {type: string}
+        secretId: {type: string}
+        secretKeyConfigured: {type: boolean}
+        enabled: {type: boolean}
+        configVersion: {type: integer}
+        updatedAt: {type: string, format: date-time}
+        updatedByUsername: {type: string}
+    PutStorageSettingsRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        provider: {type: string}
+        region: {type: string}
+        bucket: {type: string}
+        secretId: {type: string}
+        secretKey: {type: string, format: password}
+        clearSecretKey: {type: boolean}
+        enabled: {type: boolean}
+    StorageTestResult:
+      type: object
+      required: [reachable, message]
+      properties:
+        reachable: {type: boolean}
+        message: {type: string}
+        buckets:
+          type: array
+          items:
+            type: object
+            required: [name, region]
+            properties:
+              name: {type: string}
+              region: {type: string}
+    Resume:
+      type: object
+      required: [id, uploadedByUserId, originalFilename, contentType, sizeBytes, objectKey, sha256, createdAt]
+      properties:
+        id: {type: string}
+        uploadedByUserId: {type: string}
+        uploadedByUsername: {type: string}
+        candidateName: {type: string}
+        originalFilename: {type: string}
+        contentType: {type: string}
+        sizeBytes: {type: integer, format: int64}
+        objectKey: {type: string}
+        sha256: {type: string}
+        createdAt: {type: string, format: date-time}

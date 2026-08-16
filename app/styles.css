@@ -132,6 +132,9 @@ h2 { margin: 0; font-size: 17px; }
 .cameraPreview > span { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
 .cameraCheckActions { display: flex; gap: 8px; }
 .fileMeta { margin: 0; color: #8fa5c7; font-size: 12px; word-break: break-all; }
+.resumeBox { display: grid; gap: 8px; padding-top: 4px; }
+.resumeBox strong { font-size: 13px; }
+.resumeLogin { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 8px; }
 .diagnostics { align-self: start; display: grid; gap: 14px; }
 .diagnostics .cardHeading span { color: #768295; font-size: 12px; }
 .checks { display: grid; gap: 9px; }

@@ -247,14 +247,14 @@ func TestAdminUsersCreateMapsIdentityErrors(t *testing.T) {
 }
 
 type fakeUserAdmin struct {
-	list                   func(actor users.User) ([]users.User, error)
-	create                 func(actor users.User, username, password string, role users.Role) (users.User, error)
-	setStatus              func(actor users.User, userID string, status users.Status) error
-	resetPassword          func(actor users.User, userID, newPassword string) error
-	revokeSessions         func(actor users.User, userID, preserveSessionID string) error
-	listCalls              int
-	createCalls            int
-	lastPreserveSessionID  string
+	list                  func(actor users.User) ([]users.User, error)
+	create                func(actor users.User, username, password string, role users.Role) (users.User, error)
+	setStatus             func(actor users.User, userID string, status users.Status) error
+	resetPassword         func(actor users.User, userID, newPassword string) error
+	revokeSessions        func(actor users.User, userID, preserveSessionID string) error
+	listCalls             int
+	createCalls           int
+	lastPreserveSessionID string
 }
 
 func (fake *fakeUserAdmin) ListUsers(_ context.Context, actor users.User) ([]users.User, error) {

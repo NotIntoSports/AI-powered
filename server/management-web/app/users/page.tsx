@@ -1,7 +1,8 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { ConsoleShell, OnlineMark, formatTime } from "../console-shell";
+import { useAdminSession } from "../use-admin-session";
 import {
   displayError,
   parseAPIError,
@@ -11,10 +12,8 @@ import {
 } from "../../lib/control-api";
 
 export default function UsersPage() {
-  const router = useRouter();
-  const [me, setMe] = useState<PublicUser | null>(null);
+  const { me, error, setError } = useAdminSession();
   const [users, setUsers] = useState<PublicUser[]>([]);
-  const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -22,18 +21,6 @@ export default function UsersPage() {
   const [busy, setBusy] = useState(false);
 
   async function load() {
-    const meResult = await requestJSON("/api/v1/auth/me");
-    if (meResult.response.status === 401) {
-      router.replace("/login");
-      return;
-    }
-    const current = publicUserFromUnknown(meResult.body);
-    if (!current || current.role !== "admin") {
-      setError("需要管理员账号才能进入管理后台");
-      setMe(current);
-      return;
-    }
-    setMe(current);
     const listResult = await requestJSON("/api/v1/admin/users");
     if (!listResult.response.ok) {
       setError(displayError(parseAPIError(listResult.body, "无法加载用户")));
@@ -47,14 +34,11 @@ export default function UsersPage() {
   }
 
   useEffect(() => {
+    if (!me) return;
     void load();
-  }, []);
-
-  async function logout() {
-    await requestJSON("/api/v1/auth/logout", { method: "POST" });
-    router.replace("/login");
-    router.refresh();
-  }
+    const timer = window.setInterval(() => void load(), 15_000);
+    return () => window.clearInterval(timer);
+  }, [me]);
 
   async function onCreate(event: FormEvent) {
     event.preventDefault();
@@ -94,7 +78,7 @@ export default function UsersPage() {
   }
 
   async function resetPassword(user: PublicUser) {
-    const nextPassword = window.prompt(`为 ${user.username} 设置新密码（至少 12 个字符）`);
+    const nextPassword = window.prompt(`为 ${user.username} 设置新密码（至少 8 个字符）`);
     if (!nextPassword) {
       return;
     }
@@ -128,20 +112,7 @@ export default function UsersPage() {
   }
 
   return (
-    <main className="shell">
-      <div className="topbar">
-        <div>
-          <p className="eyebrow">CONTROL API</p>
-          <h1>用户管理</h1>
-        </div>
-        <div>
-          <p className="muted">{me ? `${me.username} · ${me.role}` : ""}</p>
-          <button className="secondary" type="button" onClick={() => void logout()}>
-            退出
-          </button>
-        </div>
-      </div>
-
+    <ConsoleShell me={me}>
       {error ? <p className="error">{error}</p> : null}
       {notice ? <p className="ok">{notice}</p> : null}
 
@@ -158,7 +129,7 @@ export default function UsersPage() {
               type="password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
-              minLength={12}
+              minLength={8}
               required
             />
           </label>
@@ -183,7 +154,9 @@ export default function UsersPage() {
             <tr>
               <th>用户名</th>
               <th>角色</th>
-              <th>状态</th>
+              <th>账号</th>
+              <th>在线</th>
+              <th>最后登录</th>
               <th>操作</th>
             </tr>
           </thead>
@@ -193,6 +166,8 @@ export default function UsersPage() {
                 <td>{user.username}</td>
                 <td>{user.role}</td>
                 <td>{user.status}</td>
+                <td><OnlineMark online={Boolean(user.online)} /></td>
+                <td>{formatTime(user.lastLoginAt)}</td>
                 <td className="row">
                   {user.status === "active" ? (
                     <button className="danger" type="button" onClick={() => void setStatus(user, "disabled")}>
@@ -215,6 +190,6 @@ export default function UsersPage() {
           </tbody>
         </table>
       </section>
-    </main>
+    </ConsoleShell>
   );
 }

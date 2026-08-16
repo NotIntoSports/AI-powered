@@ -29,6 +29,17 @@ go vet ./...
 terminal or two matching stdin lines. Never pass the password as a flag,
 argument, or environment variable.
 
+Optional LiveKit line (default `activeProvider` stays `volcengine`):
+
+```powershell
+docker compose --profile livekit up -d livekit
+npm run test:livekit-smoke
+npm run test:livekit-load
+```
+
+`livekit-agent` is in the same profile and only emits `subtitle.v1` JSON when
+`LIVEKIT_ASR_API_KEY` is set. Do not run local Whisper/FunASR on the 4C8G host.
+
 The API process is `control-api`. `control-api-admin` is a one-shot bootstrap
 profile and is not started by `docker compose up -d`.
 
@@ -65,6 +76,7 @@ go test ./integration -run TestSmoke -v
 | `SESSION_TTL` | no | `8h` | Minimum `15m`. |
 | `COOKIE_SECURE` | no | `true` | Compose sets `false` for local HTTP. Production must use `true` behind TLS. |
 | `TRUSTED_PROXY_CIDRS` | no | empty | Comma-separated CIDRs. Forwarded client IPs are trusted only when the TCP peer matches. |
+| `SETTINGS_MASTER_KEY` | no | empty | 64 hex characters (32 bytes). Encrypts AI API keys and RTC secrets in PostgreSQL. Required before saving settings; GET of empty config still works without it. |
 
 The HTTP server applies embedded goose migrations on start. Empty databases are
 created and upgraded automatically; keep a backup before upgrading a populated

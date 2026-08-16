@@ -42,6 +42,24 @@ test("error parser uses server message and ignores password-shaped fields", asyn
   assert.equal(api.displayError(error).includes("should-not-display"), false);
 });
 
+test("public user parser keeps online presence fields", async () => {
+  const api = await loadControlApi();
+  const user = api.publicUserFromUnknown({
+    id: "u1",
+    username: "owner",
+    role: "admin",
+    status: "active",
+    createdAt: "2026-08-16T00:00:00Z",
+    updatedAt: "2026-08-16T00:00:00Z",
+    online: true,
+    activeSessionCount: 2,
+    lastSeenAt: "2026-08-16T00:01:00Z"
+  });
+  assert.equal(user.online, true);
+  assert.equal(user.activeSessionCount, 2);
+  assert.equal(user.lastSeenAt, "2026-08-16T00:01:00Z");
+});
+
 test("login page has no registration or password-recovery entry", () => {
   const loginPage = readFileSync(join(root, "..", "app", "login", "page.tsx"), "utf8");
   assert.match(loginPage, /buildLoginBody/);

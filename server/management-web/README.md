@@ -1,6 +1,6 @@
 # Management web
 
-Administrator console for `server/control-api`. It has login and user management only: no public registration, password recovery, AI keys, RTC secrets, or candidate records.
+Administrator console for `control-api`. After login it shows account online status, current session lines, user administration, and AI/RTC/storage settings that are written to PostgreSQL. RTC settings keep 火山云 and LiveKit as two cards plus a current-line switch. There is no public registration, password recovery, or candidate records. Secrets are never shown in the browser after save.
 
 ## Run locally
 

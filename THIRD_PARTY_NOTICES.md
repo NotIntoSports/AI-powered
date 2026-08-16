@@ -14,6 +14,9 @@ The source repository and Windows distribution use third-party components. Their
 | Virtual Audio Driver | MIT; derived Microsoft samples under MS-PL | https://github.com/VirtualDrivers/Virtual-Audio-Driver |
 | Microsoft Windows classic samples | MIT | https://github.com/microsoft/Windows-classic-samples |
 | Volcengine RTC Web SDK | BSD-3-Clause | https://www.npmjs.com/package/@volcengine/rtc |
+| livekit-client | Apache-2.0 | https://github.com/livekit/client-sdk-js |
+| LiveKit server | Apache-2.0 | https://github.com/livekit/livekit |
+| livekit-agents | Apache-2.0 | https://github.com/livekit/agents |
 | chi v5 | MIT | https://github.com/go-chi/chi |
 | pgx v5 | MIT | https://github.com/jackc/pgx |
 | goose v3 | MIT | https://github.com/pressly/goose |

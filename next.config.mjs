@@ -7,7 +7,7 @@ const contentSecurityPolicy = [
   "img-src 'self' blob: data:",
   "media-src 'self' blob:",
   "font-src 'self'",
-  "connect-src 'self' ws://127.0.0.1:* ws://localhost:*",
+  "connect-src 'self' ws: wss: http://127.0.0.1:* http://localhost:* https:",
   "worker-src 'self' blob:",
   "object-src 'none'",
   "base-uri 'self'",

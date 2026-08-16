@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ai-interviewer/ai-powered/control-api/internal/secretbox"
 )
 
 const (
@@ -20,6 +22,7 @@ var (
 	ErrDatabaseURLRequired = errors.New("DATABASE_URL is required")
 	ErrSessionTTLRange     = errors.New("SESSION_TTL must be between 15m and 720h")
 	ErrTrustedProxyCIDRs   = errors.New("TRUSTED_PROXY_CIDRS must contain valid CIDR prefixes")
+	ErrSettingsMasterKey   = secretbox.ErrInvalidMasterKey
 )
 
 type Config struct {
@@ -28,6 +31,7 @@ type Config struct {
 	SessionTTL        time.Duration
 	CookieSecure      bool
 	TrustedProxyCIDRs []netip.Prefix
+	SettingsMasterKey []byte
 }
 
 func Load(getenv func(string) string) (Config, error) {
@@ -66,6 +70,13 @@ func Load(getenv func(string) string) (Config, error) {
 			}
 			cfg.TrustedProxyCIDRs = append(cfg.TrustedProxyCIDRs, prefix.Masked())
 		}
+	}
+	if value := getenv("SETTINGS_MASTER_KEY"); value != "" {
+		key, err := secretbox.ParseMasterKey(value)
+		if err != nil {
+			return Config{}, err
+		}
+		cfg.SettingsMasterKey = key
 	}
 
 	return cfg, nil

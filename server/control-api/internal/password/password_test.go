@@ -43,9 +43,20 @@ func TestHashUsesUniqueSalt(t *testing.T) {
 }
 
 func TestHashRejectsShortPassword(t *testing.T) {
-	_, err := Hash("12345678901")
+	_, err := Hash("1234567")
 	if !errors.Is(err, ErrInvalidPassword) {
 		t.Fatalf("expected ErrInvalidPassword, got %v", err)
+	}
+}
+
+func TestHashAcceptsEightCharacterPassword(t *testing.T) {
+	encoded, err := Hash("12345678")
+	if err != nil {
+		t.Fatal(err)
+	}
+	match, _, err := Verify(encoded, "12345678")
+	if err != nil || !match {
+		t.Fatalf("match=%v err=%v", match, err)
 	}
 }
 

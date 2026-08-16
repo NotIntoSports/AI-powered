@@ -28,14 +28,21 @@ var (
 type Action string
 
 const (
-	ActionAdminCreated        Action = "admin.created"
-	ActionUserCreated         Action = "user.created"
-	ActionUserStatusChanged   Action = "user.status_changed"
-	ActionUserPasswordReset   Action = "user.password_reset"
-	ActionUserSessionsRevoked Action = "user.sessions_revoked"
-	ActionLoginSucceeded      Action = "auth.login_succeeded"
-	ActionLoginFailed         Action = "auth.login_failed"
-	ActionLogout              Action = "auth.logout"
+	ActionAdminCreated           Action = "admin.created"
+	ActionUserCreated            Action = "user.created"
+	ActionUserStatusChanged      Action = "user.status_changed"
+	ActionUserPasswordReset      Action = "user.password_reset"
+	ActionUserSessionsRevoked    Action = "user.sessions_revoked"
+	ActionLoginSucceeded         Action = "auth.login_succeeded"
+	ActionLoginFailed            Action = "auth.login_failed"
+	ActionLogout                 Action = "auth.logout"
+	ActionAISettingsUpdated      Action = "settings.ai_updated"
+	ActionAISettingsTested       Action = "settings.ai_tested"
+	ActionRTCSettingsUpdated     Action = "settings.rtc_updated"
+	ActionRTCSettingsTested      Action = "settings.rtc_tested"
+	ActionStorageSettingsUpdated Action = "settings.storage_updated"
+	ActionStorageSettingsTested  Action = "settings.storage_tested"
+	ActionResumeUploaded         Action = "resume.uploaded"
 )
 
 type Result string
@@ -190,7 +197,14 @@ func (action Action) valid() bool {
 		ActionUserSessionsRevoked,
 		ActionLoginSucceeded,
 		ActionLoginFailed,
-		ActionLogout:
+		ActionLogout,
+		ActionAISettingsUpdated,
+		ActionAISettingsTested,
+		ActionRTCSettingsUpdated,
+		ActionRTCSettingsTested,
+		ActionStorageSettingsUpdated,
+		ActionStorageSettingsTested,
+		ActionResumeUploaded:
 		return true
 	default:
 		return false

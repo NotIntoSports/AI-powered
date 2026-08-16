@@ -11,7 +11,7 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
   if (hasSession && isLogin) {
-    return NextResponse.redirect(new URL("/users", request.url));
+    return NextResponse.redirect(new URL("/overview", request.url));
   }
   return NextResponse.next();
 }

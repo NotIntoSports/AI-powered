@@ -7,7 +7,9 @@
     "outDir": "dist-desktop",
     "rootDir": "desktop",
     "noEmit": false,
-    "isolatedModules": false
+    "isolatedModules": false,
+    "allowImportingTsExtensions": false
   },
-  "include": ["desktop/**/*.ts"]
+  "include": ["desktop/**/*.ts"],
+  "exclude": ["desktop/rtc/**"]
 }

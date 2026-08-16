@@ -20,6 +20,8 @@
     "test:desktop-shell": "node --no-warnings --experimental-strip-types --test tests/desktop/*.test.mjs",
     "test:packaged-runtime": "node scripts/test-packaged-runtime.mjs",
     "test:rtc-capabilities": "node scripts/test-rtc-capabilities.mjs",
+    "test:livekit-smoke": "node scripts/smoke-livekit.mjs",
+    "test:livekit-load": "node scripts/load-livekit-audio.mjs",
     "start": "next start -H 127.0.0.1",
     "test:transcription": "node scripts/smoke-transcription.mjs",
     "test:transcription-security": "node --no-warnings --experimental-strip-types scripts/test-transcription-security.mjs",
@@ -57,6 +59,7 @@
   "dependencies": {
     "@ricky0123/vad-web": "^0.0.30",
     "@volcengine/rtc": "4.69.0",
+    "livekit-client": "2.21.0",
     "next": "^15.4.0",
     "obs-websocket-js": "^5.0.8",
     "react": "^19.1.0",
