@@ -147,18 +147,35 @@ func ProbeLiveKit(ctx context.Context, client HTTPDoer, livekitURL string) RTCTe
 }
 
 func ProbeSpeech(ctx context.Context, client HTTPDoer, record SpeechRecord, apiKey, accessToken string, decryptErr error) SpeechTestResult {
-	public := PublicSpeechFrom(record, decryptErr)
+	return probeVolcengineSpeech(ctx, client, record, apiKey, accessToken, decryptErr)
+}
+
+func ProbeSpeechLine(
+	ctx context.Context,
+	client HTTPDoer,
+	record SpeechRecord,
+	provider, apiKey, accessToken, aliyunID, aliyunSecret, aliyunToken string,
+	volcErr, aliyunErr error,
+) SpeechTestResult {
+	if provider == SpeechProviderAliyun {
+		return probeAliyunSpeech(ctx, client, record, aliyunID, aliyunSecret, aliyunToken, aliyunErr)
+	}
+	return probeVolcengineSpeech(ctx, client, record, apiKey, accessToken, volcErr)
+}
+
+func probeVolcengineSpeech(ctx context.Context, client HTTPDoer, record SpeechRecord, apiKey, accessToken string, decryptErr error) SpeechTestResult {
+	public := PublicSpeechFromErrs(record, decryptErr, nil)
 	if !public.Configured {
-		return SpeechTestResult{Message: "尚未配置豆包语音"}
+		return SpeechTestResult{Provider: SpeechProviderVolcengine, Message: "尚未配置豆包语音"}
 	}
 	if decryptErr != nil {
-		return SpeechTestResult{Message: "语音密钥无法解密"}
+		return SpeechTestResult{Provider: SpeechProviderVolcengine, Message: "语音密钥无法解密"}
 	}
 	if !record.Enabled {
-		return SpeechTestResult{Message: "豆包语音已停用"}
+		return SpeechTestResult{Provider: SpeechProviderVolcengine, Message: "豆包语音已停用"}
 	}
-	if !public.Available {
-		return SpeechTestResult{Message: "请填写 API Key，或同时填写 AppID 和 Access Token"}
+	if !public.VolcengineAvailable {
+		return SpeechTestResult{Provider: SpeechProviderVolcengine, Message: "请填写 API Key，或同时填写 AppID 和 Access Token"}
 	}
 	if client == nil {
 		client = &http.Client{Timeout: 8 * time.Second}
@@ -170,7 +187,7 @@ func ProbeSpeech(ctx context.Context, client HTTPDoer, record SpeechRecord, apiK
 	body, _ := json.Marshal(map[string]string{"speaker_id": speakerID})
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://openspeech.bytedance.com/api/v3/tts/get_voice", strings.NewReader(string(body)))
 	if err != nil {
-		return SpeechTestResult{Message: "无法连接豆包语音"}
+		return SpeechTestResult{Provider: SpeechProviderVolcengine, Message: "无法连接豆包语音"}
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("X-Api-Request-Id", "speech-probe")
@@ -183,25 +200,25 @@ func ProbeSpeech(ctx context.Context, client HTTPDoer, record SpeechRecord, apiK
 	response, err := client.Do(request)
 	if err != nil {
 		if ctx.Err() != nil {
-			return SpeechTestResult{Message: "豆包语音连接超时"}
+			return SpeechTestResult{Provider: SpeechProviderVolcengine, Message: "豆包语音连接超时"}
 		}
-		return SpeechTestResult{Message: "无法连接豆包语音"}
+		return SpeechTestResult{Provider: SpeechProviderVolcengine, Message: "无法连接豆包语音"}
 	}
 	defer response.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 1<<16))
 	if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
-		return SpeechTestResult{Message: "豆包语音鉴权失败，请检查 API Key 或 AppID/Token"}
+		return SpeechTestResult{Provider: SpeechProviderVolcengine, Message: "豆包语音鉴权失败，请检查 API Key 或 AppID/Token"}
 	}
 	if response.StatusCode >= 500 {
-		return SpeechTestResult{Message: "豆包语音暂时不可达"}
+		return SpeechTestResult{Provider: SpeechProviderVolcengine, Message: "豆包语音暂时不可达"}
 	}
 	message := "豆包语音鉴权可用"
-	if public.TTSAvailable {
+	if public.TTSAvailable && record.SpeakerID != "" {
 		message = "豆包语音可用，已配置复刻音色"
 	} else {
 		message = "豆包语音鉴权可用。请在客户端录音完成声音刻录后再用于面试播报。"
 	}
-	return SpeechTestResult{Reachable: true, Message: message}
+	return SpeechTestResult{Reachable: true, Provider: SpeechProviderVolcengine, Message: message}
 }
 
 func livekitHTTPURL(raw string) string {

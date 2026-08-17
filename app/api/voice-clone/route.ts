@@ -23,11 +23,12 @@ const postSchema = z.object({
 export async function GET() {
   const speech = await getSpeechRuntimeConfig();
   return NextResponse.json({
-    available: speech.available,
+    available: speech.provider === "volcengine" && speech.available,
     ttsAvailable: speech.ttsAvailable,
     asrAvailable: speech.asrAvailable,
     speakerId: speech.speakerId,
-    source: speech.source
+    source: speech.source,
+    provider: speech.provider
   });
 }
 
@@ -40,9 +41,14 @@ export async function POST(request: Request) {
     );
   }
   const speech = await getSpeechRuntimeConfig();
-  if (!speech.available) {
+  if (speech.provider !== "volcengine" || !speech.available) {
     return NextResponse.json(
-      { code: "SPEECH_UNAVAILABLE", message: "请先在管理后台或本机环境变量配置豆包语音密钥" },
+      {
+        code: "SPEECH_UNAVAILABLE",
+        message: speech.provider === "aliyun"
+          ? "当前使用阿里云语音。声音复刻仍需配置豆包语音"
+          : "请先在管理后台或本机环境变量配置豆包语音密钥"
+      },
       { status: 503 }
     );
   }

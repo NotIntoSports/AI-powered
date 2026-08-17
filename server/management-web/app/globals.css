@@ -22,6 +22,34 @@ h2 { margin: 0; font-size: 18px; }
 .wait-pill { color: #e6c07b; }
 .card-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .card-head h2 { margin: 0; }
+details.config-panel { gap: 0; }
+details.config-panel > summary { list-style: none; }
+details.config-panel > summary::-webkit-details-marker { display: none; }
+.config-panel-summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  padding-bottom: 0;
+}
+.config-panel-summary h2 { margin: 0; }
+.config-panel-meta { display: flex; align-items: center; gap: 10px; }
+.config-panel-summary::after {
+  content: "展开";
+  color: #8d99aa;
+  font-size: 12px;
+  font-weight: 700;
+  flex: none;
+}
+details.config-panel[open] > .config-panel-summary { padding-bottom: 14px; }
+details.config-panel[open] > .config-panel-summary::after { content: "收起"; }
+.config-panel-body {
+  display: grid;
+  gap: 14px;
+  padding-top: 16px;
+  border-top: 1px solid #262c36;
+}
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
 th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid #262c36; vertical-align: top; }
 .topbar { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 12px; }
@@ -37,3 +65,14 @@ th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid #262c36; 
 .online { color: #8ee0b5; font-weight: 700; }
 .offline { color: #8d99aa; }
 .stack { display: grid; gap: 12px; }
+.status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+.status-chip { border: 1px solid #303744; border-radius: 12px; padding: 12px 14px; background: #0d1118; display: grid; gap: 4px; }
+.status-chip strong { color: #d6dce5; font-size: 14px; }
+.status-chip span { color: #8d99aa; font-size: 12px; }
+.status-chip.ready { border-color: #2f6b4f; }
+.status-chip.ready span { color: #8ee0b5; }
+.config-details > summary { list-style: none; display: flex; justify-content: space-between; align-items: center; gap: 12px; cursor: pointer; font-weight: 700; }
+.config-details > summary::-webkit-details-marker { display: none; }
+.config-details > summary::after { content: "展开"; color: #8d99aa; font-size: 12px; font-weight: 600; }
+.config-details[open] > summary::after { content: "收起"; }
+.config-details > .stack { margin-top: 14px; }

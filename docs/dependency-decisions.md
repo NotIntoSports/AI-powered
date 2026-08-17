@@ -500,3 +500,27 @@
 - 未采用：Piper / CosyVoice（本地模型体积与许可证不适合默认捆绑）；火山移动 SDK；把录音放到管理网页（麦克风在面试官本机）；改 LiveKit Agent STT（协议不兼容，本轮仍走 OpenAI-compatible）。
 - 限制：实时字幕仍走现有火山 RTC / LiveKit；复刻音频最长约 25 秒、最大 10MB；后付费自定义 `speaker_id` 首次正式合成可能产生音色槽位费用。
 
+# 2026-08-17：阿里云智能语音交互 TTS / 一句话 ASR
+
+- 目标：把阿里云控制台「智能语音交互」项目接到舞台播报和候选人转写，并做一次真实连通测试。
+- 采用：官方 REST。Token 按文档用 HMAC-SHA1 调用 `CreateToken`（`nls-meta.cn-shanghai.aliyuncs.com`，Version `2019-02-28`）；TTS `POST https://nls-gateway-cn-shanghai.aliyuncs.com/stream/v1/tts`；一句话识别 `POST .../stream/v1/asr`。鉴权头 `X-NLS-Token`，Appkey 来自控制台项目。默认音色 `xiaoyun`，WAV / 16 kHz。
+- 依赖：现有 `fetch` 与 Node `crypto`。不引入 `alibabacloud-nls`（WebSocket、2023 年后未发版、额外 `ws` 原生依赖）和已进入维护期的 `@alicloud/pop-core` V1 SDK。CreateToken 签名与官方 OpenAPI 文档一致，避免复制 SDK 源码。
+- 密钥：只写本机 `.env.local`（`ALIYUN_NLS_APPKEY` / `ALIYUN_NLS_ACCESS_KEY_ID` / `ALIYUN_NLS_ACCESS_KEY_SECRET` 或临时 `ALIYUN_NLS_TOKEN`）。不进前端、不进版本库。配齐后优先于豆包语音用于 TTS/ASR；声音复刻仍走豆包。
+- 未采用：DashScope CosyVoice（控制台项目是智能语音交互 NLS，不是百炼 API Key）；管理端 `speech_configs` 本轮不改表，避免把阿里云 AK 误送给火山探测接口。
+- 限制：一句话识别 REST 支持 WAV/PCM/OGG-OPUS/MP3/AAC 等，不保证 WebM 容器；自动追问 VAD 切片已是 WAV。项目需在控制台开通语音合成和识别，并启用所用音色。Token 有效期约 24–48 小时，运行时会缓存并提前刷新。
+
+# 2026-08-17：管理端语音双线路与折叠详情
+
+- 目标：管理后台「语音」页能看到并配置阿里云 / 豆包两条线路；平时只显示是否连通，详情可展开收起。
+- 采用：沿用 RTC 页「当前线路 + 分卡片」模式，语音页用 `<details>` 折叠；后端 `speech_configs` 增加 `active_provider` 与阿里云字段（迁移 `00008_speech_aliyun.sql`）。探测：豆包仍走 OpenSpeech `get_voice`；阿里云走官方 CreateToken + `/stream/v1/tts`。
+- 依赖：不新增 npm/Go SDK；CreateToken 用现有 `crypto/hmac`。管理端密钥仍 AES-256-GCM；桌面 `GET /api/v1/client/settings/speech` 按 `activeProvider` 下发对应明文。
+- 未采用：把本机 `.env.local` 自动同步进数据库（需管理员在管理端保存一次，避免静默写密钥）；合并两套密钥到同一表单（易混鉴权）。
+- 限制：部署后需跑 goose 迁移；旧库无阿里云列时管理端会显示未连通直到保存。
+
+# 2026-08-17：按登录账号绑定声音刻录
+
+- 目标：客户端声音刻录结果绑定桌面登录用户；该用户 TTS 使用自己的 `speaker_id`。
+- 采用：新表 `user_speech_voices`（迁移 `00009_user_speech_voices.sql`）。`PATCH /api/v1/client/settings/speech` 按 session 用户写入；`GET` 下发时用该用户音色覆盖全局默认。不新增 SDK。
+- 未采用：把音色写进 `users` 表（语音配置边界应独立）；继续用全局 `speech_configs.speaker_id` 作为唯一音色（多操作员会互相覆盖）。
+- 限制：个人复刻音色属于豆包线路。当前线路为阿里云时，舞台合成走系统音色（如 `xiaoyun`），刻录仍可写入账号档案供切回豆包后使用。
+

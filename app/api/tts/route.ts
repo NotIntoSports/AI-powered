@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getSpeechRuntimeConfig } from "../../../lib/speech-runtime";
+import { getSpeechRuntimeConfig, toAliyunNlsAuth } from "../../../lib/speech-runtime";
+import { synthesizeAliyunSpeech } from "../../../lib/aliyun-nls";
 import {
   buildUnidirectionalTtsBody,
   concatTtsAudioChunks,
@@ -42,7 +43,14 @@ export async function POST(request: Request) {
 
 async function synthesizeWithFallback(text: string) {
   const speech = await getSpeechRuntimeConfig();
-  if (speech.ttsAvailable) {
+  if (speech.provider === "aliyun" && speech.ttsAvailable) {
+    try {
+      return await synthesizeAliyunSpeech(toAliyunNlsAuth(speech), text);
+    } catch {
+      // Fall back to Windows SAPI.
+    }
+  }
+  if (speech.provider === "volcengine" && speech.ttsAvailable) {
     try {
       const { response, text: raw } = await volcengineJsonRequest({
         url: VOLCENGINE_TTS_URL,

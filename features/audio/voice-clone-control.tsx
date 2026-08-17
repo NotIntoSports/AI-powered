@@ -17,10 +17,16 @@ type VoiceCloneStatus = {
   available: boolean;
   ttsAvailable: boolean;
   speakerId: string;
+  provider?: string;
 };
 
 export function VoiceCloneControl() {
-  const [status, setStatus] = useState<VoiceCloneStatus>({ available: false, ttsAvailable: false, speakerId: "" });
+  const [status, setStatus] = useState<VoiceCloneStatus>({
+    available: false,
+    ttsAvailable: false,
+    speakerId: "",
+    provider: "none"
+  });
   const [pastedId, setPastedId] = useState("");
   const [recording, setRecording] = useState(false);
   const [seconds, setSeconds] = useState(0);
@@ -48,11 +54,12 @@ export function VoiceCloneControl() {
       setStatus({
         available: Boolean(data.available),
         ttsAvailable: Boolean(data.ttsAvailable),
-        speakerId: String(data.speakerId || "")
+        speakerId: String(data.speakerId || ""),
+        provider: String(data.provider || "")
       });
       if (data.speakerId) setPastedId(String(data.speakerId));
     } catch {
-      setStatus({ available: false, ttsAvailable: false, speakerId: "" });
+      setStatus({ available: false, ttsAvailable: false, speakerId: "", provider: "none" });
     }
   }
 
@@ -251,7 +258,13 @@ export function VoiceCloneControl() {
       <div className="cardHeading">
         <h2>面试官声音刻录</h2>
         <span className={status.ttsAvailable ? "ready" : ""}>
-          {status.ttsAvailable ? `已配置 ${status.speakerId}` : status.available ? "密钥已就绪，待刻录" : "请先在管理后台配置豆包语音"}
+          {status.ttsAvailable
+            ? status.provider === "aliyun"
+              ? `阿里云语音已配置 ${status.speakerId || "xiaoyun"}（系统音色，非个人刻录）`
+              : `已绑定本账号音色 ${status.speakerId}`
+            : status.available
+              ? "密钥已就绪，待刻录（将绑定当前登录账号）"
+              : "请先在管理后台配置豆包语音，或在本机配置阿里云语音"}
         </span>
       </div>
       <p className="voiceCloneTips">安静环境、用真实麦克风、语速自然，不要念成播音腔。朗读稿不可改，以保证复刻质量。</p>

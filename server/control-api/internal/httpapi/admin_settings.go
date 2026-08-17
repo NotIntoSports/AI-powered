@@ -24,9 +24,9 @@ type SettingsAdmin interface {
 	TestRTC(ctx context.Context, actor users.User, requestID string, input *settings.RTCInput) (settings.RTCTestResult, error)
 	IssueRTC(ctx context.Context, roomID, userID string) (settings.RTCConnection, error)
 	GetSpeech(ctx context.Context) (settings.PublicSpeech, error)
-	GetClientSpeech(ctx context.Context) (settings.ClientSpeech, error)
+	GetClientSpeech(ctx context.Context, userID string) (settings.ClientSpeech, error)
 	PutSpeech(ctx context.Context, actor users.User, requestID string, input settings.SpeechInput) (settings.PublicSpeech, error)
-	PutClientSpeechSpeakerID(ctx context.Context, speakerID string) (settings.PublicSpeech, error)
+	PutClientSpeechSpeakerID(ctx context.Context, userID, speakerID string) (settings.PublicSpeech, error)
 	TestSpeech(ctx context.Context, actor users.User, requestID string, input *settings.SpeechInput) (settings.SpeechTestResult, error)
 	GetStorage(ctx context.Context) (settings.PublicStorage, error)
 	PutStorage(ctx context.Context, actor users.User, requestID string, input settings.StorageInput) (settings.PublicStorage, error)
@@ -78,17 +78,29 @@ type storageSettingsRequest struct {
 }
 
 type speechSettingsRequest struct {
-	AppID            string `json:"appId"`
-	SpeakerID        string `json:"speakerId"`
-	TTSResourceID    string `json:"ttsResourceId"`
-	ASRResourceID    string `json:"asrResourceId"`
-	APIKey           string `json:"apiKey"`
-	AccessToken      string `json:"accessToken"`
-	SecretKey        string `json:"secretKey"`
-	ClearAPIKey      bool   `json:"clearApiKey"`
-	ClearAccessToken bool   `json:"clearAccessToken"`
-	ClearSecretKey   bool   `json:"clearSecretKey"`
-	Enabled          *bool  `json:"enabled"`
+	AppID                      string `json:"appId"`
+	SpeakerID                  string `json:"speakerId"`
+	TTSResourceID              string `json:"ttsResourceId"`
+	ASRResourceID              string `json:"asrResourceId"`
+	APIKey                     string `json:"apiKey"`
+	AccessToken                string `json:"accessToken"`
+	SecretKey                  string `json:"secretKey"`
+	ClearAPIKey                bool   `json:"clearApiKey"`
+	ClearAccessToken           bool   `json:"clearAccessToken"`
+	ClearSecretKey             bool   `json:"clearSecretKey"`
+	Enabled                    *bool  `json:"enabled"`
+	ActiveProvider             string `json:"activeProvider"`
+	AliyunAppKey               string `json:"aliyunAppKey"`
+	AliyunVoice                string `json:"aliyunVoice"`
+	AliyunGateway              string `json:"aliyunGateway"`
+	AliyunEnabled              *bool  `json:"aliyunEnabled"`
+	AliyunAccessKeyID          string `json:"aliyunAccessKeyId"`
+	AliyunAccessKeySecret      string `json:"aliyunAccessKeySecret"`
+	AliyunToken                string `json:"aliyunToken"`
+	ClearAliyunAccessKeyID     bool   `json:"clearAliyunAccessKeyId"`
+	ClearAliyunAccessKeySecret bool   `json:"clearAliyunAccessKeySecret"`
+	ClearAliyunToken           bool   `json:"clearAliyunToken"`
+	TestProvider               string `json:"testProvider"`
 }
 
 type adminSettingsHandler struct {
@@ -291,7 +303,7 @@ func (handler *adminSettingsHandler) getClientSpeech(w http.ResponseWriter, requ
 		writeAPIError(w, request, http.StatusForbidden, "FORBIDDEN", "desktop session is required")
 		return
 	}
-	clientSpeech, err := handler.admin.GetClientSpeech(request.Context())
+	clientSpeech, err := handler.admin.GetClientSpeech(request.Context(), authenticated.User.ID)
 	if !writeSettingsError(w, request, err) {
 		return
 	}
@@ -332,7 +344,7 @@ func (handler *adminSettingsHandler) patchClientSpeech(w http.ResponseWriter, re
 		writeJSONDecodeError(w, request, err)
 		return
 	}
-	public, err := handler.admin.PutClientSpeechSpeakerID(request.Context(), strings.TrimSpace(input.SpeakerID))
+	public, err := handler.admin.PutClientSpeechSpeakerID(request.Context(), authenticated.User.ID, strings.TrimSpace(input.SpeakerID))
 	if errors.Is(err, settings.ErrNotConfigured) {
 		writeAPIError(w, request, http.StatusServiceUnavailable, "SPEECH_UNAVAILABLE", "请先在管理后台配置豆包语音")
 		return
@@ -452,17 +464,29 @@ func writeSettingsError(w http.ResponseWriter, request *http.Request, err error)
 
 func speechInputFromRequest(input speechSettingsRequest) settings.SpeechInput {
 	return settings.SpeechInput{
-		AppID:            input.AppID,
-		SpeakerID:        input.SpeakerID,
-		TTSResourceID:    input.TTSResourceID,
-		ASRResourceID:    input.ASRResourceID,
-		APIKey:           input.APIKey,
-		AccessToken:      input.AccessToken,
-		SecretKey:        input.SecretKey,
-		ClearAPIKey:      input.ClearAPIKey,
-		ClearAccessToken: input.ClearAccessToken,
-		ClearSecretKey:   input.ClearSecretKey,
-		Enabled:          input.Enabled,
+		AppID:                      input.AppID,
+		SpeakerID:                  input.SpeakerID,
+		TTSResourceID:              input.TTSResourceID,
+		ASRResourceID:              input.ASRResourceID,
+		APIKey:                     input.APIKey,
+		AccessToken:                input.AccessToken,
+		SecretKey:                  input.SecretKey,
+		ClearAPIKey:                input.ClearAPIKey,
+		ClearAccessToken:           input.ClearAccessToken,
+		ClearSecretKey:             input.ClearSecretKey,
+		Enabled:                    input.Enabled,
+		ActiveProvider:             input.ActiveProvider,
+		AliyunAppKey:               input.AliyunAppKey,
+		AliyunVoice:                input.AliyunVoice,
+		AliyunGateway:              input.AliyunGateway,
+		AliyunEnabled:              input.AliyunEnabled,
+		AliyunAccessKeyID:          input.AliyunAccessKeyID,
+		AliyunAccessKeySecret:      input.AliyunAccessKeySecret,
+		AliyunToken:                input.AliyunToken,
+		ClearAliyunAccessKeyID:     input.ClearAliyunAccessKeyID,
+		ClearAliyunAccessKeySecret: input.ClearAliyunAccessKeySecret,
+		ClearAliyunToken:           input.ClearAliyunToken,
+		TestProvider:               input.TestProvider,
 	}
 }
 

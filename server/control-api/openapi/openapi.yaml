@@ -517,7 +517,7 @@ paths:
   /api/v1/admin/settings/speech:
     get:
       operationId: getAdminSpeechSettings
-      summary: Return public Doubao speech settings. Secrets are never included.
+      summary: Return public speech settings for Doubao and Aliyun NLS. Secrets are never included.
       security:
         - cookieAuth: []
       responses:
@@ -535,7 +535,7 @@ paths:
           $ref: '#/components/responses/Forbidden'
     put:
       operationId: putAdminSpeechSettings
-      summary: Save Doubao speech settings. Empty secrets keep the stored values.
+      summary: Save speech settings for the active provider. Empty secrets keep the stored values.
       security:
         - cookieAuth: []
       requestBody:
@@ -567,7 +567,7 @@ paths:
   /api/v1/admin/settings/speech/test:
     post:
       operationId: testAdminSpeechSettings
-      summary: Probe Doubao speech authentication without returning secrets.
+      summary: Probe speech authentication for Doubao or Aliyun without returning secrets.
       security:
         - cookieAuth: []
       requestBody:
@@ -767,7 +767,7 @@ paths:
   /api/v1/client/settings/speech:
     get:
       operationId: getClientSpeechSettings
-      summary: Return decrypted Doubao speech runtime settings for a desktop session. Secrets are not stored on the client disk.
+      summary: Return decrypted speech runtime settings for a desktop session. Secrets are not stored on the client disk.
       security:
         - bearerAuth: []
       responses:
@@ -1408,6 +1408,7 @@ components:
         available: {type: boolean}
         ttsAvailable: {type: boolean}
         asrAvailable: {type: boolean}
+        activeProvider: {type: string, enum: [volcengine, aliyun]}
         appId: {type: string}
         speakerId: {type: string}
         ttsResourceId: {type: string}
@@ -1416,30 +1417,28 @@ components:
         accessTokenConfigured: {type: boolean}
         secretKeyConfigured: {type: boolean}
         enabled: {type: boolean}
+        volcengineAvailable: {type: boolean}
+        aliyunAvailable: {type: boolean}
+        aliyunAppKey: {type: string}
+        aliyunVoice: {type: string}
+        aliyunGateway: {type: string}
+        aliyunEnabled: {type: boolean}
+        aliyunAccessKeyIdConfigured: {type: boolean}
+        aliyunAccessKeySecretConfigured: {type: boolean}
+        aliyunTokenConfigured: {type: boolean}
         configVersion: {type: integer}
         updatedAt: {type: string, format: date-time}
         updatedByUsername: {type: string}
     ClientSpeechSettings:
-      type: object
-      required: [configured, available, ttsAvailable, asrAvailable, appId, speakerId, enabled]
-      properties:
-        configured: {type: boolean}
-        available: {type: boolean}
-        ttsAvailable: {type: boolean}
-        asrAvailable: {type: boolean}
-        appId: {type: string}
-        speakerId: {type: string}
-        ttsResourceId: {type: string}
-        asrResourceId: {type: string}
-        apiKeyConfigured: {type: boolean}
-        accessTokenConfigured: {type: boolean}
-        secretKeyConfigured: {type: boolean}
-        enabled: {type: boolean}
-        configVersion: {type: integer}
-        updatedAt: {type: string, format: date-time}
-        updatedByUsername: {type: string}
-        apiKey: {type: string, format: password}
-        accessToken: {type: string, format: password}
+      allOf:
+        - $ref: '#/components/schemas/PublicSpeechSettings'
+        - type: object
+          properties:
+            apiKey: {type: string, format: password}
+            accessToken: {type: string, format: password}
+            accessKeyId: {type: string, format: password}
+            accessKeySecret: {type: string, format: password}
+            aliyunToken: {type: string, format: password}
     PutSpeechSettingsRequest:
       type: object
       additionalProperties: false
@@ -1455,11 +1454,24 @@ components:
         clearApiKey: {type: boolean}
         clearAccessToken: {type: boolean}
         clearSecretKey: {type: boolean}
+        activeProvider: {type: string, enum: [volcengine, aliyun]}
+        aliyunAppKey: {type: string}
+        aliyunVoice: {type: string}
+        aliyunGateway: {type: string}
+        aliyunEnabled: {type: boolean}
+        aliyunAccessKeyId: {type: string, format: password}
+        aliyunAccessKeySecret: {type: string, format: password}
+        aliyunToken: {type: string, format: password}
+        clearAliyunAccessKeyId: {type: boolean}
+        clearAliyunAccessKeySecret: {type: boolean}
+        clearAliyunToken: {type: boolean}
+        testProvider: {type: string, enum: [volcengine, aliyun]}
     SpeechTestResult:
       type: object
       required: [reachable, message]
       properties:
         reachable: {type: boolean}
+        provider: {type: string}
         message: {type: string}
     Resume:
       type: object

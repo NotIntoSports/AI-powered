@@ -320,11 +320,13 @@ func (s *Service) GetSpeech(ctx context.Context) (PublicSpeech, error) {
 	}
 	_, apiErr := store.DecryptSpeechAPIKey(record)
 	_, tokenErr := store.DecryptSpeechAccessToken(record)
-	decryptErr := firstDecryptErr(apiErr, tokenErr)
-	return PublicSpeechFrom(record, decryptErr), nil
+	_, aliyunIDErr := store.DecryptAliyunAccessKeyID(record)
+	_, aliyunSecretErr := store.DecryptAliyunAccessKeySecret(record)
+	_, aliyunTokenErr := store.DecryptAliyunToken(record)
+	return PublicSpeechFromErrs(record, firstDecryptErr(apiErr, tokenErr), firstDecryptErr(aliyunIDErr, aliyunSecretErr, aliyunTokenErr)), nil
 }
 
-func (s *Service) GetClientSpeech(ctx context.Context) (ClientSpeech, error) {
+func (s *Service) GetClientSpeech(ctx context.Context, userID string) (ClientSpeech, error) {
 	store := NewStore(s.db, s.box)
 	record, err := store.GetSpeech(ctx)
 	if errors.Is(err, ErrNotConfigured) {
@@ -335,12 +337,38 @@ func (s *Service) GetClientSpeech(ctx context.Context) (ClientSpeech, error) {
 	}
 	apiKey, apiErr := store.DecryptSpeechAPIKey(record)
 	accessToken, tokenErr := store.DecryptSpeechAccessToken(record)
-	decryptErr := firstDecryptErr(apiErr, tokenErr)
-	public := PublicSpeechFrom(record, decryptErr)
-	if decryptErr != nil {
-		return ClientSpeech{PublicSpeech: public}, decryptErr
+	accessKeyID, aliyunIDErr := store.DecryptAliyunAccessKeyID(record)
+	accessKeySecret, aliyunSecretErr := store.DecryptAliyunAccessKeySecret(record)
+	aliyunToken, aliyunTokenErr := store.DecryptAliyunToken(record)
+	volcErr := firstDecryptErr(apiErr, tokenErr)
+	aliyunErr := firstDecryptErr(aliyunIDErr, aliyunSecretErr, aliyunTokenErr)
+	public := PublicSpeechFromErrs(record, volcErr, aliyunErr)
+	if userSpeaker, speakerErr := store.GetUserSpeechSpeakerID(ctx, userID); speakerErr != nil {
+		return ClientSpeech{}, speakerErr
+	} else if userSpeaker != "" {
+		public.SpeakerID = userSpeaker
+		if public.VolcengineAvailable {
+			public.TTSAvailable = true
+			if public.ActiveProvider == SpeechProviderVolcengine || public.ActiveProvider == "" {
+				public.Available = true
+				public.ASRAvailable = true
+			}
+		}
 	}
-	return ClientSpeech{PublicSpeech: public, APIKey: apiKey, AccessToken: accessToken}, nil
+	if volcErr != nil && aliyunErr != nil {
+		return ClientSpeech{PublicSpeech: public}, firstDecryptErr(volcErr, aliyunErr)
+	}
+	client := ClientSpeech{PublicSpeech: public}
+	if volcErr == nil {
+		client.APIKey = apiKey
+		client.AccessToken = accessToken
+	}
+	if aliyunErr == nil {
+		client.AccessKeyID = accessKeyID
+		client.AccessKeySecret = accessKeySecret
+		client.AliyunToken = aliyunToken
+	}
+	return client, nil
 }
 
 func (s *Service) PutSpeech(ctx context.Context, actor users.User, requestID string, input SpeechInput) (PublicSpeech, error) {
@@ -353,7 +381,10 @@ func (s *Service) PutSpeech(ctx context.Context, actor users.User, requestID str
 		}
 		_, apiErr := store.DecryptSpeechAPIKey(record)
 		_, tokenErr := store.DecryptSpeechAccessToken(record)
-		public = PublicSpeechFrom(record, firstDecryptErr(apiErr, tokenErr))
+		_, aliyunIDErr := store.DecryptAliyunAccessKeyID(record)
+		_, aliyunSecretErr := store.DecryptAliyunAccessKeySecret(record)
+		_, aliyunTokenErr := store.DecryptAliyunToken(record)
+		public = PublicSpeechFromErrs(record, firstDecryptErr(apiErr, tokenErr), firstDecryptErr(aliyunIDErr, aliyunSecretErr, aliyunTokenErr))
 		return audit.NewStore(tx).Append(ctx, audit.Event{
 			ActorUserID: actor.ID,
 			Action:      audit.ActionSpeechSettingsUpdated,
@@ -367,15 +398,16 @@ func (s *Service) PutSpeech(ctx context.Context, actor users.User, requestID str
 	return public, err
 }
 
-func (s *Service) PutClientSpeechSpeakerID(ctx context.Context, speakerID string) (PublicSpeech, error) {
+func (s *Service) PutClientSpeechSpeakerID(ctx context.Context, userID, speakerID string) (PublicSpeech, error) {
 	store := NewStore(s.db, s.box)
-	record, err := store.PutSpeechSpeakerID(ctx, speakerID)
+	if err := store.PutUserSpeechSpeakerID(ctx, userID, speakerID); err != nil {
+		return PublicSpeech{}, err
+	}
+	client, err := s.GetClientSpeech(ctx, userID)
 	if err != nil {
 		return PublicSpeech{}, err
 	}
-	_, apiErr := store.DecryptSpeechAPIKey(record)
-	_, tokenErr := store.DecryptSpeechAccessToken(record)
-	return PublicSpeechFrom(record, firstDecryptErr(apiErr, tokenErr)), nil
+	return client.PublicSpeech, nil
 }
 
 func (s *Service) TestSpeech(ctx context.Context, actor users.User, requestID string, input *SpeechInput) (SpeechTestResult, error) {
@@ -387,13 +419,24 @@ func (s *Service) TestSpeech(ctx context.Context, actor users.User, requestID st
 	}
 	apiKey := ""
 	accessToken := ""
-	var decryptErr error
+	aliyunID := ""
+	aliyunSecret := ""
+	aliyunToken := ""
+	var volcErr, aliyunErr error
 	if stored {
-		apiKey, decryptErr = store.DecryptSpeechAPIKey(record)
-		if decryptErr == nil {
-			accessToken, decryptErr = store.DecryptSpeechAccessToken(record)
+		apiKey, volcErr = store.DecryptSpeechAPIKey(record)
+		if volcErr == nil {
+			accessToken, volcErr = store.DecryptSpeechAccessToken(record)
+		}
+		aliyunID, aliyunErr = store.DecryptAliyunAccessKeyID(record)
+		if aliyunErr == nil {
+			aliyunSecret, aliyunErr = store.DecryptAliyunAccessKeySecret(record)
+		}
+		if aliyunErr == nil {
+			aliyunToken, aliyunErr = store.DecryptAliyunToken(record)
 		}
 	}
+	provider := record.ActiveProvider
 	if input != nil {
 		normalized, normErr := normalizeSpeechInput(*input)
 		if normErr != nil {
@@ -416,20 +459,57 @@ func (s *Service) TestSpeech(ctx context.Context, actor users.User, requestID st
 		} else {
 			record.Enabled = true
 		}
+		if normalized.ActiveProvider != "" {
+			record.ActiveProvider = normalized.ActiveProvider
+		}
+		if normalized.AliyunAppKey != "" {
+			record.AliyunAppKey = normalized.AliyunAppKey
+		}
+		if normalized.AliyunVoice != "" {
+			record.AliyunVoice = normalized.AliyunVoice
+		}
+		if normalized.AliyunGateway != "" {
+			record.AliyunGateway = normalized.AliyunGateway
+		}
+		if normalized.AliyunEnabled != nil {
+			record.AliyunEnabled = *normalized.AliyunEnabled
+		} else {
+			record.AliyunEnabled = true
+		}
 		if strings.TrimSpace(normalized.APIKey) != "" {
 			apiKey = strings.TrimSpace(normalized.APIKey)
 			record.EncryptedAPIKey = []byte("pending")
-			decryptErr = nil
+			volcErr = nil
 		}
 		if strings.TrimSpace(normalized.AccessToken) != "" {
 			accessToken = strings.TrimSpace(normalized.AccessToken)
 			record.EncryptedAccessToken = []byte("pending")
-			decryptErr = nil
+			volcErr = nil
+		}
+		if strings.TrimSpace(normalized.AliyunAccessKeyID) != "" {
+			aliyunID = strings.TrimSpace(normalized.AliyunAccessKeyID)
+			record.EncryptedAliyunAccessKeyID = []byte("pending")
+			aliyunErr = nil
+		}
+		if strings.TrimSpace(normalized.AliyunAccessKeySecret) != "" {
+			aliyunSecret = strings.TrimSpace(normalized.AliyunAccessKeySecret)
+			record.EncryptedAliyunAccessKeySecret = []byte("pending")
+			aliyunErr = nil
+		}
+		if strings.TrimSpace(normalized.AliyunToken) != "" {
+			aliyunToken = strings.TrimSpace(normalized.AliyunToken)
+			record.EncryptedAliyunToken = []byte("pending")
+			aliyunErr = nil
+		}
+		if normalized.TestProvider != "" {
+			provider = normalized.TestProvider
+		} else if normalized.ActiveProvider != "" {
+			provider = normalized.ActiveProvider
 		}
 	} else if !stored {
-		return SpeechTestResult{Message: "尚未配置豆包语音"}, nil
+		return SpeechTestResult{Message: "尚未配置语音"}, nil
 	}
-	result := ProbeSpeech(ctx, s.client, record, apiKey, accessToken, decryptErr)
+	result := ProbeSpeechLine(ctx, s.client, record, provider, apiKey, accessToken, aliyunID, aliyunSecret, aliyunToken, volcErr, aliyunErr)
 	_ = audit.NewStore(s.db).Append(ctx, audit.Event{
 		ActorUserID: actor.ID,
 		Action:      audit.ActionSpeechSettingsTested,
@@ -437,7 +517,7 @@ func (s *Service) TestSpeech(ctx context.Context, actor users.User, requestID st
 		TargetID:    singletonID,
 		Result:      audit.ResultSuccess,
 		RequestID:   requestID,
-		Metadata:    map[string]any{"reachable": result.Reachable},
+		Metadata:    map[string]any{"reachable": result.Reachable, "provider": result.Provider},
 	})
 	return result, nil
 }

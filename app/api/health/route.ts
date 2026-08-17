@@ -34,7 +34,9 @@ export async function GET() {
     modelName: runtime.model,
     ttsConfigured: speech.ttsAvailable || ttsVoices.length > 0,
     ttsVoiceCount: ttsVoices.length,
-    ttsSource: speech.ttsAvailable ? "volcengine" : ttsVoices.length > 0 ? "sapi" : "none",
+    ttsSource: speech.ttsAvailable
+      ? speech.provider
+      : ttsVoices.length > 0 ? "sapi" : "none",
     transcriptionProvider: getTranscriptionProvider(),
     transcriptionSource,
     transcriptionConfigured,

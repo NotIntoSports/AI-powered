@@ -1,6 +1,6 @@
 # Management web
 
-Administrator console for `control-api`. After login it shows account online status, current session lines, user administration, and AI/RTC/storage settings that are written to PostgreSQL. RTC settings keep 火山云 and LiveKit as two cards plus a current-line switch. There is no public registration, password recovery, or candidate records. Secrets are never shown in the browser after save.
+Administrator console for `control-api`. After login it shows account online status, current session lines, user administration, and AI/RTC/speech/storage settings that are written to PostgreSQL. RTC settings keep 火山云 and LiveKit as two cards plus a current-line switch. Speech settings keep 阿里云 NLS and 豆包 as collapsible cards with connectivity status on the summary. There is no public registration, password recovery, or candidate records. Secrets are never shown in the browser after save.
 
 ## Run locally
 

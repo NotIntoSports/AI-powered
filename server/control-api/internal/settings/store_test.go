@@ -176,6 +176,7 @@ func TestPublicSpeechOmitsSecretsAndRequiresSpeakerForTTS(t *testing.T) {
 		SpeakerID:            "custom_zh_interviewer",
 		TTSResourceID:        defaultTTSResourceID,
 		ASRResourceID:        defaultASRResourceID,
+		ActiveProvider:       SpeechProviderVolcengine,
 		EncryptedAPIKey:      []byte("cipher-api"),
 		EncryptedAccessToken: []byte("cipher-token"),
 		EncryptedSecretKey:   []byte("cipher-secret"),
@@ -185,13 +186,28 @@ func TestPublicSpeechOmitsSecretsAndRequiresSpeakerForTTS(t *testing.T) {
 	if strings.Contains(encoded, "cipher") {
 		t.Fatalf("leaked: %s", encoded)
 	}
-	if !public.Available || !public.TTSAvailable || !public.ASRAvailable {
+	if !public.Available || !public.TTSAvailable || !public.ASRAvailable || !public.VolcengineAvailable {
 		t.Fatalf("public=%#v", public)
 	}
 	record.SpeakerID = ""
 	public = PublicSpeechFrom(record, nil)
 	if !public.Available || public.TTSAvailable || !public.ASRAvailable {
 		t.Fatalf("without speaker=%#v", public)
+	}
+}
+
+func TestPublicSpeechAliyunDoesNotRequireSpeakerID(t *testing.T) {
+	record := SpeechRecord{
+		ActiveProvider:                 SpeechProviderAliyun,
+		AliyunEnabled:                  true,
+		AliyunAppKey:                   "FeBrZpfg4YaDM9DL",
+		AliyunVoice:                    "xiaoyun",
+		EncryptedAliyunAccessKeyID:     []byte("cipher-id"),
+		EncryptedAliyunAccessKeySecret: []byte("cipher-secret"),
+	}
+	public := PublicSpeechFrom(record, nil)
+	if !public.Available || !public.TTSAvailable || !public.AliyunAvailable || public.VolcengineAvailable {
+		t.Fatalf("aliyun public=%#v", public)
 	}
 }
 

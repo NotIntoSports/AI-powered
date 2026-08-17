@@ -142,7 +142,8 @@ func (fake *fakeSettingsAdmin) GetSpeech(context.Context) (settings.PublicSpeech
 	return fake.speech, nil
 }
 
-func (fake *fakeSettingsAdmin) GetClientSpeech(context.Context) (settings.ClientSpeech, error) {
+func (fake *fakeSettingsAdmin) GetClientSpeech(_ context.Context, userID string) (settings.ClientSpeech, error) {
+	_ = userID
 	if fake.clientSpeech.APIKey != "" || fake.clientSpeech.AccessToken != "" || fake.clientSpeech.Configured {
 		return fake.clientSpeech, nil
 	}
@@ -152,25 +153,36 @@ func (fake *fakeSettingsAdmin) GetClientSpeech(context.Context) (settings.Client
 func (fake *fakeSettingsAdmin) PutSpeech(_ context.Context, _ users.User, _ string, input settings.SpeechInput) (settings.PublicSpeech, error) {
 	fake.putSpeech = input
 	fake.speech = settings.PublicSpeech{
-		Configured:            true,
-		Available:             true,
-		AppID:                 input.AppID,
-		SpeakerID:             input.SpeakerID,
-		TTSResourceID:         input.TTSResourceID,
-		ASRResourceID:         input.ASRResourceID,
-		APIKeyConfigured:      input.APIKey != "",
-		AccessTokenConfigured: input.AccessToken != "",
-		SecretKeyConfigured:   input.SecretKey != "",
-		Enabled:               true,
-		ConfigVersion:         1,
+		Configured:                      true,
+		Available:                       true,
+		AppID:                           input.AppID,
+		SpeakerID:                       input.SpeakerID,
+		TTSResourceID:                   input.TTSResourceID,
+		ASRResourceID:                   input.ASRResourceID,
+		APIKeyConfigured:                input.APIKey != "",
+		AccessTokenConfigured:           input.AccessToken != "",
+		SecretKeyConfigured:             input.SecretKey != "",
+		Enabled:                         true,
+		ActiveProvider:                  input.ActiveProvider,
+		AliyunAppKey:                    input.AliyunAppKey,
+		AliyunVoice:                     input.AliyunVoice,
+		AliyunGateway:                   input.AliyunGateway,
+		AliyunAccessKeyIDConfigured:     input.AliyunAccessKeyID != "",
+		AliyunAccessKeySecretConfigured: input.AliyunAccessKeySecret != "",
+		AliyunTokenConfigured:           input.AliyunToken != "",
+		AliyunAvailable:                 input.AliyunAppKey != "" && (input.AliyunAccessKeyID != "" || input.AliyunToken != ""),
+		ConfigVersion:                   1,
 	}
 	return fake.speech, nil
 }
 
-func (fake *fakeSettingsAdmin) PutClientSpeechSpeakerID(_ context.Context, speakerID string) (settings.PublicSpeech, error) {
+func (fake *fakeSettingsAdmin) PutClientSpeechSpeakerID(_ context.Context, userID, speakerID string) (settings.PublicSpeech, error) {
 	fake.speakerID = speakerID
 	fake.speech.SpeakerID = speakerID
 	fake.speech.TTSAvailable = speakerID != ""
+	if userID == "" {
+		return settings.PublicSpeech{}, settings.ErrInvalidInput
+	}
 	return fake.speech, nil
 }
 

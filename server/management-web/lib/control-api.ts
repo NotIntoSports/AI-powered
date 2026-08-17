@@ -107,6 +107,7 @@ export type PublicSpeechSettings = {
   available: boolean;
   ttsAvailable: boolean;
   asrAvailable: boolean;
+  activeProvider?: "volcengine" | "aliyun" | string;
   appId: string;
   speakerId: string;
   ttsResourceId: string;
@@ -115,6 +116,15 @@ export type PublicSpeechSettings = {
   accessTokenConfigured: boolean;
   secretKeyConfigured: boolean;
   enabled: boolean;
+  volcengineAvailable?: boolean;
+  aliyunAvailable?: boolean;
+  aliyunAppKey?: string;
+  aliyunVoice?: string;
+  aliyunGateway?: string;
+  aliyunEnabled?: boolean;
+  aliyunAccessKeyIdConfigured?: boolean;
+  aliyunAccessKeySecretConfigured?: boolean;
+  aliyunTokenConfigured?: boolean;
   configVersion: number;
   updatedAt?: string;
   updatedByUsername?: string;
@@ -122,6 +132,7 @@ export type PublicSpeechSettings = {
 
 export type SpeechTestResult = {
   reachable: boolean;
+  provider?: string;
   message: string;
 };
 

@@ -4,7 +4,12 @@ import {
   isSecureEndpoint,
   selectScopedApiKey
 } from "./endpoint-security";
-import { getSpeechRuntimeConfig } from "./speech-runtime";
+import { getSpeechRuntimeConfig, toAliyunNlsAuth } from "./speech-runtime";
+import {
+  mapAliyunAsrFormat,
+  parseWavSampleRate,
+  recognizeAliyunSpeech
+} from "./aliyun-nls";
 import {
   buildFlashAsrBody,
   mapTranscriptionFormat,
@@ -16,7 +21,7 @@ import {
 export const MAX_AUDIO_BYTES = 15 * 1024 * 1024;
 
 export type TranscriptionProvider = "openai" | "whisper-cpp";
-export type TranscriptionSource = "volcengine" | "management" | "environment" | "whisper-cpp" | "none";
+export type TranscriptionSource = "aliyun" | "volcengine" | "management" | "environment" | "whisper-cpp" | "none";
 
 type TranscriptionResult = {
   text?: string;
@@ -123,7 +128,9 @@ export function getTranscriptionProvider(): TranscriptionProvider {
 }
 
 export async function getTranscriptionSource(): Promise<TranscriptionSource> {
-  if ((await getSpeechRuntimeConfig()).asrAvailable) return "volcengine";
+  const speech = await getSpeechRuntimeConfig();
+  if (speech.provider === "aliyun" && speech.asrAvailable) return "aliyun";
+  if (speech.provider === "volcengine" && speech.asrAvailable) return "volcengine";
   if (await getManagementASRConfig()) return "management";
   if (getTranscriptionProvider() === "whisper-cpp") return "whisper-cpp";
   if (await isLocalTranscriptionConfigured()) return "environment";
@@ -185,7 +192,16 @@ export async function validateAudioFile(file: File) {
 
 export async function transcribeAudio(file: File) {
   await validateAudioFile(file);
-  if ((await getSpeechRuntimeConfig()).asrAvailable) {
+  const speech = await getSpeechRuntimeConfig();
+  if (speech.provider === "aliyun" && speech.asrAvailable) {
+    try {
+      const text = await transcribeWithAliyun(file);
+      if (text) return text;
+    } catch {
+      // Fall back to OpenAI-compatible or whisper.cpp.
+    }
+  }
+  if (speech.provider === "volcengine" && speech.asrAvailable) {
     try {
       const text = await transcribeWithVolcengine(file);
       if (text) return text;
@@ -197,6 +213,17 @@ export async function transcribeAudio(file: File) {
     return transcribeWithOpenAI(file);
   }
   return transcribeWithWhisperCpp(file);
+}
+
+async function transcribeWithAliyun(file: File) {
+  const speech = await getSpeechRuntimeConfig();
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  return recognizeAliyunSpeech(
+    toAliyunNlsAuth(speech),
+    bytes,
+    mapAliyunAsrFormat(file.type),
+    parseWavSampleRate(bytes)
+  );
 }
 
 async function transcribeWithVolcengine(file: File) {

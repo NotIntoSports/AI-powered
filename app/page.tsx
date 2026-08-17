@@ -34,7 +34,7 @@ type Diagnostics = {
   mediaReady: boolean;
   transcriptionConfigured: boolean;
   transcriptionReady: boolean;
-  transcriptionSource: "volcengine" | "management" | "environment" | "whisper-cpp" | "none";
+  transcriptionSource: "aliyun" | "volcengine" | "management" | "environment" | "whisper-cpp" | "none";
 };
 
 const emptySession: InterviewSession = {
@@ -248,7 +248,7 @@ export default function ConsolePage() {
           mediaReady: Boolean(stage.mediaReady),
           transcriptionConfigured: Boolean(health.transcriptionConfigured),
           transcriptionReady: Boolean(health.transcriptionReady),
-          transcriptionSource: health.transcriptionSource === "volcengine" || health.transcriptionSource === "management" || health.transcriptionSource === "environment" || health.transcriptionSource === "whisper-cpp" ? health.transcriptionSource : "none"
+          transcriptionSource: health.transcriptionSource === "aliyun" || health.transcriptionSource === "volcengine" || health.transcriptionSource === "management" || health.transcriptionSource === "environment" || health.transcriptionSource === "whisper-cpp" ? health.transcriptionSource : "none"
         });
         setManagementNetwork({
           reachable: Boolean(health.managementReachable),
