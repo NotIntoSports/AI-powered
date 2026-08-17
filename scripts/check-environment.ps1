@@ -155,7 +155,7 @@ $checks = @(
 )
 
 Write-Host ''
-Write-Host 'AI Interviewer environment' -ForegroundColor Cyan
+Write-Host 'AI Virtual Assistant environment' -ForegroundColor Cyan
 foreach ($check in $checks) {
     $mark = if ($check[1]) { '[OK]' } else { '[--]' }
     $color = if ($check[1]) { 'Green' } else { 'Yellow' }

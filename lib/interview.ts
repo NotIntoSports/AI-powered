@@ -35,6 +35,7 @@ export type InterviewSession = {
   finishedAt: string | null;
   transcript: TranscriptItem[];
   report: InterviewReport | null;
+  resumeIds: string[];
   resumeId: string;
 };
 
@@ -61,8 +62,21 @@ const sessionSchema = z.object({
   finishedAt: z.string().nullable().default(null),
   transcript: z.array(transcriptItemSchema),
   report: interviewReportSchema.nullable().default(null),
+  resumeIds: z.array(z.string().max(64)).max(20).default([]),
   resumeId: z.string().max(64).default("")
+}).transform((session) => {
+  const resumeIds = normalizeResumeIds(session.resumeIds, session.resumeId);
+  return { ...session, resumeIds, resumeId: resumeIds[0] || "" };
 });
+
+function normalizeResumeIds(resumeIds?: string[] | null, resumeId?: string | null) {
+  const fromList = Array.isArray(resumeIds)
+    ? resumeIds.map((id) => id.trim()).filter(Boolean)
+    : [];
+  const legacy = resumeId?.trim() || "";
+  const merged = fromList.length > 0 ? fromList : legacy ? [legacy] : [];
+  return [...new Set(merged)].slice(0, 20);
+}
 
 const initialSession: InterviewSession = {
   sessionId: "",
@@ -80,6 +94,7 @@ const initialSession: InterviewSession = {
   finishedAt: null,
   transcript: [],
   report: null,
+  resumeIds: [],
   resumeId: ""
 };
 
@@ -242,12 +257,14 @@ export function resetSession(input: {
   interviewFocus: string;
   maxQuestions: number;
   consentConfirmed: true;
+  resumeIds?: string[];
   resumeId?: string;
 }): Promise<InterviewSession> {
   return mutateSession((previous) => {
     if (previous.status === "running") throw new Error("SESSION_ALREADY_RUNNING");
     const timestamp = now();
-    const opening = `${input.candidateName || "你好"}，欢迎参加${input.roleName || "本岗位"}面试。本次由 AI 面试官协助进行，招聘人员会人工复核面试记录。请先用两分钟介绍一下你自己。`;
+    const opening = `${input.candidateName || "你好"}，欢迎开始关于「${input.roleName || "本次交流"}」的互动。本次由 AI虚拟助手协助进行，对话记录会保存并由人工复核。请先用两分钟介绍一下你自己。`;
+    const resumeIds = normalizeResumeIds(input.resumeIds, input.resumeId);
     return {
       sessionId: `${Date.now()}-${crypto.randomUUID().slice(0, 8)}`,
       revision: previous.revision + 1,
@@ -264,7 +281,8 @@ export function resetSession(input: {
       finishedAt: null,
       transcript: [{ role: "interviewer", kind: "opening", text: opening, at: timestamp }],
       report: null,
-      resumeId: input.resumeId?.trim() || ""
+      resumeIds,
+      resumeId: resumeIds[0] || ""
     };
   });
 }
@@ -329,7 +347,7 @@ export function appendFinalAnswerAndFinish(input: {
     assertExpectedTurn(session, input.expectedRevision);
     if (!hasReachedQuestionLimit(session)) throw new Error("SESSION_CHANGED");
     const timestamp = now();
-    const closing = "感谢你的时间，本次面试到这里。后续结果会由招聘团队与你联系。";
+    const closing = "感谢你的时间，本次互动到这里。如有后续安排，相关人员会再与你联系。";
     session.transcript.push(
       { role: "candidate", kind: "answer", text: input.answer, at: timestamp },
       { role: "interviewer", kind: "closing", text: closing, at: timestamp }
@@ -411,7 +429,7 @@ export function finishSession(): Promise<InterviewSession> {
   return mutateSession((session) => {
     if (session.status !== "running") throw new Error("SESSION_NOT_RUNNING");
     const timestamp = now();
-    const closing = "感谢你的时间，本次面试到这里。后续结果会由招聘团队与你联系。";
+    const closing = "感谢你的时间，本次互动到这里。如有后续安排，相关人员会再与你联系。";
     session.status = "finished";
     session.finishedAt = timestamp;
     session.transcript.push({

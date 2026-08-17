@@ -1,5 +1,5 @@
-appId: com.aidigitalhuman.desktop
-productName: AI Digital Human
+appId: com.aivirtualassistant.desktop
+productName: AI Virtual Assistant
 electronDist: node_modules/electron/dist
 directories:
   output: dist
@@ -29,7 +29,7 @@ win:
   target:
     - target: nsis
       arch: [x64]
-  executableName: AI-Digital-Human
+  executableName: AI-Virtual-Assistant
 nsis:
   include: build/installer.nsh
   oneClick: true
@@ -39,5 +39,5 @@ nsis:
   runAfterFinish: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: AI Digital Human
-  artifactName: AI-Digital-Human-${version}-Windows-x64.${ext}
+  shortcutName: AI Virtual Assistant
+  artifactName: AI-Virtual-Assistant-${version}-Windows-x64.${ext}

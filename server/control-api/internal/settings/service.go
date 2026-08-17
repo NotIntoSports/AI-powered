@@ -410,6 +410,10 @@ func (s *Service) PutClientSpeechSpeakerID(ctx context.Context, userID, speakerI
 	return client.PublicSpeech, nil
 }
 
+func (s *Service) ListUserSpeechVoices(ctx context.Context) (map[string]UserSpeechVoice, error) {
+	return NewStore(s.db, s.box).ListUserSpeechVoices(ctx)
+}
+
 func (s *Service) TestSpeech(ctx context.Context, actor users.User, requestID string, input *SpeechInput) (SpeechTestResult, error) {
 	store := NewStore(s.db, s.box)
 	record, err := store.GetSpeech(ctx)

@@ -318,6 +318,12 @@ func (s *Store) PutSpeechSpeakerID(ctx context.Context, speakerID string) (Speec
 	return current, nil
 }
 
+type UserSpeechVoice struct {
+	UserID    string
+	SpeakerID string
+	UpdatedAt time.Time
+}
+
 func (s *Store) GetUserSpeechSpeakerID(ctx context.Context, userID string) (string, error) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -334,6 +340,37 @@ func (s *Store) GetUserSpeechSpeakerID(ctx context.Context, userID string) (stri
 		return "", ErrStore
 	}
 	return strings.TrimSpace(speakerID), nil
+}
+
+func (s *Store) ListUserSpeechVoices(ctx context.Context) (map[string]UserSpeechVoice, error) {
+	rows, err := s.db.Query(ctx, `
+		select user_id, speaker_id, updated_at
+		from user_speech_voices
+		where char_length(trim(speaker_id)) > 0
+	`)
+	if err != nil {
+		return nil, ErrStore
+	}
+	defer rows.Close()
+
+	out := make(map[string]UserSpeechVoice)
+	for rows.Next() {
+		var voice UserSpeechVoice
+		if err := rows.Scan(&voice.UserID, &voice.SpeakerID, &voice.UpdatedAt); err != nil {
+			return nil, ErrStore
+		}
+		voice.UserID = strings.TrimSpace(voice.UserID)
+		voice.SpeakerID = strings.TrimSpace(voice.SpeakerID)
+		if voice.UserID == "" || voice.SpeakerID == "" {
+			continue
+		}
+		voice.UpdatedAt = voice.UpdatedAt.UTC()
+		out[voice.UserID] = voice
+	}
+	if err := rows.Err(); err != nil {
+		return nil, ErrStore
+	}
+	return out, nil
 }
 
 func (s *Store) PutUserSpeechSpeakerID(ctx context.Context, userID, speakerID string) error {

@@ -71,7 +71,7 @@ export default function StorageSettingsPage() {
       const data = result.body as PublicStorageSettings;
       setConfig(data);
       setSecretKey("");
-      setNotice(data.available ? "对象存储已配置并可用。" : "已保存，但还需要 Bucket、地域和密钥后才能上传简历。");
+      setNotice(data.available ? "对象存储已配置并可用。" : "已保存，但还需要 Bucket、地域和密钥后才能上传资料。");
     } finally {
       setBusy(false);
     }
@@ -116,7 +116,7 @@ export default function StorageSettingsPage() {
           />
         </div>
         <p className="muted">
-          这里只给管理员保存腾讯云密钥。Windows 客户端上传简历时走服务端接口，不会拿到 SecretKey。
+          这里只给管理员保存腾讯云密钥。Windows 客户端上传资料时走服务端接口，不会拿到 SecretKey。
         </p>
         <label>
           SecretId

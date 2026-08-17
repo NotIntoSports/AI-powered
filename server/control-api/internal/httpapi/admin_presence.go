@@ -3,9 +3,11 @@ package httpapi
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/ai-interviewer/ai-powered/control-api/internal/presence"
+	"github.com/ai-interviewer/ai-powered/control-api/internal/settings"
 	"github.com/ai-interviewer/ai-powered/control-api/internal/users"
 )
 
@@ -20,6 +22,9 @@ type adminUser struct {
 	Online             bool       `json:"online"`
 	LastSeenAt         *time.Time `json:"lastSeenAt,omitempty"`
 	ActiveSessionCount int        `json:"activeSessionCount"`
+	VoiceBound          bool       `json:"voiceBound"`
+	SpeakerID          string     `json:"speakerId,omitempty"`
+	VoiceBoundAt        *time.Time `json:"voiceBoundAt,omitempty"`
 }
 
 type publicLine struct {
@@ -106,7 +111,11 @@ func (handler *adminPresenceHandler) listDevices(w http.ResponseWriter, request 
 	writeJSON(w, http.StatusOK, public)
 }
 
-func mergeAdminUsers(listed []users.User, presenceByUser map[string]presence.UserPresence) []adminUser {
+func mergeAdminUsers(
+	listed []users.User,
+	presenceByUser map[string]presence.UserPresence,
+	voicesByUser map[string]settings.UserSpeechVoice,
+) []adminUser {
 	out := make([]adminUser, 0, len(listed))
 	for _, user := range listed {
 		item := adminUser{publicUser: toPublicUser(user)}
@@ -114,6 +123,12 @@ func mergeAdminUsers(listed []users.User, presenceByUser map[string]presence.Use
 			item.Online = snapshot.Online
 			item.LastSeenAt = snapshot.LastSeenAt
 			item.ActiveSessionCount = snapshot.ActiveSessionCount
+		}
+		if voice, ok := voicesByUser[user.ID]; ok && strings.TrimSpace(voice.SpeakerID) != "" {
+			item.VoiceBound = true
+			item.SpeakerID = strings.TrimSpace(voice.SpeakerID)
+			boundAt := voice.UpdatedAt.UTC()
+			item.VoiceBoundAt = &boundAt
 		}
 		out = append(out, item)
 	}

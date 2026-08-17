@@ -8,10 +8,12 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ai-interviewer/ai-powered/control-api/internal/identity"
 	"github.com/ai-interviewer/ai-powered/control-api/internal/password"
 	"github.com/ai-interviewer/ai-powered/control-api/internal/sessions"
+	"github.com/ai-interviewer/ai-powered/control-api/internal/settings"
 	"github.com/ai-interviewer/ai-powered/control-api/internal/users"
 )
 
@@ -335,6 +337,82 @@ func performAdminCookieRequest(t *testing.T, handler http.Handler, method, path,
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	return response
+}
+
+func TestAdminUsersListIncludesVoiceBinding(t *testing.T) {
+	boundAt := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
+	settingsAdmin := &fakeSettingsAdmin{
+		listVoices: func() (map[string]settings.UserSpeechVoice, error) {
+			return map[string]settings.UserSpeechVoice{
+				testUser.ID: {UserID: testUser.ID, SpeakerID: "S_bound12345", UpdatedAt: boundAt},
+			}, nil
+		},
+	}
+	adminUsers := &fakeUserAdmin{
+		list: func(actor users.User) ([]users.User, error) {
+			return []users.User{testUser}, nil
+		},
+	}
+	router := NewRouter(Dependencies{
+		Authentication: adminBrowserAuth(),
+		UserAdmin:      adminUsers,
+		SettingsAdmin:  settingsAdmin,
+		SessionTTL:     testSessionTTL,
+		CookieSecure:   true,
+	})
+
+	list := performAdminCookieRequest(t, router, http.MethodGet, "/api/v1/admin/users", "")
+	if list.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", list.Code, list.Body.String())
+	}
+	var listed []adminUser
+	decodeJSON(t, list, &listed)
+	if len(listed) != 1 || !listed[0].VoiceBound || listed[0].SpeakerID != "S_bound12345" {
+		t.Fatalf("listed=%#v", listed)
+	}
+	if listed[0].VoiceBoundAt == nil || !listed[0].VoiceBoundAt.Equal(boundAt) {
+		t.Fatalf("voiceBoundAt=%v", listed[0].VoiceBoundAt)
+	}
+	assertNoStore(t, list)
+}
+
+func TestAdminUsersListVoiceLookupFailureIsInternal(t *testing.T) {
+	router := NewRouter(Dependencies{
+		Authentication: adminBrowserAuth(),
+		UserAdmin: &fakeUserAdmin{
+			list: func(users.User) ([]users.User, error) { return []users.User{testUser}, nil },
+		},
+		SettingsAdmin: &fakeSettingsAdmin{
+			listVoices: func() (map[string]settings.UserSpeechVoice, error) {
+				return nil, errors.New("db unavailable")
+			},
+		},
+		SessionTTL:   testSessionTTL,
+		CookieSecure: true,
+	})
+	response := performAdminCookieRequest(t, router, http.MethodGet, "/api/v1/admin/users", "")
+	assertAPIError(t, response, http.StatusInternalServerError, "INTERNAL_ERROR")
+}
+
+func TestMergeAdminUsersAttachesVoiceBinding(t *testing.T) {
+	boundAt := time.Date(2026, 8, 17, 8, 30, 0, 0, time.UTC)
+	second := users.User{ID: "user-2", Username: "ops", Role: users.RoleOperator, Status: users.StatusActive}
+	listed := mergeAdminUsers(
+		[]users.User{testUser, second},
+		nil,
+		map[string]settings.UserSpeechVoice{
+			testUser.ID: {UserID: testUser.ID, SpeakerID: "custom_zh_interviewer", UpdatedAt: boundAt},
+		},
+	)
+	if len(listed) != 2 {
+		t.Fatalf("len=%d", len(listed))
+	}
+	if !listed[0].VoiceBound || listed[0].SpeakerID != "custom_zh_interviewer" || listed[0].VoiceBoundAt == nil {
+		t.Fatalf("bound user=%#v", listed[0])
+	}
+	if listed[1].VoiceBound || listed[1].SpeakerID != "" || listed[1].VoiceBoundAt != nil {
+		t.Fatalf("unbound user=%#v", listed[1])
+	}
 }
 
 func TestAdminUsersJSONRoundTripDoesNotIncludePassword(t *testing.T) {

@@ -2,8 +2,8 @@ import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata = {
-  title: "管理后台",
-  description: "AI 面试官控制 API 管理控制台"
+  title: "AI虚拟助手管理后台",
+  description: "AI虚拟助手控制 API 管理控制台"
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

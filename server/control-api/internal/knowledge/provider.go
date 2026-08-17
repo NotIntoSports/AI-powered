@@ -47,6 +47,7 @@ type IndexOutcome struct {
 type SearchInput struct {
 	Query         string
 	ResumeID      string
+	ResumeIDs     []string
 	ExternalDocID string
 	TopK          int
 }
@@ -86,10 +87,26 @@ func NormalizeSearch(in SearchInput) (SearchInput, error) {
 	in.Query = strings.TrimSpace(in.Query)
 	in.ResumeID = strings.TrimSpace(in.ResumeID)
 	in.ExternalDocID = strings.TrimSpace(in.ExternalDocID)
+	ids := make([]string, 0, len(in.ResumeIDs)+1)
+	seen := map[string]struct{}{}
+	for _, raw := range in.ResumeIDs {
+		id := strings.TrimSpace(raw)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 && in.ResumeID != "" {
+		ids = append(ids, in.ResumeID)
+	}
 	if in.Query == "" || utf8.RuneCountInString(in.Query) > MaxQueryRunes {
 		return SearchInput{}, ErrInvalidSearch
 	}
-	if in.ResumeID == "" {
+	if len(ids) == 0 {
 		return SearchInput{}, ErrInvalidSearch
 	}
 	if in.TopK == 0 {
@@ -98,6 +115,8 @@ func NormalizeSearch(in SearchInput) (SearchInput, error) {
 	if in.TopK < MinTopK || in.TopK > MaxTopK {
 		return SearchInput{}, ErrInvalidSearch
 	}
+	in.ResumeIDs = ids
+	in.ResumeID = ids[0]
 	return in, nil
 }
 

@@ -66,7 +66,7 @@ $server = Get-ChildItem -LiteralPath $whisperRoot -Recurse -Filter 'whisper-serv
 if (-not $server) {
     Write-Step 'Finding the latest official whisper.cpp Windows release'
     $headers = @{
-        'User-Agent' = 'AI-Interviewer-Setup'
+        'User-Agent' = 'AI-Virtual-Assistant-Setup'
         'Accept' = 'application/vnd.github+json'
         'X-GitHub-Api-Version' = '2022-11-28'
     }

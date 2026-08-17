@@ -29,9 +29,10 @@ func newKnowledgeHandler(admin KnowledgeAdmin) *knowledgeHandler {
 }
 
 type knowledgeSearchRequest struct {
-	Query    string `json:"query"`
-	ResumeID string `json:"resumeId"`
-	TopK     int    `json:"topK"`
+	Query     string   `json:"query"`
+	ResumeID  string   `json:"resumeId"`
+	ResumeIDs []string `json:"resumeIds"`
+	TopK      int      `json:"topK"`
 }
 
 type resumeIndexStatus struct {
@@ -51,9 +52,10 @@ func (handler *knowledgeHandler) search(w http.ResponseWriter, request *http.Req
 		return
 	}
 	result := handler.admin.Search(request.Context(), actor, knowledge.SearchInput{
-		Query:    body.Query,
-		ResumeID: body.ResumeID,
-		TopK:     body.TopK,
+		Query:     body.Query,
+		ResumeID:  body.ResumeID,
+		ResumeIDs: body.ResumeIDs,
+		TopK:      body.TopK,
 	})
 	writeJSON(w, http.StatusOK, result)
 }

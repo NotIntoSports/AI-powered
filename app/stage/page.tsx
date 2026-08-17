@@ -235,7 +235,7 @@ export default function StagePage() {
       )}
       <section className="lowerThird">
         <div>
-          <strong>AI 数字人</strong>
+          <strong>AI虚拟助手</strong>
           <span>{session?.roleName || "实时互动"}</span>
         </div>
         <i className={speaking ? "live" : ""}>{speaking ? "正在提问" : "正在聆听"}</i>

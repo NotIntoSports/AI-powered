@@ -301,13 +301,25 @@ export async function saveSpeechSpeakerId(speakerId: string) {
   const trimmed = speakerId.trim();
   const current = (await getStoredSpeech()) ?? speechSettingsSchema.parse({});
   await writeStoredSpeech({ ...current, speakerId: trimmed, disabled: false });
-  await fetchDesktopControlJson("/api/v1/client/settings/speech", {
+  const synced = await fetchDesktopControlJson<{ speakerId?: string }>("/api/v1/client/settings/speech", {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ speakerId: trimmed }),
     signal: AbortSignal.timeout(5_000)
-  }).catch(() => null);
+  });
+  if (!synced) {
+    throw new SpeechAccountBindError();
+  }
   return getSpeechRuntimeConfig();
+}
+
+export class SpeechAccountBindError extends Error {
+  readonly code = "VOICE_BIND_FAILED";
+
+  constructor(message = "账号音色同步失败，请确认已登录桌面账号") {
+    super(message);
+    this.name = "SpeechAccountBindError";
+  }
 }
 
 export async function isVolcengineSpeechConfigured() {

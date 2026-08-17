@@ -2,7 +2,7 @@ export function describeTtsError(error: string) {
   const normalized = error.trim().toLowerCase();
   if (!normalized) return "语音播放失败，请重新测试。";
   if (/not.?allowed/.test(normalized)) {
-    return "浏览器阻止了自动播放。请打开数字人舞台，或在 OBS 中右键舞台源选择“交互”，点击“启用声音并重播”。";
+    return "浏览器阻止了自动播放。请打开助手舞台，或在 OBS 中右键舞台源选择“交互”，点击“启用声音并重播”。";
   }
   if (/sapi-http-(?:500|503)|sapi_unavailable|sapi_failed/.test(normalized)) {
     return "Windows 本机语音生成失败。请运行环境检查确认中文 SAPI 声音可用，然后重新测试。";

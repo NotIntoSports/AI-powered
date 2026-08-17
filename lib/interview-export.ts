@@ -3,7 +3,7 @@ import type { InterviewSession } from "./interview";
 export function safeFilenamePart(value: string) {
   return value.trim()
     .replace(/[^\p{L}\p{N}._-]+/gu, "-")
-    .replace(/^-+|-+$/g, "") || "interview";
+    .replace(/^-+|-+$/g, "") || "session";
 }
 
 function escapeMarkdown(value: string) {
@@ -30,19 +30,19 @@ function listSection(title: string, items: string[]) {
 
 export function renderInterviewMarkdown(session: InterviewSession) {
   const lines = [
-    "# 面试记录",
+    "# 互动记录",
     "",
-    `- 候选人：${valueOrUnknown(session.candidateName)}`,
-    `- 应聘岗位：${valueOrUnknown(session.roleName)}`,
+    `- 互动对象：${valueOrUnknown(session.candidateName)}`,
+    `- 对话主题：${valueOrUnknown(session.roleName)}`,
     `- 开始时间：${valueOrUnknown(session.startedAt || "")}`,
     `- 结束时间：${valueOrUnknown(session.finishedAt || "")}`,
     `- 会话状态：${escapeMarkdown(session.status)}`,
     `- 人工复核：必须`,
     "",
-    "## 面试配置",
+    "## 会话配置",
     "",
-    `- 岗位要求：${valueOrUnknown(session.jobDescription)}`,
-    `- 面试重点：${valueOrUnknown(session.interviewFocus)}`,
+    `- 补充说明：${valueOrUnknown(session.jobDescription)}`,
+    `- 对话重点：${valueOrUnknown(session.interviewFocus)}`,
     `- 问题上限：${session.maxQuestions}`,
     "",
     "## 对话原文",
@@ -54,7 +54,7 @@ export function renderInterviewMarkdown(session: InterviewSession) {
   } else {
     session.transcript.forEach((item, index) => {
       lines.push(
-        `### ${index + 1}. ${item.role === "interviewer" ? "AI 面试官" : "候选人"}`,
+        `### ${index + 1}. ${item.role === "interviewer" ? "AI虚拟助手" : "对方"}`,
         "",
         `时间：${escapeMarkdown(item.at)}`,
         "",
@@ -64,9 +64,9 @@ export function renderInterviewMarkdown(session: InterviewSession) {
     });
   }
 
-  lines.push("## AI 面试纪要", "");
+  lines.push("## AI 互动纪要", "");
   if (!session.report) {
-    lines.push("尚未生成面试纪要。", "");
+    lines.push("尚未生成互动纪要。", "");
   } else {
     lines.push(
       escapeMarkdown(session.report.summary),
@@ -97,7 +97,7 @@ export function renderInterviewMarkdown(session: InterviewSession) {
   lines.push(
     "---",
     "",
-    "本记录由 AI 辅助整理，不包含录用或淘汰建议。招聘人员必须结合岗位标准和对话原文进行人工复核。",
+    "本记录由 AI 辅助整理，不包含录用、淘汰或其他自动决策建议。使用者必须结合场景标准和对话原文进行人工复核。",
     ""
   );
   return lines.join("\n");

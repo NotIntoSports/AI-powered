@@ -22,7 +22,7 @@ export function sanitizeInterviewQuestion(content: string) {
     .replace(/^\s{0,3}#{1,6}\s*/gm, "")
     .replace(/^\s*(?:[-*+]|\d+[.)、])\s+/gm, "")
     .replace(/[*_~`]+/g, "")
-    .replace(/^\s*(?:问题|面试官|追问)(?:\s*[：:]\s*|\s+)/i, "")
+    .replace(/^\s*(?:问题|面试官|虚拟助手|追问)(?:\s*[：:]\s*|\s+)/i, "")
     .replace(/<[^>]+>/g, "")
     .replace(/\s+/g, " ")
     .trim();

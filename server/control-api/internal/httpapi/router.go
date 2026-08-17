@@ -59,7 +59,7 @@ func NewRouter(dependencies Dependencies) http.Handler {
 	})
 
 	if dependencies.UserAdmin != nil {
-		adminUsers := newAdminUsersHandler(dependencies.UserAdmin, dependencies.PresenceAdmin)
+		adminUsers := newAdminUsersHandler(dependencies.UserAdmin, dependencies.PresenceAdmin, dependencies.SettingsAdmin)
 		r.Route("/api/v1/admin", func(r chi.Router) {
 			r.Use(noStore)
 			r.Use(authentication.loadSession)

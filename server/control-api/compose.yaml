@@ -42,11 +42,29 @@ services:
         condition: service_started
     restart: unless-stopped
 
-  embedding:
-    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9
-    command: ["--model-id", "BAAI/bge-m3"]
+  infinity-emb:
+    image: michaelf34/infinity:latest-cpu
+    command:
+      [
+        "v2",
+        "--model-id",
+        "/data/modelscope/models/BAAI--bge-m3/snapshots/master",
+        "--port",
+        "80",
+        "--engine",
+        "torch",
+      ]
     volumes:
       - embedding_model_cache:/data
+    mem_limit: 3g
+    restart: unless-stopped
+
+  embedding:
+    image: nginx:1.27-alpine
+    depends_on:
+      - infinity-emb
+    volumes:
+      - ../deploy/embedding-proxy/default.conf:/etc/nginx/conf.d/default.conf:ro
     restart: unless-stopped
 
   control-api-admin:

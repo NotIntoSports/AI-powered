@@ -27,6 +27,7 @@ type SettingsAdmin interface {
 	GetClientSpeech(ctx context.Context, userID string) (settings.ClientSpeech, error)
 	PutSpeech(ctx context.Context, actor users.User, requestID string, input settings.SpeechInput) (settings.PublicSpeech, error)
 	PutClientSpeechSpeakerID(ctx context.Context, userID, speakerID string) (settings.PublicSpeech, error)
+	ListUserSpeechVoices(ctx context.Context) (map[string]settings.UserSpeechVoice, error)
 	TestSpeech(ctx context.Context, actor users.User, requestID string, input *settings.SpeechInput) (settings.SpeechTestResult, error)
 	GetStorage(ctx context.Context) (settings.PublicStorage, error)
 	PutStorage(ctx context.Context, actor users.User, requestID string, input settings.StorageInput) (settings.PublicStorage, error)

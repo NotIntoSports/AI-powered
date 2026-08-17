@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { MAX_CLONE_AUDIO_BYTES } from "../../../lib/pcm-wav";
-import { getSpeechRuntimeConfig, saveSpeechSpeakerId } from "../../../lib/speech-runtime";
+import { getSpeechRuntimeConfig, saveSpeechSpeakerId, SpeechAccountBindError } from "../../../lib/speech-runtime";
 import { VOICE_CLONE_SCRIPT, DEFAULT_CUSTOM_SPEAKER_ID } from "../../../lib/voice-clone-script";
 import {
   buildVoiceCloneBody,
@@ -61,8 +61,7 @@ export async function POST(request: Request) {
         { status: 422 }
       );
     }
-    await saveSpeechSpeakerId(speakerId);
-    return NextResponse.json({ speakerId, cloned: false });
+    return bindSpeakerId(speakerId, false);
   }
 
   const audioBytes = Buffer.from(parsed.data.audioBase64, "base64");
@@ -106,11 +105,40 @@ export async function POST(request: Request) {
         { status: 502 }
       );
     }
-    await saveSpeechSpeakerId(speakerId);
-    return NextResponse.json({ speakerId, cloned: true });
+    return bindSpeakerId(speakerId, true);
   } catch {
     return NextResponse.json(
       { code: "VOICE_CLONE_FAILED", message: "声音刻录失败，请检查网络和语音配置" },
+      { status: 502 }
+    );
+  }
+}
+
+async function bindSpeakerId(speakerId: string, cloned: boolean) {
+  try {
+    await saveSpeechSpeakerId(speakerId);
+    return NextResponse.json({ speakerId, cloned, bound: true });
+  } catch (error) {
+    if (error instanceof SpeechAccountBindError) {
+      return NextResponse.json(
+        {
+          code: error.code,
+          message: error.message,
+          speakerId,
+          cloned,
+          bound: false
+        },
+        { status: 502 }
+      );
+    }
+    return NextResponse.json(
+      {
+        code: "VOICE_BIND_FAILED",
+        message: "账号音色同步失败，请确认已登录桌面账号",
+        speakerId,
+        cloned,
+        bound: false
+      },
       { status: 502 }
     );
   }

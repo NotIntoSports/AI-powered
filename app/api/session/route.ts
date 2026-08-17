@@ -29,6 +29,7 @@ const actionSchema = z.discriminatedUnion("action", [
     interviewFocus: z.string().trim().max(500).default(""),
     maxQuestions: z.number().int().min(2).max(20).default(6),
     consentConfirmed: z.literal(true),
+    resumeIds: z.array(z.string().trim().max(64)).max(20).optional().default([]),
     resumeId: z.string().trim().max(64).optional().default("")
   }),
   z.object({
@@ -61,11 +62,16 @@ function lastInterviewerText(transcript: { role: string; text: string }[]) {
   return "";
 }
 
-async function knowledgeContextFor(resumeId: string | undefined, transcript: { role: string; text: string }[], answer: string) {
-  if (!resumeId) {
+async function knowledgeContextFor(
+  resumeIds: string[] | undefined,
+  transcript: { role: string; text: string }[],
+  answer: string
+) {
+  const ids = Array.isArray(resumeIds) ? resumeIds.map((id) => id.trim()).filter(Boolean) : [];
+  if (ids.length === 0) {
     return "";
   }
-  return searchResumeKnowledge(resumeId, buildKnowledgeQuery(lastInterviewerText(transcript), answer));
+  return searchResumeKnowledge(ids, buildKnowledgeQuery(lastInterviewerText(transcript), answer));
 }
 
 function lastCandidateText(transcript: { role: string; text: string }[]) {
@@ -158,7 +164,7 @@ export async function POST(request: Request) {
         interviewFocus: session.interviewFocus,
         transcript: session.transcript.slice(0, -1),
         knowledgeContext: await knowledgeContextFor(
-          session.resumeId,
+          session.resumeIds,
           session.transcript.slice(0, -1),
           lastCandidateText(session.transcript.slice(0, -1))
         )
@@ -192,7 +198,7 @@ export async function POST(request: Request) {
         jobDescription: session.jobDescription,
         interviewFocus: session.interviewFocus,
         transcript: correctedTranscript,
-        knowledgeContext: await knowledgeContextFor(session.resumeId, correctedTranscript, parsed.data.answer)
+        knowledgeContext: await knowledgeContextFor(session.resumeIds, correctedTranscript, parsed.data.answer)
       });
       return NextResponse.json(await replaceLastExchange({
         answer: parsed.data.answer,
@@ -248,7 +254,7 @@ export async function POST(request: Request) {
       jobDescription: session.jobDescription,
       interviewFocus: session.interviewFocus,
       transcript: transcriptWithAnswer,
-      knowledgeContext: await knowledgeContextFor(session.resumeId, session.transcript, parsed.data.answer)
+      knowledgeContext: await knowledgeContextFor(session.resumeIds, session.transcript, parsed.data.answer)
     });
     return NextResponse.json(await appendAnswerAndQuestion({
       answer: parsed.data.answer,

@@ -8,7 +8,7 @@ import { OBSWebSocket } from "obs-websocket-js";
 
 const root = process.cwd();
 const executable = process.env.AI_INTERVIEWER_RUNTIME_EXECUTABLE
-  ?? path.join(root, "dist", "win-unpacked", "AI-Digital-Human.exe");
+  ?? path.join(root, "dist", "win-unpacked", "AI-Virtual-Assistant.exe");
 const runtimeRoot = process.env.AI_INTERVIEWER_RUNTIME_ROOT
   ?? path.join(root, "dist", "win-unpacked", "resources", ".desktop-runtime");
 const serverPath = path.join(runtimeRoot, "server.js");

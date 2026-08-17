@@ -36,8 +36,8 @@ export function ObsControl({ onStatusChange }: ObsControlProps) {
       setVirtualCameraActive(state.virtualCameraActive);
       setMessage(
         state.virtualCameraActive
-          ? "专用 OBS、数字人场景和虚拟摄像头已自动就绪。"
-          : "专用 OBS 与数字人场景已就绪，虚拟摄像头当前已停止。"
+          ? "专用 OBS、助手场景和虚拟摄像头已自动就绪。"
+          : "专用 OBS 与助手场景已就绪，虚拟摄像头当前已停止。"
       );
       return;
     }

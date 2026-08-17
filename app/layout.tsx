@@ -2,8 +2,8 @@ import type { ReactNode } from "react";
 import "./styles.css";
 
 export const metadata = {
-  title: "AI 数字人",
-  description: "本地 AI 数字人互动与演示工具"
+  title: "AI虚拟助手",
+  description: "本地 AI虚拟助手：可用于面试、会议主持与虚拟直播互动"
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

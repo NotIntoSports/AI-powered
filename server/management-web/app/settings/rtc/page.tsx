@@ -145,7 +145,7 @@ export default function RTCSettingsPage() {
               waitText="当前线路尚未就绪"
             />
           </div>
-          <p className="muted">火山云 RTC 与自建 LiveKit 配置同时保存。切换只改当前线路，一场面试中途不会热切。自建压力大时切回火山云。</p>
+          <p className="muted">火山云 RTC 与自建 LiveKit 配置同时保存。切换只改当前线路，一场互动中途不会热切。自建压力大时切回火山云。</p>
           <label>
             当前线路
             <select value={activeProvider} onChange={(event) => setActiveProvider(event.target.value as "volcengine" | "livekit")}>

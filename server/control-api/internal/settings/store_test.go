@@ -240,6 +240,38 @@ func TestPutSpeechKeepsExistingKeyWhenOmitted(t *testing.T) {
 	}
 }
 
+func TestListUserSpeechVoicesReturnsBoundAccounts(t *testing.T) {
+	pool := openSettingsTestPool(t)
+	store := NewStore(pool, mustBox(t))
+	ctx := context.Background()
+	actor := createSettingsUser(t, pool)
+	if _, err := store.PutSpeech(ctx, actor, SpeechInput{
+		AppID: "8358554445", APIKey: "speech-key", SpeakerID: "custom_zh_interviewer",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	operator, err := users.NewStore(pool).Create(ctx, users.CreateInput{
+		Username: "voice-operator", PasswordHash: "hash", Role: users.RoleOperator,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.PutUserSpeechSpeakerID(ctx, operator.ID, "S_operator01"); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := store.ListUserSpeechVoices(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	voice, ok := listed[operator.ID]
+	if !ok || voice.SpeakerID != "S_operator01" || voice.UpdatedAt.IsZero() {
+		t.Fatalf("listed=%#v", listed)
+	}
+	if _, ok := listed[actor.ID]; ok {
+		t.Fatalf("admin without personal voice should be absent: %#v", listed)
+	}
+}
+
 func mustBox(t *testing.T) *secretbox.Box {
 	t.Helper()
 	key, err := secretbox.ParseMasterKey(strings.Repeat("ab", 32))

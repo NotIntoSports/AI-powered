@@ -255,7 +255,7 @@ export default function SpeechSettingsPage() {
             />
           </summary>
           <div className="stack">
-      <p className="muted">录音和声音刻录在面试官本机完成。刻录结果绑定登录账号，该账号的合成播报使用自己的音色。管理网页不采集麦克风。</p>
+      <p className="muted">录音和声音刻录在助手本机完成。刻录结果绑定登录账号，该账号的合成播报使用自己的音色。管理网页不采集麦克风。</p>
             <SecretField
               label="API Key（新控制台优先）"
               configured={Boolean(config?.apiKeyConfigured)}

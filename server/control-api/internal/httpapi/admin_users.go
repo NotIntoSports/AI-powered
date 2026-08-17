@@ -8,6 +8,7 @@ import (
 	"github.com/ai-interviewer/ai-powered/control-api/internal/identity"
 	"github.com/ai-interviewer/ai-powered/control-api/internal/password"
 	"github.com/ai-interviewer/ai-powered/control-api/internal/presence"
+	"github.com/ai-interviewer/ai-powered/control-api/internal/settings"
 	"github.com/ai-interviewer/ai-powered/control-api/internal/users"
 	"github.com/go-chi/chi/v5"
 )
@@ -41,10 +42,11 @@ type revokeSessionsRequest struct {
 type adminUsersHandler struct {
 	admin    UserAdmin
 	presence PresenceAdmin
+	settings SettingsAdmin
 }
 
-func newAdminUsersHandler(admin UserAdmin, presence PresenceAdmin) *adminUsersHandler {
-	return &adminUsersHandler{admin: admin, presence: presence}
+func newAdminUsersHandler(admin UserAdmin, presence PresenceAdmin, settingsAdmin SettingsAdmin) *adminUsersHandler {
+	return &adminUsersHandler{admin: admin, presence: presence, settings: settingsAdmin}
 }
 
 func requireAdministrator(next http.Handler) http.Handler {
@@ -79,7 +81,15 @@ func (handler *adminUsersHandler) list(w http.ResponseWriter, request *http.Requ
 			return
 		}
 	}
-	writeJSON(w, http.StatusOK, mergeAdminUsers(listed, presenceByUser))
+	var voicesByUser map[string]settings.UserSpeechVoice
+	if handler.settings != nil {
+		voicesByUser, err = handler.settings.ListUserSpeechVoices(request.Context())
+		if err != nil {
+			writeAPIError(w, request, http.StatusInternalServerError, "INTERNAL_ERROR", "administrator service unavailable")
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, mergeAdminUsers(listed, presenceByUser, voicesByUser))
 }
 
 func (handler *adminUsersHandler) create(w http.ResponseWriter, request *http.Request) {

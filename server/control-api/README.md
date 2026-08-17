@@ -1,7 +1,7 @@
 # Control API
 
 Private Go management API for administrator accounts, revocable sessions, and
-audit events. It is separate from the Electron/Next.js interview client and
+audit events. It is separate from the Electron/Next.js **AI虚拟助手** client and
 **does not offer public registration**. Create the first administrator with the
 CLI; later operators are created only by an existing administrator.
 
@@ -31,7 +31,7 @@ argument, or environment variable.
 
 Resume indexing uses the `embedding` service (TEI `cpu-1.9` + `BAAI/bge-m3`) on
 the compose network only. It does not publish a host port. `control-api` starts
-even if the model weights are still downloading; interview follow-ups degrade to
+even if the model weights are still downloading; follow-up questions degrade to
 empty knowledge until the index is ready.
 
 Optional LiveKit line (default `activeProvider` stays `volcengine`):

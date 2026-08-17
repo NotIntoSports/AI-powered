@@ -1,9 +1,9 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-echo AI Interviewer first-time setup
+echo AI Virtual Assistant first-time setup
 echo.
-echo [M] Minimal: npm dependencies and OBS. Use manual candidate input.
+echo [M] Minimal: npm dependencies and OBS. Use manual reply input.
 echo [F] Full:    Minimal plus local whisper.cpp transcription.
 echo [L] Local:   Full plus Ollama and qwen3.5:4b (about 3.4GB model download).
 echo [Q] Quit without installing.

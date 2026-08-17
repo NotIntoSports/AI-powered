@@ -55,14 +55,17 @@ func (s *chunkStore) Delete(ctx context.Context, resumeID string) error {
 	return err
 }
 
-func (s *chunkStore) Search(ctx context.Context, resumeID string, embedding []float32, topK int) ([]knowledge.Chunk, error) {
+func (s *chunkStore) Search(ctx context.Context, resumeIDs []string, embedding []float32, topK int) ([]knowledge.Chunk, error) {
+	if len(resumeIDs) == 0 {
+		return []knowledge.Chunk{}, nil
+	}
 	rows, err := s.db.Query(ctx, `
 		select content, 1 - (embedding <=> $1) as score, candidate_name
 		from knowledge_chunks
-		where source_type = $2 and source_id = $3
+		where source_type = $2 and source_id = any($3)
 		order by embedding <=> $1
 		limit $4
-	`, pgvector.NewVector(embedding), sourceResume, resumeID, topK)
+	`, pgvector.NewVector(embedding), sourceResume, resumeIDs, topK)
 	if err != nil {
 		return nil, err
 	}

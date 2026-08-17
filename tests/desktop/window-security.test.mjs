@@ -10,7 +10,7 @@ test("Electron window uses hardened renderer settings", async () => {
   assert.match(source, /setWindowOpenHandler/);
   assert.match(source, /will-navigate/);
   assert.match(source, /requestSingleInstanceLock/);
-  assert.match(source, /app\.setName\(["']AI Digital Human["']\)/);
+  assert.match(source, /app\.setName\(["']AI Virtual Assistant["']\)/);
   assert.match(source, /window\.removeMenu\(\)/);
   assert.match(source, /titleBarStyle:\s*["']hidden["']/);
   assert.match(source, /titleBarOverlay:\s*\{/);
@@ -42,4 +42,5 @@ test("desktop workspace uses panel scrolling instead of page scrolling", async (
   assert.match(page, /className="workspaceTools"/);
   assert.match(styles, /\.workspacePage\s*\{[^}]*overflow:\s*hidden/s);
   assert.match(styles, /\.workspacePage \.transcript \.messages\s*\{[^}]*overflow-y:\s*auto/s);
+  assert.match(styles, /\.console\.workspacePage\s*\{[^}]*width:\s*min\(1800px/s);
 });

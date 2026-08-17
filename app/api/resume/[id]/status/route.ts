@@ -12,7 +12,7 @@ export async function GET(
   const { id } = await context.params;
   if (!resumeIdPattern.test(id)) {
     return NextResponse.json(
-      { code: "RESUME_NOT_FOUND", message: "简历不存在或已删除" },
+      { code: "RESUME_NOT_FOUND", message: "资料不存在或已删除" },
       { status: 404, headers: { "Cache-Control": "no-store" } }
     );
   }

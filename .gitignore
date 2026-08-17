@@ -26,5 +26,6 @@ native/**/obj/
 native/**/publish/
 .desktop-runtime/
 .worktrees/
+.idea/
 resources/prerequisites/*
 !resources/prerequisites/.gitkeep

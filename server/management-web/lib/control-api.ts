@@ -12,6 +12,9 @@ export type PublicUser = {
   online?: boolean;
   lastSeenAt?: string;
   activeSessionCount?: number;
+  voiceBound?: boolean;
+  speakerId?: string;
+  voiceBoundAt?: string;
 };
 
 export type SessionLine = {
@@ -198,7 +201,10 @@ export function publicUserFromUnknown(payload: unknown): PublicUser | null {
     lastLoginAt: typeof record.lastLoginAt === "string" ? record.lastLoginAt : undefined,
     online: record.online === true,
     lastSeenAt: typeof record.lastSeenAt === "string" ? record.lastSeenAt : undefined,
-    activeSessionCount: typeof record.activeSessionCount === "number" ? record.activeSessionCount : 0
+    activeSessionCount: typeof record.activeSessionCount === "number" ? record.activeSessionCount : 0,
+    voiceBound: record.voiceBound === true,
+    speakerId: typeof record.speakerId === "string" && record.speakerId ? record.speakerId : undefined,
+    voiceBoundAt: typeof record.voiceBoundAt === "string" ? record.voiceBoundAt : undefined
   };
 }
 
@@ -214,7 +220,7 @@ export function displayError(error: APIError): string {
     case "CANNOT_DISABLE_SELF":
       return "不能禁用当前登录的管理员";
     case "RESUME_NOT_FOUND":
-      return "简历不存在或已删除";
+      return "资料不存在或已删除";
     default:
       return error.message;
   }

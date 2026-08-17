@@ -9,5 +9,16 @@ for (const id of ["speechReady", "obsConnected", "virtualCameraActive", "virtual
 assert.equal(Object.values(getSnapshotReadiness(snapshot, now + 1)).every(Boolean), true);
 assert.equal(Object.values(getSnapshotReadiness(snapshot, now + READINESS_VERIFICATION_TTL_MS)).some(Boolean), false);
 snapshot = updateReadinessSnapshot(snapshot, "virtualCameraActive", false, now + 2);
-assert.equal(snapshot.virtualCameraVerified, undefined); assert.equal(snapshot.virtualAudioReady, undefined); assert.equal(snapshot.meetingPreviewConfirmed, undefined);
+assert.equal(snapshot.virtualCameraVerified, undefined);
+assert.equal(typeof snapshot.virtualAudioReady, "number");
+// Real-camera path: virtual audio readiness is independent of OBS virtual camera.
+assert.equal(typeof snapshot.meetingPreviewConfirmed, "number");
+snapshot = updateReadinessSnapshot(snapshot, "virtualCameraActive", true, now + 3);
+snapshot = updateReadinessSnapshot(snapshot, "virtualCameraVerified", false, now + 4);
+assert.equal(snapshot.meetingPreviewConfirmed, undefined);
+snapshot = updateReadinessSnapshot(snapshot, "virtualCameraVerified", true, now + 5);
+snapshot = updateReadinessSnapshot(snapshot, "meetingPreviewConfirmed", true, now + 5);
+snapshot = updateReadinessSnapshot(snapshot, "virtualAudioReady", false, now + 6);
+assert.equal(snapshot.virtualAudioReady, undefined);
+assert.equal(snapshot.meetingPreviewConfirmed, undefined);
 process.stdout.write("readiness snapshot test passed\n");

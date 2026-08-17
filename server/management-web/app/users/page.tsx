@@ -166,6 +166,9 @@ export default function UsersPage() {
               <th>角色</th>
               <th>状态</th>
               <th>在线</th>
+              <th>语音绑定</th>
+              <th>音色 ID</th>
+              <th>绑定时间</th>
               <th>最后登录</th>
               <th>操作</th>
             </tr>
@@ -177,6 +180,9 @@ export default function UsersPage() {
                 <td>{user.role === "admin" ? "管理员" : "客户端"}</td>
                 <td>{user.status === "active" ? "启用" : user.status === "disabled" ? "停用" : user.status}</td>
                 <td><OnlineMark online={Boolean(user.online)} /></td>
+                <td>{user.voiceBound ? "已绑定" : "未绑定"}</td>
+                <td>{user.speakerId || "—"}</td>
+                <td>{formatTime(user.voiceBoundAt)}</td>
                 <td>{formatTime(user.lastLoginAt)}</td>
                 <td className="row">
                   {user.status === "active" ? (

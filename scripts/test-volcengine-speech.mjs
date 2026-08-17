@@ -23,7 +23,7 @@ const speech = await import(pathToFileURL(path.join(dir, "volcengine-speech.mjs"
 const wav = await import(pathToFileURL(path.join(dir, "pcm-wav.mjs")).href);
 const script = await import(pathToFileURL(path.join(dir, "voice-clone-script.mjs")).href);
 
-assert.match(script.VOICE_CLONE_SCRIPT, /你好，我是今天的面试官/);
+assert.match(script.VOICE_CLONE_SCRIPT, /你好，我是今天的虚拟助手/);
 assert.equal(script.DEFAULT_CUSTOM_SPEAKER_ID, "custom_zh_interviewer");
 
 const apiHeaders = speech.volcengineSpeechHeaders({ apiKey: "volc-secret-key" }, "seed-icl-2.0", "req-1");

@@ -162,14 +162,22 @@ func (s *Service) Search(ctx context.Context, actor users.User, in SearchInput) 
 	if err != nil {
 		return EmptyResult()
 	}
-	record, err := s.resumes.GetAccessible(ctx, actor, normalized.ResumeID)
-	if err != nil || record.IndexStatus != string(StatusReady) {
+	readyIDs := make([]string, 0, len(normalized.ResumeIDs))
+	for _, resumeID := range normalized.ResumeIDs {
+		record, err := s.resumes.GetAccessible(ctx, actor, resumeID)
+		if err != nil || record.IndexStatus != string(StatusReady) {
+			continue
+		}
+		readyIDs = append(readyIDs, resumeID)
+	}
+	if len(readyIDs) == 0 {
 		return EmptyResult()
 	}
-	normalized.ExternalDocID = record.ExternalDocID
+	normalized.ResumeIDs = readyIDs
+	normalized.ResumeID = readyIDs[0]
 	result, err := s.provider.Search(ctx, normalized)
 	if err != nil {
-		log.Printf("knowledge search failed resume=%s: %v", normalized.ResumeID, err)
+		log.Printf("knowledge search failed resumes=%v: %v", readyIDs, err)
 		return EmptyResult()
 	}
 	if result.Chunks == nil {

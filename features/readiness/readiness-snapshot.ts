@@ -27,9 +27,11 @@ export function getSnapshotReadiness(snapshot: ReadinessSnapshot, now = Date.now
 export function updateReadinessSnapshot(snapshot: ReadinessSnapshot, id: ReadinessVerificationId, ready: boolean, now = Date.now()): ReadinessSnapshot {
   const next = { ...snapshot };
   if (ready) next[id] = now; else delete next[id];
-  if (!next.virtualCameraActive) {
-    delete next.virtualCameraVerified; delete next.virtualAudioReady; delete next.meetingPreviewConfirmed;
-  } else if (!next.virtualCameraVerified || !next.virtualAudioReady) delete next.meetingPreviewConfirmed;
+  // Camera preview is tied to OBS virtual camera; virtual audio can be used with a real camera.
+  if (!next.virtualCameraActive) delete next.virtualCameraVerified;
+  if (!next.virtualAudioReady || (next.virtualCameraActive && !next.virtualCameraVerified)) {
+    delete next.meetingPreviewConfirmed;
+  }
   return next;
 }
 

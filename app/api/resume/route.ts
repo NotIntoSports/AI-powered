@@ -12,7 +12,7 @@ export async function POST(request: Request) {
   const token = (await cookies()).get("control_api_token")?.value;
   if (!token) {
     return NextResponse.json(
-      { code: "UNAUTHENTICATED", message: "请先在客户端登录后再管理简历" },
+      { code: "UNAUTHENTICATED", message: "请先在客户端登录后再管理资料" },
       { status: 401, headers: { "Cache-Control": "no-store" } }
     );
   }
@@ -20,7 +20,7 @@ export async function POST(request: Request) {
   const file = incoming.get("file");
   if (!(file instanceof File)) {
     return NextResponse.json(
-      { code: "INVALID_INPUT", message: "请选择 PDF 或 Word 简历" },
+      { code: "INVALID_INPUT", message: "请选择 PDF 或 Word 资料" },
       { status: 422 }
     );
   }

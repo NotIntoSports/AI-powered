@@ -79,7 +79,7 @@ if (-not $SkipObs) {
     if ($obsPath -and $obsProcesses.Count -gt 0) {
         Write-Host 'OBS is already running.' -ForegroundColor Yellow
         Write-Host 'Stop any recording or live stream before continuing.' -ForegroundColor Yellow
-        $answer = Read-Host 'Allow AI Interviewer to close OBS normally and restart it for automatic connection? [Y/N]'
+        $answer = Read-Host 'Allow AI Virtual Assistant to close OBS normally and restart it for automatic connection? [Y/N]'
         if ($answer -match '^(?i:y|yes)$') {
             foreach ($process in $obsProcesses) { [void]$process.CloseMainWindow() }
             $deadline = [DateTime]::UtcNow.AddSeconds(20)
@@ -170,5 +170,5 @@ if (-not (Test-AppReady $Port)) {
 
 $url = "http://127.0.0.1:$Port"
 if (-not $NoBrowser) { Start-Process $url }
-Write-Host "AI Interviewer is ready: $url" -ForegroundColor Green
+Write-Host "AI Virtual Assistant is ready: $url" -ForegroundColor Green
 Write-Host "Logs: $logsRoot"

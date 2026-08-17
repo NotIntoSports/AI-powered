@@ -12,17 +12,30 @@ export function buildKnowledgeQuery(lastQuestion: string, answer: string) {
   return Array.from(combined).slice(0, maxQueryRunes).join("");
 }
 
-export async function searchResumeKnowledge(resumeId: string, query: string) {
-  const id = resumeId.trim();
+function normalizeResumeIds(resumeIds: string | string[] | undefined) {
+  if (Array.isArray(resumeIds)) {
+    return [...new Set(resumeIds.map((id) => id.trim()).filter(Boolean))];
+  }
+  const single = typeof resumeIds === "string" ? resumeIds.trim() : "";
+  return single ? [single] : [];
+}
+
+export async function searchResumeKnowledge(resumeIds: string | string[], query: string) {
+  const ids = normalizeResumeIds(resumeIds);
   const text = query.trim();
-  if (!id || !text) {
+  if (ids.length === 0 || !text) {
     return "";
   }
   try {
     const response = await fetch("/api/knowledge/search", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query: text, resumeId: id, topK: 5 }),
+      body: JSON.stringify({
+        query: text,
+        resumeIds: ids,
+        resumeId: ids[0],
+        topK: 5
+      }),
       cache: "no-store"
     });
     if (!response.ok) {

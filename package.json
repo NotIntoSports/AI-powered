@@ -1,8 +1,8 @@
 {
   "name": "authorized-interview-screen-helper",
   "version": "0.1.0",
-  "description": "Windows desktop client for local AI digital human interactions",
-  "author": "AI Digital Human contributors",
+  "description": "Windows desktop client for local AI Virtual Assistant interactions",
+  "author": "AI Virtual Assistant contributors",
   "private": true,
   "main": "dist-desktop/main.js",
   "scripts": {

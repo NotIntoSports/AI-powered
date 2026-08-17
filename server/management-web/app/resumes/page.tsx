@@ -19,7 +19,7 @@ export default function ResumesPage() {
   async function load() {
     const result = await requestJSON("/api/v1/admin/resumes");
     if (!result.response.ok) {
-      setError(displayError(parseAPIError(result.body, "无法加载简历")));
+      setError(displayError(parseAPIError(result.body, "无法加载资料")));
       return;
     }
     setItems(Array.isArray(result.body) ? (result.body as ResumeRecord[]) : []);
@@ -41,12 +41,12 @@ export default function ResumesPage() {
   }
 
   async function remove(id: string) {
-    if (!window.confirm("确定删除这份简历？删除后客户端可以重新上传。")) {
+    if (!window.confirm("确定删除这份资料？删除后客户端可以重新上传。")) {
       return;
     }
     const result = await requestJSON(`/api/v1/admin/resumes/${encodeURIComponent(id)}`, { method: "DELETE" });
     if (!result.response.ok) {
-      setError(displayError(parseAPIError(result.body, "无法删除简历")));
+      setError(displayError(parseAPIError(result.body, "无法删除资料")));
       return;
     }
     setError("");
@@ -77,15 +77,15 @@ export default function ResumesPage() {
     <ConsoleShell me={me}>
       {error ? <p className="error">{error}</p> : null}
       <section className="card">
-        <h2>简历</h2>
-        <p className="muted">上传在 Windows 客户端完成。管理员可以查看、下载和删除；对象存储密钥不会下发到客户端。</p>
+        <h2>资料</h2>
+        <p className="muted">上传在 Windows 客户端（参考资料）完成，可多文件或文件夹。管理员可以查看、下载、重新索引和删除；对象存储密钥不会下发到客户端。</p>
       </section>
       <section className="card">
         <h2>已上传</h2>
         <table>
           <thead>
             <tr>
-              <th>候选人</th>
+              <th>对象</th>
               <th>文件</th>
               <th>大小</th>
               <th>上传者</th>
@@ -96,7 +96,7 @@ export default function ResumesPage() {
           </thead>
           <tbody>
             {items.length === 0 ? (
-              <tr><td colSpan={7} className="muted">还没有简历</td></tr>
+              <tr><td colSpan={7} className="muted">还没有资料</td></tr>
             ) : items.map((item) => (
               <tr key={item.id}>
                 <td>{item.candidateName || "—"}</td>
@@ -104,7 +104,10 @@ export default function ResumesPage() {
                 <td>{Math.max(1, Math.round(item.sizeBytes / 1024))} KB</td>
                 <td>{item.uploadedByUsername || "—"}</td>
                 <td>{formatTime(item.createdAt)}</td>
-                <td>{indexLabel[item.indexStatus || ""] || item.indexStatus || "—"}</td>
+                <td>
+                  {indexLabel[item.indexStatus || ""] || item.indexStatus || "—"}
+                  {item.indexError ? <div className="muted">{item.indexError}</div> : null}
+                </td>
                 <td>
                   <div className="tableActions">
                     <button className="secondary" type="button" onClick={() => void download(item.id)}>查看</button>

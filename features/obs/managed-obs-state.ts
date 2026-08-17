@@ -67,7 +67,7 @@ const managedObsErrorMessages: Record<string, string> = {
   OBS_PORT_NOT_READY: "专用 OBS 未在 30 秒内开放控制端口。请重置配置后重试。",
   OBS_AUTH_FAILED: "客户端无法通过 OBS 安全认证。请重置专用配置后重试。",
   OBS_CONNECTION_LOST: "与专用 OBS 的安全连接已断开，请重新自动连接。",
-  OBS_SCENE_CONFIG_FAILED: "数字人场景配置失败。请重置专用配置后重试。",
+  OBS_SCENE_CONFIG_FAILED: "助手场景配置失败。请重置专用配置后重试。",
   OBS_INTERVENTION_ROUTING_FAILED: "人工麦克风与 AI 音频切换失败。请重置专用 OBS 配置后重试。",
   OBS_VIRTUAL_CAMERA_NOT_REGISTERED: "OBS 虚拟摄像头尚未注册，请先完成管理员授权。",
   OBS_VIRTUAL_CAMERA_FAILED: "OBS 已连接，但虚拟摄像头无法启动。请先重新注册组件。",

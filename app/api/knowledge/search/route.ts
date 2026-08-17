@@ -13,7 +13,7 @@ export async function POST(request: Request) {
   const token = (await cookies()).get(TOKEN_COOKIE)?.value;
   if (!token) {
     return NextResponse.json(
-      { code: "UNAUTHENTICATED", message: "请先在客户端登录后再检索简历" },
+      { code: "UNAUTHENTICATED", message: "请先在客户端登录后再检索资料" },
       { status: 401, headers: { "Cache-Control": "no-store" } }
     );
   }

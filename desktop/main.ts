@@ -2,17 +2,22 @@ import path from "node:path";
 import { app, BrowserWindow, dialog, ipcMain, safeStorage, session } from "electron";
 
 import { registerDesktopIpc } from "./ipc";
+import { applyLocalEnvFile, resolveDesktopEnvFiles } from "./load-env";
 import { ManagedObsController } from "./managed-obs";
 import { ManagedObsSecretStore } from "./obs-secret-store";
 import { getPrerequisiteStatus } from "./prerequisites/windows-install";
 import { LocalServerStartError, startLocalServer, stopOwnedProcess } from "./server-process";
 import type { DesktopStatus, OwnedProcess } from "./types";
 
+for (const envFile of resolveDesktopEnvFiles(process.cwd())) {
+  applyLocalEnvFile(envFile);
+}
+
 let server: (OwnedProcess & { baseUrl: string }) | null = null;
 let obsManager: ManagedObsController | null = null;
 let mainWindow: BrowserWindow | null = null;
 
-app.setName("AI Digital Human");
+app.setName("AI Virtual Assistant");
 
 function isAllowedLocalUrl(value: string, baseUrl: string): boolean {
   try {
@@ -126,7 +131,7 @@ if (!hasLock) {
     const message = error instanceof LocalServerStartError
       ? `${error.message}\n\n启动日志：${error.logPath}`
       : error instanceof Error ? error.message : String(error);
-    dialog.showErrorBox("AI 数字人启动失败", message);
+    dialog.showErrorBox("AI虚拟助手启动失败", message);
     app.quit();
   });
 }

@@ -14,14 +14,18 @@ export default function LoginPage() {
 
   useEffect(() => {
     let active = true;
-    void readControlSession().then((session) => {
-      if (!active) return;
-      if (session.connected) {
-        router.replace("/");
-        return;
-      }
-      setChecking(false);
-    });
+    void readControlSession()
+      .then((session) => {
+        if (!active) return;
+        if (session.connected) {
+          router.replace("/");
+          return;
+        }
+        setChecking(false);
+      })
+      .catch(() => {
+        if (active) setChecking(false);
+      });
     return () => {
       active = false;
     };
@@ -86,7 +90,7 @@ export default function LoginPage() {
             {busy ? "登录中…" : "连接管理端"}
           </button>
         </form>
-        <a className="textLink" href="/">返回数字人工作台</a>
+        <a className="textLink" href="/">返回虚拟助手工作台</a>
       </section>
     </main>
   );

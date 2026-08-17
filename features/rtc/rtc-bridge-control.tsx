@@ -4,6 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import VERTC from "@volcengine/rtc";
 import { createSubtitleTransport } from "../../desktop/rtc/create-transport.ts";
 import {
+  loadRemoteMonitorEnabled,
+  subscribeRemoteMonitor
+} from "../audio/remote-monitor.ts";
+import {
   describeNetwork,
   getNetworkQuality,
   setRtcNetwork,
@@ -33,9 +37,12 @@ type RtcTokenResponse = {
 
 declare global { interface Window { aiInterviewerDesktop?: DesktopBridge } }
 
-function createPcmTrack() {
+function createPcmTrack(monitorEnabled: boolean) {
   const context = new AudioContext({ sampleRate: 48_000 });
   const destination = context.createMediaStreamDestination();
+  const monitorGain = context.createGain();
+  monitorGain.gain.value = monitorEnabled ? 1 : 0;
+  monitorGain.connect(context.destination);
   let nextStart = context.currentTime;
   const push = (bytes: Uint8Array) => {
     const sampleCount = Math.floor(bytes.byteLength / 2);
@@ -47,11 +54,19 @@ function createPcmTrack() {
     const source = context.createBufferSource();
     source.buffer = buffer;
     source.connect(destination);
+    source.connect(monitorGain);
     nextStart = Math.max(nextStart, context.currentTime + 0.02);
     source.start(nextStart);
     nextStart += buffer.duration;
   };
-  return { context, track: destination.stream.getAudioTracks()[0], push };
+  return {
+    context,
+    track: destination.stream.getAudioTracks()[0],
+    push,
+    setMonitorEnabled(enabled: boolean) {
+      monitorGain.gain.value = enabled ? 1 : 0;
+    }
+  };
 }
 
 function providerLabel(provider: SubtitleProvider) {
@@ -67,8 +82,15 @@ export function RtcBridgeControl() {
   const [network, setNetwork] = useState(getNetworkQuality);
   const cleanupRef = useRef<null | (() => Promise<void>)>(null);
   const transportRef = useRef<SubtitleTransport | null>(null);
+  const monitorRef = useRef<null | ((enabled: boolean) => void)>(null);
 
   useEffect(() => subscribeNetworkQuality(() => setNetwork(getNetworkQuality())), []);
+
+  useEffect(() => {
+    const apply = () => monitorRef.current?.(loadRemoteMonitorEnabled());
+    apply();
+    return subscribeRemoteMonitor(apply);
+  }, []);
 
   async function refresh() {
     const bridge = window.aiInterviewerDesktop;
@@ -97,7 +119,8 @@ export function RtcBridgeControl() {
     const activeProvider: SubtitleProvider = token.provider === "livekit" ? "livekit" : "volcengine";
     const language = token.language || "zh";
     const roomId = token.roomId || sessionId;
-    const pcm = createPcmTrack();
+    const pcm = createPcmTrack(loadRemoteMonitorEnabled());
+    monitorRef.current = pcm.setMonitorEnabled;
     subtitleSink.reset();
     let engine: ReturnType<typeof VERTC.createEngine> | undefined;
     let transport: SubtitleTransport;
@@ -122,7 +145,7 @@ export function RtcBridgeControl() {
     const removePcm = bridge.onAudioPcm(pcm.push);
     const removeEvent = bridge.onAudioEvent((event) => {
       const value = event as { type?: string; peak?: number; message?: string };
-      if (value.type === "level") setStatus(`${providerLabel(activeProvider)} 运行中 · 候选人音量 ${Math.round((value.peak || 0) * 100)}%`);
+      if (value.type === "level") setStatus(`${providerLabel(activeProvider)} 运行中 · 对方音量 ${Math.round((value.peak || 0) * 100)}%`);
       if (value.type === "process-exited") void stop();
       if (value.type === "error") setStatus(value.message || "音频捕获失败");
     });
@@ -130,6 +153,7 @@ export function RtcBridgeControl() {
     cleanupRef.current = async () => {
       removePcm();
       removeEvent();
+      monitorRef.current = null;
       transportRef.current = null;
       setRtcNetwork({ connected: false });
       await bridge.stopAudioCapture().catch(() => undefined);
@@ -141,7 +165,11 @@ export function RtcBridgeControl() {
     };
     setProvider(activeProvider);
     setRunning(true);
-    setStatus(`${providerLabel(activeProvider)} 运行中；监听声音仍由会议软件直接播放。`);
+    setStatus(
+      loadRemoteMonitorEnabled()
+        ? `${providerLabel(activeProvider)} 运行中；本机正在播放对方声音（可在「监听与人工介入」关闭）。`
+        : `${providerLabel(activeProvider)} 运行中；本机未播放对方声音，请用会议软件收听。`
+    );
   }
 
   useEffect(() => {
@@ -176,7 +204,7 @@ export function RtcBridgeControl() {
   }
 
   return (
-    <article className="card">
+    <article className="card" id="settings-rtc-bridge">
       <div className="cardHeading"><h2>会议音频桥接</h2><span className={running ? "ready" : ""}>{running ? `${providerLabel(provider)} 运行中` : "未启动"}</span></div>
       <label>会议软件进程
         <select value={pid} disabled={running} onChange={(event) => setPid(Number(event.target.value))}>
@@ -191,7 +219,7 @@ export function RtcBridgeControl() {
       </div>
       <p>{status}</p>
       <p className="networkMeter">{describeNetwork(network)}</p>
-      <p className="muted">只捕获所选会议进程及其子进程；PCM 不落盘。线路由管理端 current provider 决定，一场面试中途不切换。若会议软件重启，请重新选择进程。</p>
+      <p className="muted">只捕获所选会议进程及其子进程；PCM 不落盘。线路由管理端 current provider 决定，一场互动中途不切换。若会议软件重启，请重新选择进程。对方声音是否本机播放由工作台「本机听到对方说话」开关控制（默认开启）。</p>
     </article>
   );
 }

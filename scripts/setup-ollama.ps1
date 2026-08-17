@@ -109,5 +109,5 @@ Move-Item -LiteralPath $temporaryPath -Destination $settingsPath -Force
 
 Write-Host ''
 Write-Host "Ollama model is ready: $Model" -ForegroundColor Green
-Write-Host 'The AI Interviewer is configured for http://127.0.0.1:11434/v1'
+Write-Host 'The AI Virtual Assistant is configured for http://127.0.0.1:11434/v1'
 Write-Host 'Run npm run start:windows, then click “测试模型连接”.'

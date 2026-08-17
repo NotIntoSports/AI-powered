@@ -41,7 +41,7 @@ test("error parser uses server message and ignores password-shaped fields", asyn
   assert.equal(error.requestId, "req-1");
   assert.equal(api.displayError(error), "登录失败");
   assert.equal(api.displayError(error).includes("should-not-display"), false);
-  assert.equal(api.displayError({ code: "RESUME_NOT_FOUND", message: "resume not found" }), "简历不存在或已删除");
+  assert.equal(api.displayError({ code: "RESUME_NOT_FOUND", message: "resume not found" }), "资料不存在或已删除");
 });
 
 test("public user parser keeps online presence fields", async () => {
@@ -60,6 +60,36 @@ test("public user parser keeps online presence fields", async () => {
   assert.equal(user.online, true);
   assert.equal(user.activeSessionCount, 2);
   assert.equal(user.lastSeenAt, "2026-08-16T00:01:00Z");
+  assert.equal(user.voiceBound, false);
+  assert.equal(user.speakerId, undefined);
+});
+
+test("public user parser keeps voice binding fields", async () => {
+  const api = await loadControlApi();
+  const user = api.publicUserFromUnknown({
+    id: "u2",
+    username: "operator",
+    role: "operator",
+    status: "active",
+    createdAt: "2026-08-17T00:00:00Z",
+    updatedAt: "2026-08-17T00:00:00Z",
+    voiceBound: true,
+    speakerId: "S_bound12345",
+    voiceBoundAt: "2026-08-17T12:00:00Z"
+  });
+  assert.equal(user.voiceBound, true);
+  assert.equal(user.speakerId, "S_bound12345");
+  assert.equal(user.voiceBoundAt, "2026-08-17T12:00:00Z");
+});
+
+test("users page shows voice binding columns", () => {
+  const page = readFileSync(join(root, "..", "app", "users", "page.tsx"), "utf8");
+  assert.match(page, /语音绑定/);
+  assert.match(page, /音色 ID/);
+  assert.match(page, /绑定时间/);
+  assert.match(page, /user\.voiceBound/);
+  assert.match(page, /user\.speakerId/);
+  assert.match(page, /user\.voiceBoundAt/);
 });
 
 test("login page has no registration or password-recovery entry", () => {
@@ -77,4 +107,7 @@ test("resume admin page can view, reindex, and delete uploaded files", () => {
   assert.match(page, />查看</);
   assert.match(page, />重新索引</);
   assert.match(page, />删除</);
+  assert.match(page, /<h2>资料<\/h2>/);
+  assert.match(page, /还没有资料/);
+  assert.doesNotMatch(page, /简历/);
 });

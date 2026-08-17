@@ -10,14 +10,17 @@ import {
 } from "../features/audio/echo-guard";
 import { canAutoSubmitTranscription } from "../features/audio/transcription-turn";
 import type { MicVAD } from "@ricky0123/vad-web/dist/real-time-vad";
+import {
+  loadRemoteMonitorEnabled,
+  subscribeRemoteMonitor
+} from "../features/audio/remote-monitor";
 import { InterventionControls } from "../features/intervention/intervention-controls";
 import { LiveSubtitles } from "../features/subtitles/live-subtitles";
-import { RtcBridgeControl } from "../features/rtc/rtc-bridge-control";
 import { getInterviewReadiness } from "../features/readiness/interview-readiness";
 import { getSnapshotReadiness, invalidateDeviceReadiness, loadReadinessSnapshot } from "../features/readiness/readiness-snapshot";
 import { loadOutputMode, subscribeOutputMode, type OutputMode } from "../features/readiness/output-mode";
-import { AppNavigation } from "../features/settings/app-navigation";
-import { ResumeUpload } from "../features/resume/resume-upload";
+import { AppChrome } from "../features/settings/app-chrome";
+import { IntegrationAlerts } from "../features/meeting/integration-alerts";
 import { setManagementNetwork } from "../features/rtc/network-quality";
 
 type Diagnostics = {
@@ -53,6 +56,7 @@ const emptySession: InterviewSession = {
   finishedAt: null,
   transcript: [],
   report: null,
+  resumeIds: [],
   resumeId: ""
 };
 
@@ -74,7 +78,7 @@ export default function ConsolePage() {
   const [interviewFocus, setInterviewFocus] = useState("");
   const [maxQuestions, setMaxQuestions] = useState(6);
   const [consentConfirmed, setConsentConfirmed] = useState(false);
-  const [resumeId, setResumeId] = useState("");
+  const [resumeIds, setResumeIds] = useState<string[]>([]);
   const [answer, setAnswer] = useState("");
   const [manualText, setManualText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -96,6 +100,7 @@ export default function ConsolePage() {
   });
   const captureActiveRef = useRef(false);
   const captureStreamRef = useRef<MediaStream | null>(null);
+  const monitorAudioRef = useRef<HTMLAudioElement | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const vadRef = useRef<MicVAD | null>(null);
   const vadSpeechRevisionRef = useRef(0);
@@ -115,6 +120,7 @@ export default function ConsolePage() {
   const [candidateSpeaking, setCandidateSpeaking] = useState(false);
   const [error, setError] = useState("");
   const [outputMode, setOutputMode] = useState<OutputMode>("real");
+  const [uploadOpen, setUploadOpen] = useState(false);
   const [snapshotReadiness, setSnapshotReadiness] = useState(() => getSnapshotReadiness({}));
   const readiness = getInterviewReadiness({
     outputMode,
@@ -154,6 +160,41 @@ export default function ConsolePage() {
   useEffect(() => {
     stageConnectedRef.current = diagnostics.stageConnected;
   }, [diagnostics.stageConnected]);
+
+  useEffect(() => {
+    function applyMonitor() {
+      const audio = monitorAudioRef.current;
+      if (!audio) return;
+      audio.muted = !loadRemoteMonitorEnabled();
+      if (!audio.muted && audio.paused) {
+        void audio.play().catch(() => undefined);
+      }
+    }
+    applyMonitor();
+    return subscribeRemoteMonitor(applyMonitor);
+  }, []);
+
+  function attachRemoteMonitor(stream: MediaStream) {
+    stopRemoteMonitor();
+    const audioTracks = stream.getAudioTracks();
+    if (!audioTracks.length) return;
+    const audio = new Audio();
+    audio.srcObject = new MediaStream(audioTracks);
+    audio.autoplay = true;
+    audio.muted = !loadRemoteMonitorEnabled();
+    monitorAudioRef.current = audio;
+    if (!audio.muted) {
+      void audio.play().catch(() => undefined);
+    }
+  }
+
+  function stopRemoteMonitor() {
+    const audio = monitorAudioRef.current;
+    monitorAudioRef.current = null;
+    if (!audio) return;
+    audio.pause();
+    audio.srcObject = null;
+  }
 
   function queueVadCommand(command: "pause" | "start") {
     const vad = vadRef.current;
@@ -347,6 +388,7 @@ export default function ConsolePage() {
       captureActiveRef.current = true;
       setCapturingAudio(true);
       setAudioSource(audioTrack.label || "系统音频");
+      attachRemoteMonitor(stream);
       stream.getVideoTracks()[0]?.addEventListener("ended", stopAudioCapture, { once: true });
       if (automaticFollowup) {
         await startVoiceActivityDetection(stream);
@@ -521,6 +563,7 @@ export default function ConsolePage() {
     echoGuardRef.current = idleEchoGuard;
     setEchoGuardActive(false);
     if (vad) void vad.destroy();
+    stopRemoteMonitor();
     captureStreamRef.current?.getTracks().forEach((track) => track.stop());
     captureStreamRef.current = null;
     setCapturingAudio(false);
@@ -531,16 +574,25 @@ export default function ConsolePage() {
 
   return (
     <main className="console workspacePage">
+      <AppChrome
+        current="workspace"
+        upload={{
+          candidateName,
+          selectedIds: resumeIds,
+          onChangeSelection: setResumeIds,
+          open: uploadOpen,
+          onOpenChange: setUploadOpen
+        }}
+      />
       <header className="topbar">
         <div>
           <p className="eyebrow">LIVE INTERACTION</p>
-          <h1>数字人工作台</h1>
+          <h1>虚拟助手工作台</h1>
         </div>
-        <AppNavigation current="workspace" />
       </header>
 
       {error && <p className="error" role="alert">{error}</p>}
-      <section className={`readinessBanner ${readiness.ready ? "ready" : ""}`} aria-live="polite"><div><strong>{readiness.ready ? (outputMode === "virtual" ? "数字人环境已就绪" : "助手环境已就绪") : `开始前还需完成 ${readiness.missing.length} 项设置`}</strong><span>{readiness.ready ? (outputMode === "virtual" ? "声音、虚拟摄像头和 AI 检查均已通过。" : "AI 已配置。会议软件请使用你自己的摄像头，本软件提供字幕和追问。") : readiness.missing.slice(0, 3).map((item) => item.label).join("、")}</span></div>{!readiness.ready && <a className="buttonLink" href="/settings">前往设置完成检测</a>}</section>
+      <IntegrationAlerts missing={readiness.missing} />
 
       <section className="consoleGrid">
         <article className="card setup">
@@ -549,15 +601,17 @@ export default function ConsolePage() {
             <span className={`pill ${session.status}`}>{session.status}</span>
           </div>
           <label>互动对象<input value={candidateName} onChange={(e) => setCandidateName(e.target.value)} placeholder="例如：张同学" /></label>
-          <ResumeUpload candidateName={candidateName} selectedId={resumeId} onSelect={setResumeId} />
+          {resumeIds.length > 0 ? (
+            <p className="muted resumeHint">本场已选 {resumeIds.length} 份参考资料（右上角可调整）。</p>
+          ) : null}
           <label>对话主题<input value={roleName} onChange={(e) => setRoleName(e.target.value)} placeholder="例如：项目交流" /></label>
           <label>
-            背景资料
+            补充说明
             <textarea
               className="compactTextarea"
               value={jobDescription}
               onChange={(e) => setJobDescription(e.target.value)}
-              placeholder="粘贴相关资料，AI 会据此继续对话"
+              placeholder="粘贴相关说明，AI 会据此继续对话"
             />
           </label>
           <label>
@@ -586,12 +640,12 @@ export default function ConsolePage() {
             />
             <span>我已向对方说明本次互动由 AI 协助、会保存记录，并提供人工复核渠道。</span>
           </label>
-          {readiness.ready ? <button disabled={busy || !consentConfirmed || session.status === "running"} onClick={() => act({ action: "start", candidateName, roleName, jobDescription, interviewFocus, maxQuestions, consentConfirmed, resumeId: resumeId || undefined })}>{session.status === "running" ? "当前互动进行中" : "开始新互动"}</button> : <a className="buttonLink primary" href="/settings">前往设置完成检测</a>}
+          {readiness.ready ? <button disabled={busy || !consentConfirmed || session.status === "running"} onClick={() => act({ action: "start", candidateName, roleName, jobDescription, interviewFocus, maxQuestions, consentConfirmed, resumeIds: resumeIds.length ? resumeIds : undefined })}>{session.status === "running" ? "当前互动进行中" : "开始新互动"}</button> : <a className="buttonLink primary" href="/settings">前往设置完成检测</a>}
           {diagnostics.modelConfigured && session.status !== "running" && (
             <p className="muted">
               {outputMode === "virtual"
                 ? "虚拟摄像头相关检测通过后才能开始；开始时还会用 GET /models 做一次无推理连接检查，不产生模型调用费用。"
-                : "AI 模型已配置后即可开始；开始时还会用 GET /models 做一次无推理连接检查，不产生模型调用费用。"}
+                : "AI 模型已配置后即可开始；虚拟声卡可选。开始时还会用 GET /models 做一次无推理连接检查，不产生模型调用费用。"}
             </p>
           )}
           <button className="secondary" disabled={busy || session.status !== "running"} onClick={() => act({ action: "finish" })}>结束互动</button>
@@ -646,7 +700,7 @@ export default function ConsolePage() {
             {session.transcript.length === 0 && <p className="muted">开始互动后，对话会显示在这里。</p>}
             {session.transcript.map((item, index) => (
               <div className={`message ${item.role}`} key={`${item.at}-${index}`}>
-                <strong>{item.role === "interviewer" ? "AI 数字人" : "对方"}</strong>
+                <strong>{item.role === "interviewer" ? "AI虚拟助手" : "对方"}</strong>
                 <p>{item.text}</p>
               </div>
             ))}
@@ -709,14 +763,13 @@ export default function ConsolePage() {
           <div className="divider" />
           <h2>AI 人工播报</h2>
           <form className="inlineForm" onSubmit={sayManual}>
-            <input value={manualText} onChange={(e) => setManualText(e.target.value)} placeholder="让数字人直接说一句话" />
+            <input value={manualText} onChange={(e) => setManualText(e.target.value)} placeholder="让虚拟助手直接说一句话" />
             <button disabled={busy || session.status !== "running"}>播报</button>
           </form>
           </article>
         </section>
 
         <aside className="workspaceTools" aria-label="会话工具">
-          <RtcBridgeControl />
           <LiveSubtitles />
           <InterventionControls onAiPauseChange={(paused) => setAutomaticFollowup(!paused)} />
         </aside>

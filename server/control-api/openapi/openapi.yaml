@@ -991,10 +991,15 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [query, resumeId]
+              required: [query]
               properties:
                 query: {type: string, minLength: 1, maxLength: 2000}
-                resumeId: {type: string}
+                resumeId: {type: string, description: Legacy single material id; still accepted.}
+                resumeIds:
+                  type: array
+                  maxItems: 20
+                  items: {type: string}
+                  description: Material ids to search across for this interaction.
                 topK: {type: integer, minimum: 1, maximum: 10, default: 5}
       responses:
         '200':
@@ -1145,6 +1150,9 @@ components:
         online: {type: boolean}
         lastSeenAt: {type: string, format: date-time}
         activeSessionCount: {type: integer}
+        voiceBound: {type: boolean, description: Whether the account has a bound Doubao speaker_id.}
+        speakerId: {type: string, description: Bound speaker_id when voiceBound is true.}
+        voiceBoundAt: {type: string, format: date-time, description: Last time the account voice binding was updated.}
     LoginRequest:
       type: object
       additionalProperties: false

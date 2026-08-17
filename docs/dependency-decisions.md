@@ -2,13 +2,39 @@
 
 每项新功能实施前，在此追加一条记录。
 
+## 工作台精简与对方声音本机监听
+
+- 目标：工作台去掉与右上角重复的资料上传块，以及占位大的会议接入/音频桥接整卡；接入失败时仅提示。操作者需本机听到对方，才能决定是否打断 AI。
+- 采用：复用现有 `UploadMaterialsDock`、设置页 `AudioRouteControl`/`MeetingHandoffControl`、Web Audio `AudioContext`/`HTMLAudioElement` 与 `localStorage`；不新增依赖。
+- UI：会议接入与 RTC 桥接只留在 `/settings`；工作台失败/未就绪提示改为右上角固定悬浮 toast（可关闭），不占用页面顶部版面。
+- 监听：`features/audio/remote-monitor.ts` 默认开启；屏幕共享采集与 RTC PCM 均可本机播放；关闭可避免与会议软件双声。
+- 限制：进程捕获开启本机播放时，若会议软件本机也在出声可能双声，需用户按场景关开关。
+
+## 真实摄像头与虚拟声卡解耦
+
+- 目标：会议画面用真实摄像头时，仍可配置虚拟声卡把 AI 语音送进会议，并保留 AI 对话能力。
+- 采用：复用现有 `AudioRouteControl` / `MeetingHandoffControl`；`outputMode` 只约束 OBS/虚拟摄像头门禁与形象素材。
+- 门禁：真实模式开始互动仍只要求 AI 模型已配置；虚拟声卡可选。虚拟画面模式仍要求 OBS、虚拟摄像头、虚拟声卡与入会确认。
+- 快照：`virtualCameraActive` 失效只清 `virtualCameraVerified`，不再清掉 `virtualAudioReady`。
+- UI：设置页在真实模式下也展示虚拟声卡检测与入会确认；入会确认文案按 `real` / `virtual` 切换。工作台不再常驻接入整卡。
+- 限制：TTS 仍由 `/stage` 播报；真实模式测线路需打开助手舞台，并将系统/混音输出接到虚拟线路线。
+
+## 角位 chrome 与会议接入可见性
+
+- 目标：登录与账户入口放到左下角（Cursor 式个人菜单），资料上传放到工作台右上角；解决默认真实摄像头模式下「虚拟声卡接入会议」看起来消失的问题。
+- 采用：复用现有 `readControlSession`、`ResumeUpload`、`AudioRouteControl`、`MeetingHandoffControl` 与 readiness sessionStorage，不新增 UI 依赖。
+- 布局：`AppChrome` 固定挂载左下 `UserAccountMenu`；工作台另挂右上 `UploadMaterialsDock`；顶栏不再横排设置/登录。
+- 会议：虚拟声卡检测与入会确认在设置页完成；工作台仅在未就绪/接入异常时提示（见「工作台精简与对方声音本机监听」）。
+- 边界：安装组件卡仍暂不展示。
+
 ## 桌面工作台、设置与记录页面拆分
 
 - 目标：让 Electron 默认页只承担数字人实时互动，把技术配置、设备检测、历史记录和纪要移到独立页面。
 - 采用：复用 Next.js App Router、现有 React 组件和浏览器 `sessionStorage`，不新增路由、状态管理或 UI 依赖。
-- 桌面边界：RTC 会议进程连接、实时字幕和人工介入保留在工作台；AI/RTC 凭据、OBS、数字人素材与输出检测进入设置页；安装组件卡暂不展示。
+- 桌面边界：实时字幕和人工介入保留在工作台；会议音频桥接、AI/RTC 凭据、OBS、数字人素材与输出检测进入设置页；安装组件卡暂不展示。
 - 状态：会话存储只保存设备检测成功时间，不保存密钥、媒体流或对话数据；五分钟过期并在设备变化时级联失效。
 - 兼容：服务端 API、IPC 名称、会话和归档结构保持不变，旧记录无需迁移。
+- 补充：账户/设置入口在左下个人菜单；会议接入与 RTC 桥接见「工作台精简与对方声音本机监听」。
 
 ## 虚拟摄像头输出
 
@@ -152,7 +178,7 @@
 - 进程停止所有权：停止脚本优先读取启动器写入的项目 PID，再以默认端口作为旧版本兼容回退；进程名称和命令行中的工作区路径仍必须同时匹配。这样自定义端口实例可以正常停止，默认端口被其他 Node 项目占用时也不会优先触碰无关进程。
 - 原因：当前目标是单台 Windows 电脑和有限预算。PM2/Docker/自定义 MSI 会引入常驻服务、虚拟化或签名维护成本，现阶段没有收益。
 - 安全边界：统一安装脚本只在用户主动运行后安装 OBS/Whisper；不会自动下载或安装虚拟音频驱动，也不会开启 Windows 测试签名模式。统一启动只启动本项目、已安装 OBS 和已配置的 whisper-server。
-- 双击入口：复用 `.cmd`、现有 PowerShell 和 npm 脚本，不引入 Electron、Tauri、MSI/WiX 或自动更新框架。`Start-AI-Interviewer.cmd` 日常启动，`Check-AI-Interviewer.cmd` 只读检查；`First-Time-Setup.cmd` 必须先选择最小安装（依赖+OBS，跳过 Whisper）、完整安装或退出，选择前不会执行安装下载。
+- 双击入口：复用 `.cmd`、现有 PowerShell 和 npm 脚本，不引入 Electron、Tauri、MSI/WiX 或自动更新框架。`Start-AI-Virtual-Assistant.cmd` 日常启动，`Check-AI-Virtual-Assistant.cmd` 只读检查；`First-Time-Setup.cmd` 必须先选择最小安装（依赖+OBS，跳过 Whisper）、完整安装或退出，选择前不会执行安装下载。
 - 低预算本机档位：首次安装菜单增加显式的 `Local` 选项，按顺序复用完整 Windows 安装与现有 `setup-ollama.ps1`，安装 whisper.cpp、Ollama 和 `qwen3.5:4b`。Ollama 官方 Windows 文档说明原生应用在本机提供 `http://localhost:11434`；Ollama registry 当前标注 4B 模型约 3.4GB。该选项在选择前展示下载量，不把模型下载隐藏在“最小安装”里；任一步失败立即停止，不继续写入模型配置。
 - Node 首次引导：Node 官方当前将 v24 标记为 LTS，v22 仍为 LTS，而 v20 已 EOL，并建议生产应用使用 Active/Maintenance LTS。双击安装不能预设新电脑已有 npm，因此复用 Windows Package Manager 社区仓库的精确包 `OpenJS.NodeJS.LTS`：无 Node 时安装、低于 22 时升级、满足要求时不动作。`ensure-node.ps1 -DryRun -Json` 可只读审计计划；安装后主脚本直接从标准安装目录重新定位 `npm.cmd`，无需依赖旧 PowerShell 进程自动刷新 PATH。不使用远程脚本管道或自行分发 Node 二进制。
 - 预检复用：中文声音调用统一的 `sapi-voices.ps1`，因此继承 System.Speech→SAPI COM 兜底；模型配置同时识别 `.env.local` 和 DPAPI 设置文件中的密文字段，只报告是否配置，不解密或输出密钥。
@@ -291,8 +317,8 @@
 # 2026-08-11：Windows 安装与 standalone 启动修复
 
 - 调查结论：继续使用 Next.js 15 官方 `output: "standalone"` 产物。官方产物的根 `server.js` 与同级追踪依赖已经构成最小运行目录，只需补复制 `public` 和 `.next/static`；递归搜索同名入口会误命中 `.next` 内部路由文件并漏掉 `node_modules`。electron-builder 默认忽略规则还会过滤父目录 extraResources 内的嵌套 `node_modules`，因此将 standalone 的追踪依赖作为独立白名单资源复制，并用打包后可执行文件健康检查约束最终产物。
-- 安装选择：继续使用现有 electron-builder 26.15.3（MIT）与其 NSIS 能力，不引入第二套安装框架。安装改为显式 per-user one-click，并通过 electron-builder 官方 NSIS include 扩展把 `APP_FILENAME` 固定为产品名；NSIS 自动创建 `%LOCALAPPDATA%\\Programs\\AI Interviewer Desktop`，不要求用户选择或预建目录，也不为客户端本体申请管理员权限。
-- 故障诊断：复用 Electron `app.setName`、`dialog` 和 Node 子进程/文件 API，固定用户数据目录产品名，并把本地服务启动输出脱敏后写入 `%APPDATA%\\AI Interviewer Desktop\\logs\\desktop-startup.log`；失败时显示路径，不增加遥测、不上传日志，API Key、Token、密码和 URL 凭据会在落盘前过滤。
+- 安装选择：继续使用现有 electron-builder 26.15.3（MIT）与其 NSIS 能力，不引入第二套安装框架。安装改为显式 per-user one-click，并通过 electron-builder 官方 NSIS include 扩展把 `APP_FILENAME` 固定为产品名；NSIS 自动创建 `%LOCALAPPDATA%\\Programs\\AI Virtual Assistant`，不要求用户选择或预建目录，也不为客户端本体申请管理员权限。
+- 故障诊断：复用 Electron `app.setName`、`dialog` 和 Node 子进程/文件 API，固定用户数据目录产品名，并把本地服务启动输出脱敏后写入 `%APPDATA%\\AI Virtual Assistant\\logs\\desktop-startup.log`；失败时显示路径，不增加遥测、不上传日志，API Key、Token、密码和 URL 凭据会在落盘前过滤。
 - 兼容与成本：无新增依赖、安装体积和云端费用不变；OBS 与虚拟音频驱动仍作为独立前置组件，仅在用户明确触发安装时提权。用户数据继续位于 `%APPDATA%`，与程序安装和升级目录隔离。
 
 # 2026-08-12：移除桌面端默认菜单栏
@@ -308,7 +334,7 @@
 - 未选择：不使用完全无边框窗口和自制最小化、最大化、关闭按钮，以免增加 IPC 权限面、缩放适配和 Windows Snap 行为的维护成本。
 - 兼容与成本：复用 Electron 与 Chromium 标准能力，无新增依赖、资源文件、网络请求或用户配置；保留 Windows 拖动、双击最大化、Snap 和系统按钮语义。
 - 视口修正：全屏数字人舞台使用 `100dvh - titlebar-area-height` 作为可用高度，并使用 `width: 100%`，避免标题区与 `100vh` 叠加产生无意义滚动条；普通长内容页面仍保留按需滚动。
-- 首页布局：桌面宽度下改为会话设置、核心对话、会话工具三栏固定工作区，页面本身不滚动；长对话、设置表单和辅助工具仅在各自面板内部按需滚动。窗口窄于 1180px 时恢复自然文档流，避免压缩可用内容。
+- 首页布局：桌面宽度下改为会话设置、核心对话、会话工具三栏固定工作区，页面本身不滚动；长对话、设置表单和辅助工具仅在各自面板内部按需滚动。工作台宽度使用 `min(1800px, 100% - 32px)`，全屏/最大化时中间对话栏随视口拉伸；窗口窄于 1280px 时恢复自然文档流，避免压缩可用内容。
 
 # 2026-08-13：RTC 与实时字幕改由后端配置
 
@@ -476,11 +502,12 @@
 - 目标：上传简历后异步索引，追问时按 `resumeId` 检索经历片段并注入 `generateNextQuestion`。检索失败或未就绪时继续提问，不挡面试。
 - 稳定面：HTTP `POST /api/v1/client/knowledge/search` 与 Go `knowledge.Provider`。一期只实现 `local-pgvector`；换云知识库或 RAGFlow 时只加适配器，不改面试客户端。
 - 向量存储：[pgvector](https://github.com/pgvector/pgvector) PostgreSQL 扩展，镜像 `pgvector/pgvector:pg16`（PostgreSQL 许可证）。Go 侧 [pgvector-go](https://github.com/pgvector/pgvector-go)（MIT）通过 `AfterConnect` 注册类型。知识留在管理端库，不在客户端建向量库。
-- Embedding：Compose 内网 [Text Embeddings Inference](https://github.com/huggingface/text-embeddings-inference) `cpu-1.9`（Apache-2.0）加载 [BAAI/bge-m3](https://huggingface.co/BAAI/bge-m3)（MIT，1024 维）。走官方 OpenAI-compatible `POST /v1/embeddings`，不把推理写进 Go 二进制，不映射宿主端口。
+- Embedding（初版）：Compose 内网 [Text Embeddings Inference](https://github.com/huggingface/text-embeddings-inference) `cpu-1.9`（Apache-2.0）加载 [BAAI/bge-m3](https://huggingface.co/BAAI/bge-m3)（MIT，1024 维）。走官方 OpenAI-compatible `POST /v1/embeddings`，不把推理写进 Go 二进制，不映射宿主端口。
+- Embedding（2026-08-17 生产落地）：国内拉取 TEI/HF 权重经常失败。改用已缓存的 [michaelf34/infinity](https://github.com/michaelfeil/infinity) `latest-cpu`（MIT）加载同一 `BAAI/bge-m3`；权重经 [ModelScope](https://www.modelscope.cn/) `snapshot_download` 写入 `embedding_model_cache`。Infinity 只提供 `POST /embeddings`，另用 `nginx:1.27-alpine` 服务名 `embedding` 把 `POST /v1/embeddings` 反代过去，control-api 契约不变。
 - 解析：PDF 用 [ledongthuc/pdf](https://github.com/ledongthuc/pdf)（MIT）；docx 用标准库 `archive/zip` + `encoding/xml`。`.doc` 标记 skipped；无字层扫描件标记 failed。不接 OCR。
 - 切块：自写「章节标题 + 日期经历整段」，每块带 `[候选人 | 章节 | 公司或项目]` 前缀。不用固定字数滑动窗，也不用英文 `.` 当句界。该逻辑关在 `local-pgvector` 适配器内，换供应商后可整段丢掉。
 - 未采用：RAGFlow / Dify / WeKnora（独立产品，RAM 或权限模型不合）；langchaingo 整框架（默认滑动窗切块，且再包一层 HTTP/pgx）；chromem-go（向量不进现有 PostgreSQL）；云 embedding（密钥与数据出管理端内网）。
-- 限制：TEI CPU 常驻约 2–4GB，权重首次约 1.2–2GB。维度相同也不能混用向量空间，换模型必须整库重索引。一期不做 rerank、稀疏检索、题库 UI、报告注入或第二套 Provider。
+- 限制：CPU embedding 常驻约 2–4GB，bge-m3 权重约 4GB（含 onnx）。维度相同也不能混用向量空间，换模型必须整库重索引。一期不做 rerank、稀疏检索、题库 UI、报告注入或第二套 Provider。Infinity 冷启动含长文本 warmup，约 1–2 分钟后才监听。
 
 # 2026-08-16：真实摄像头与虚拟摄像头二选一
 
@@ -524,3 +551,15 @@
 - 未采用：把音色写进 `users` 表（语音配置边界应独立）；继续用全局 `speech_configs.speaker_id` 作为唯一音色（多操作员会互相覆盖）。
 - 限制：个人复刻音色属于豆包线路。当前线路为阿里云时，舞台合成走系统音色（如 `xiaoyun`），刻录仍可写入账号档案供切回豆包后使用。
 
+# 2026-08-17：账户语音绑定与提交结果可见性
+
+- 目标：管理端账户列表能看到每人是否已绑定音色；客户端提交刻录后能明确看到账号同步成功或失败。
+- 采用：复用现有 `user_speech_voices`。`GET /api/v1/admin/users` 合并 `voiceBound` / `speakerId` / `voiceBoundAt`；管理端账户表展示三列。客户端 `saveSpeechSpeakerId` 在 control-api PATCH 失败时抛错，`/api/voice-clone` 返回 `VOICE_BIND_FAILED`，避免「刻录成功但账号未绑定」的假成功。不新增依赖或表。
+- 未采用：录音文件落库与克隆任务历史（与当前「只存 speaker_id」模型不一致）；管理端清绑操作（本次仅可见性）。
+- 限制：录音本身仍不落库；「提交成功」以账号是否写入有效 `speaker_id` 为准。
+
+# 2026-08-17：工作台全屏宽度与简历索引错误可见性
+
+- 目标：最大化/全屏后三栏工作台随视口拉伸；「索引失败」直接展示 `indexError` 可读原因。
+- 采用：现有 CSS 与 API 字段，无新依赖。`.console.workspacePage` 宽度改为 `min(1800px, 100% - 32px)`；窄屏断点调至 1280px。客户端与管理端展示已返回的 `indexError`，并对扫描件/`.doc`/embedding 不可用做中文映射。
+- 未采用：第三方布局库；单独「重新索引」客户端按钮（管理端已有）。

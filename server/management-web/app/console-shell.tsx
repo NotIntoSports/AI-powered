@@ -13,7 +13,7 @@ const links = [
   { href: "/settings/rtc", label: "RTC 配置" },
   { href: "/settings/speech", label: "语音" },
   { href: "/settings/storage", label: "对象存储" },
-  { href: "/resumes", label: "简历" }
+  { href: "/resumes", label: "资料" }
 ];
 
 export function ConsoleShell({

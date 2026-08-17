@@ -183,15 +183,34 @@ export function VoiceCloneControl() {
           speakerId: pastedId.trim() || DEFAULT_CUSTOM_SPEAKER_ID
         })
       });
-      const data = await response.json() as { speakerId?: string; message?: string };
+      const data = await response.json() as {
+        speakerId?: string;
+        message?: string;
+        code?: string;
+        bound?: boolean;
+      };
       if (!response.ok) {
+        if (data.code === "VOICE_BIND_FAILED") {
+          const speakerId = String(data.speakerId || "");
+          if (speakerId) {
+            setStatus((current) => ({ ...current, speakerId, ttsAvailable: Boolean(speakerId) }));
+            setPastedId(speakerId);
+          }
+          setMessage(data.message || "刻录完成，但账号同步失败，请确认已登录桌面账号后再保存音色 ID。");
+          await refreshStatus();
+          return;
+        }
         setMessage(data.message || "声音刻录失败。");
         return;
       }
       const speakerId = String(data.speakerId || "");
       setStatus((current) => ({ ...current, speakerId, ttsAvailable: Boolean(speakerId) }));
       setPastedId(speakerId);
-      setMessage(speakerId ? `刻录成功，音色 ID：${speakerId}` : "刻录成功。");
+      setMessage(
+        speakerId
+          ? `刻录成功，已绑定本账号音色 ${speakerId}`
+          : "刻录成功，已绑定本账号。"
+      );
       await refreshStatus();
     } catch {
       setMessage("声音刻录失败，请检查网络和语音配置。");
@@ -213,13 +232,22 @@ export function VoiceCloneControl() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ speakerId })
       });
-      const data = await response.json() as { speakerId?: string; message?: string };
+      const data = await response.json() as {
+        speakerId?: string;
+        message?: string;
+        code?: string;
+        bound?: boolean;
+      };
       if (!response.ok) {
-        setMessage(data.message || "无法保存音色 ID。");
+        setMessage(
+          data.code === "VOICE_BIND_FAILED"
+            ? (data.message || "账号音色同步失败，请确认已登录桌面账号。")
+            : (data.message || "无法保存音色 ID。")
+        );
         return;
       }
       setStatus((current) => ({ ...current, speakerId: String(data.speakerId || speakerId), ttsAvailable: true }));
-      setMessage("已保存音色 ID，可点试听。");
+      setMessage(`已绑定本账号音色 ${data.speakerId || speakerId}，可点试听。`);
       await refreshStatus();
     } catch {
       setMessage("无法保存音色 ID。");
@@ -234,7 +262,7 @@ export function VoiceCloneControl() {
       const response = await fetch("/api/tts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: "你好，我是今天的面试官，现在用复刻音色试听。" })
+        body: JSON.stringify({ text: "你好，我是今天的虚拟助手，现在用复刻音色试听。" })
       });
       if (!response.ok) {
         setMessage("试听失败。若尚未刻录，请先录音；也可检查 Windows 中文语音。");
@@ -256,7 +284,7 @@ export function VoiceCloneControl() {
   return (
     <article className="card voiceClone">
       <div className="cardHeading">
-        <h2>面试官声音刻录</h2>
+        <h2>助手声音刻录</h2>
         <span className={status.ttsAvailable ? "ready" : ""}>
           {status.ttsAvailable
             ? status.provider === "aliyun"

@@ -66,7 +66,11 @@ func (p *Provider) Search(ctx context.Context, in knowledge.SearchInput) (knowle
 	if err != nil {
 		return knowledge.EmptyResult(), err
 	}
-	chunks, err := p.store.Search(ctx, in.ResumeID, vector, in.TopK)
+	ids := in.ResumeIDs
+	if len(ids) == 0 && strings.TrimSpace(in.ResumeID) != "" {
+		ids = []string{in.ResumeID}
+	}
+	chunks, err := p.store.Search(ctx, ids, vector, in.TopK)
 	if err != nil {
 		return knowledge.EmptyResult(), err
 	}

@@ -12,17 +12,18 @@ import (
 )
 
 type fakeSettingsAdmin struct {
-	ai          settings.PublicAI
-	clientAI    settings.ClientAI
-	clientASR   settings.ClientASR
+	ai           settings.PublicAI
+	clientAI     settings.ClientAI
+	clientASR    settings.ClientASR
 	clientSpeech settings.ClientSpeech
-	speech      settings.PublicSpeech
-	rtc         settings.PublicRTC
-	storage     settings.PublicStorage
-	putAI       settings.AIInput
-	putRTC      settings.RTCInput
-	putSpeech   settings.SpeechInput
-	speakerID   string
+	speech       settings.PublicSpeech
+	rtc          settings.PublicRTC
+	storage      settings.PublicStorage
+	putAI        settings.AIInput
+	putRTC       settings.RTCInput
+	putSpeech    settings.SpeechInput
+	speakerID    string
+	listVoices   func() (map[string]settings.UserSpeechVoice, error)
 }
 
 func (fake *fakeSettingsAdmin) GetAI(context.Context) (settings.PublicAI, error) {
@@ -184,6 +185,13 @@ func (fake *fakeSettingsAdmin) PutClientSpeechSpeakerID(_ context.Context, userI
 		return settings.PublicSpeech{}, settings.ErrInvalidInput
 	}
 	return fake.speech, nil
+}
+
+func (fake *fakeSettingsAdmin) ListUserSpeechVoices(context.Context) (map[string]settings.UserSpeechVoice, error) {
+	if fake.listVoices != nil {
+		return fake.listVoices()
+	}
+	return map[string]settings.UserSpeechVoice{}, nil
 }
 
 func (fake *fakeSettingsAdmin) TestSpeech(context.Context, users.User, string, *settings.SpeechInput) (settings.SpeechTestResult, error) {
