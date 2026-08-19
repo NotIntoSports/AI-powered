@@ -16,6 +16,19 @@ import {
   stopBridgeSession,
   type MeetingProcess
 } from "./bridge-session.ts";
+import {
+  loadAutoBridgeEnabled,
+  loadAutoBridgeSoftware,
+  saveAutoBridgeEnabled,
+  saveAutoBridgeSoftware,
+  subscribeAutoBridgeStore,
+  MEETING_EXECUTABLE_NAMES,
+  MEETING_SOFTWARE_LABELS
+} from "./auto-bridge-store.ts";
+import {
+  getAutoBridgeStatus,
+  subscribeAutoBridgeStatus
+} from "./auto-bridge-controller.tsx";
 
 export function RtcBridgeControl() {
   const [processes, setProcesses] = useState<MeetingProcess[]>([]);
@@ -24,8 +37,20 @@ export function RtcBridgeControl() {
   const [running, setRunning] = useState(false);
   const [provider, setProvider] = useState<SubtitleProvider>("volcengine");
   const [network, setNetwork] = useState(getNetworkQuality);
+  const [autoEnabled, setAutoEnabled] = useState(loadAutoBridgeEnabled);
+  const [autoSoftware, setAutoSoftware] = useState(loadAutoBridgeSoftware);
+  const [autoStatus, setAutoStatus] = useState(getAutoBridgeStatus);
 
   useEffect(() => subscribeNetworkQuality(() => setNetwork(getNetworkQuality())), []);
+
+  useEffect(() => {
+    const stopStore = subscribeAutoBridgeStore(() => {
+      setAutoEnabled(loadAutoBridgeEnabled());
+      setAutoSoftware(loadAutoBridgeSoftware());
+    });
+    const stopStatus = subscribeAutoBridgeStatus(() => setAutoStatus(getAutoBridgeStatus()));
+    return () => { stopStore(); stopStatus(); };
+  }, []);
 
   async function refresh() {
     const bridge = getDesktopBridge();
@@ -78,6 +103,39 @@ export function RtcBridgeControl() {
           {processes.map((process) => <option key={process.pid} value={process.pid}>{process.name} · {process.title} · PID {process.pid}</option>)}
         </select>
       </label>
+      <label className="autoFollowup">
+        <input
+          type="checkbox"
+          checked={autoEnabled}
+          disabled={!autoSoftware && !autoEnabled}
+          onChange={(event) => {
+            setAutoEnabled(event.target.checked);
+            saveAutoBridgeEnabled(event.target.checked);
+          }}
+        />
+        <span>
+          <strong>自动听取</strong>
+          <small>检测到预选会议软件开启后自动捕获并推流；散会自动停止。</small>
+        </span>
+      </label>
+      <label>预选会议软件
+        <select
+          value={autoSoftware}
+          disabled={running}
+          onChange={(event) => {
+            setAutoSoftware(event.target.value);
+            saveAutoBridgeSoftware(event.target.value);
+          }}
+        >
+          <option value="">未选择（自动听取不生效）</option>
+          {[...MEETING_EXECUTABLE_NAMES].map((name) => (
+            <option key={name} value={name}>{MEETING_SOFTWARE_LABELS[name] || name}</option>
+          ))}
+        </select>
+      </label>
+      {autoEnabled && autoSoftware ? (
+        <p className="muted">自动状态：{autoStatus.text}</p>
+      ) : null}
       <div className="obsActions">
         <button disabled={running || !pid} onClick={() => void start()}>启动实时字幕</button>
         <button className="secondary" disabled={!running} onClick={() => void stop()}>停止字幕</button>
