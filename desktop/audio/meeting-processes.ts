@@ -1,8 +1,18 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { MEETING_EXECUTABLE_NAMES } from "./meeting-software.ts";
 
-export { MEETING_EXECUTABLE_NAMES, MEETING_SOFTWARE_LABELS } from "./meeting-software.ts";
+// 会议进程白名单。注意：不从 meeting-software 导入——该常量模块供客户端 bundle 共用，
+// 而 desktop 侧源码需同时满足 tsc(CommonJS) 编译与 Node strip-types 直接加载（后者要求显式 .ts
+// 扩展名，前者禁止），跨文件导入无法两全；此处与 meeting-software.ts 的白名单保持同步。
+const MEETING_EXECUTABLE_NAMES: ReadonlySet<string> = new Set([
+  "teams.exe",
+  "ms-teams.exe",
+  "wemeetapp.exe",
+  "feishu.exe",
+  "lark.exe",
+  "dingtalk.exe",
+  "zoom.exe"
+]);
 
 const execFileAsync = promisify(execFile);
 

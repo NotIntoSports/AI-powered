@@ -53,7 +53,6 @@ export function AutoBridgeController() {
   const [, forceRender] = useState(0);
 
   useEffect(() => {
-    const stopStoreSync = subscribeAutoBridgeStore(() => forceRender((value) => value + 1));
     let machine: AutoBridgeMachine = initialAutoBridgeMachine();
     let busy = false;
     let disposed = false;
@@ -120,6 +119,11 @@ export function AutoBridgeController() {
       }
     }
 
+    // 开关变化时立即触发一轮 tick，保证关闭开关即刻停止自动会话（规格行为 8）
+    const stopStoreSync = subscribeAutoBridgeStore(() => {
+      forceRender((value) => value + 1);
+      void tick();
+    });
     void tick();
     const timer = window.setInterval(() => void tick(), AUTO_BRIDGE_POLL_MS);
     return () => {
