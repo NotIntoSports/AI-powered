@@ -14,13 +14,13 @@
     Abort
   ${EndIf}
 
-  DetailPrint "Installing the signed virtual audio driver..."
+  DetailPrint "Installing VB-Audio VB-CABLE..."
   nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\resources\scripts\install-prerequisite.ps1" -Component virtual-audio -ResourcesDirectory "$INSTDIR\resources\prerequisites" -Operation install'
   Pop $0
   Pop $1
   ${If} $0 != 0
     DetailPrint "$1"
-    MessageBox MB_ICONSTOP "Virtual audio driver installation failed (code $0)."
+    MessageBox MB_ICONSTOP "VB-CABLE installation failed (code $0)."
     Abort
   ${EndIf}
 !macroend

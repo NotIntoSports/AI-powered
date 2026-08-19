@@ -47,6 +47,32 @@ assert.deepEqual(vbCable.inputs, [
   "Realtek Microphone"
 ]);
 
+const vbCable16Ch = classifyAudioDevices([
+  { kind: "audioinput", label: "CABLE Output (VB-Audio Virtual Cable)", deviceId: "cable-out" },
+  { kind: "audiooutput", label: "CABLE In 16 Ch (VB-Audio Virtual Cable)", deviceId: "cable-in16" }
+]);
+assert.deepEqual(vbCable16Ch.routes, [{
+  provider: "vb-cable",
+  label: "VB-CABLE",
+  input: "CABLE Output (VB-Audio Virtual Cable)",
+  output: "CABLE In 16 Ch (VB-Audio Virtual Cable)",
+  inputDeviceId: "cable-out",
+  outputDeviceId: "cable-in16"
+}]);
+
+const vbCableChinese = classifyAudioDevices([
+  { kind: "audioinput", label: "麦克风 (VB-Audio Virtual Cable)", deviceId: "cable-zh-mic" },
+  { kind: "audiooutput", label: "扬声器 (VB-Audio Virtual Cable)", deviceId: "cable-zh-spk" }
+]);
+assert.deepEqual(vbCableChinese.routes, [{
+  provider: "vb-cable",
+  label: "VB-CABLE",
+  input: "麦克风 (VB-Audio Virtual Cable)",
+  output: "扬声器 (VB-Audio Virtual Cable)",
+  inputDeviceId: "cable-zh-mic",
+  outputDeviceId: "cable-zh-spk"
+}]);
+
 const incomplete = classifyAudioDevices([
   { kind: "audioinput", label: "Virtual Microphone", deviceId: "virtual-mic" },
   { kind: "audiooutput", label: "Realtek Speakers", deviceId: "real-speaker" }
@@ -54,6 +80,34 @@ const incomplete = classifyAudioDevices([
 assert.equal(incomplete.virtualInputs.length, 0);
 assert.equal(incomplete.virtualOutputs.length, 0);
 assert.equal(incomplete.routes.length, 0);
+assert.deepEqual(incomplete.unpairedVirtualInputs, [{
+  provider: "virtual-audio-driver",
+  label: "Virtual Audio Driver",
+  input: "Virtual Microphone",
+  inputDeviceId: "virtual-mic"
+}]);
+assert.deepEqual(incomplete.unlabeledOutputs, []);
+
+const chineseDriver = classifyAudioDevices([
+  { kind: "audioinput", label: "麦克风 (Virtual Audio Driver)", deviceId: "zh-mic" },
+  { kind: "audiooutput", label: "扬声器 (Virtual Audio Driver)", deviceId: "zh-speaker" }
+]);
+assert.deepEqual(chineseDriver.routes, [{
+  provider: "virtual-audio-driver",
+  label: "Virtual Audio Driver",
+  input: "麦克风 (Virtual Audio Driver)",
+  output: "扬声器 (Virtual Audio Driver)",
+  inputDeviceId: "zh-mic",
+  outputDeviceId: "zh-speaker"
+}]);
+
+const unlabeledOutput = classifyAudioDevices([
+  { kind: "audioinput", label: "Virtual Mic Driver", deviceId: "virtual-mic" },
+  { kind: "audiooutput", label: "", deviceId: "hidden-out" }
+]);
+assert.equal(unlabeledOutput.routes.length, 0);
+assert.equal(unlabeledOutput.unpairedVirtualInputs[0]?.inputDeviceId, "virtual-mic");
+assert.deepEqual(unlabeledOutput.unlabeledOutputs, [{ label: "", deviceId: "hidden-out" }]);
 
 const openSourceDriver = classifyAudioDevices([
   { kind: "audioinput", label: "Virtual Mic Driver", deviceId: "virtual-mic" },

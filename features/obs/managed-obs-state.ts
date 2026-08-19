@@ -19,16 +19,22 @@ export type PrerequisiteStatus = {
   virtualCameraRegistered: boolean;
   virtualAudioInstalled: boolean;
   virtualAudioDriverStaged: boolean;
+  virtualAudioPresentInDriverStore: boolean;
 };
 
 export type PrerequisiteInstallResult =
   | { installed: true; rebootRequired: boolean }
   | { installed: false; error: { code: string; message?: string } };
 
+export type EnsureVirtualAudioResult =
+  | { staged: true }
+  | { staged: false; error: { code: string; message?: string } };
+
 export type InterventionAction = "begin" | "end" | "resume" | "mute";
 
 export interface ManagedObsDesktopBridge {
   getPrerequisiteStatus(): Promise<PrerequisiteStatus>;
+  ensureVirtualAudio(): Promise<EnsureVirtualAudioResult>;
   installPrerequisite(component: "obs" | "virtual-audio"): Promise<PrerequisiteInstallResult>;
   ensureManagedObs(): Promise<ManagedObsState>;
   getManagedObsState(): Promise<ManagedObsState>;
@@ -83,6 +89,7 @@ const installErrorMessages: Record<string, string> = {
   "verification-failed": "组件安全验证未通过，已停止注册。",
   "registration-failed": "Windows 未能注册 OBS 虚拟摄像头。请重新授权后重试。",
   "install-failed": "Windows 未能安装所选系统组件。",
+  "download-failed": "VB-CABLE 下载或校验失败，请检查网络后重试。",
   unknown: "系统组件处理过程中发生异常，请重试。"
 };
 
@@ -106,7 +113,16 @@ export function formatManagedObsFailure(failure: {
 }
 
 export function formatPrerequisiteInstallError(error: { code: string; message?: string }) {
-  return installErrorMessages[error.code] ?? installErrorMessages.unknown;
+  const detail = error.message?.replace(/\s+/g, " ").trim() || "";
+  if (/VirtualAudioDriver|SignPath|problem 52|0xC0000428/i.test(detail)) {
+    return "旧开源虚拟声卡已被 Windows 内存完整性拦截。请安装内置的 VB-Audio VB-CABLE，重启后把会议麦克风选为 CABLE Output。";
+  }
+  const base = installErrorMessages[error.code] ?? installErrorMessages.unknown;
+  if (!detail) return base;
+  if (error.code === "unknown" || error.code === "install-failed" || error.code === "signature-rejected") {
+    return `${base}（${detail.slice(0, 180)}）`;
+  }
+  return base;
 }
 
 export function formatUnexpectedObsError(action: string) {

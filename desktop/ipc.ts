@@ -1,7 +1,8 @@
 import { shell, type BrowserWindow, type IpcMain } from "electron";
+import path from "node:path";
 import { AudioCaptureProcess } from "./audio/capture-process";
 import { listMeetingProcesses } from "./audio/meeting-processes";
-import { getPrerequisiteStatus, installPrerequisite } from "./prerequisites/windows-install";
+import { getPrerequisiteStatus, installPrerequisite, ensureVirtualAudioResources } from "./prerequisites/windows-install";
 import type { DesktopStatus, ManagedObsState } from "./types";
 import type { InterventionAction } from "./obs-scene";
 
@@ -14,12 +15,19 @@ type ManagedObsIpcController = {
   reset(): Promise<ManagedObsState>;
 };
 
+type InstallResources = {
+  scriptPath: string;
+  fetchScriptPath: string;
+  directory: string;
+  userDataDirectory: string;
+};
+
 export function registerDesktopIpc(
   ipcMain: IpcMain,
   getStatus: () => DesktopStatus,
   getWindow: () => BrowserWindow | null,
   audioBridgePath: string,
-  installResources?: { scriptPath: string; directory: string },
+  installResources?: InstallResources,
   obsManager?: ManagedObsIpcController
 ): void {
   ipcMain.handle("desktop:get-status", () => getStatus());
@@ -42,11 +50,28 @@ export function registerDesktopIpc(
     capture.stop();
     return { stopped: true as const };
   });
-  ipcMain.handle("desktop:get-prerequisite-status", () => getPrerequisiteStatus());
+  ipcMain.handle("desktop:get-prerequisite-status", () => {
+    if (!installResources) return getPrerequisiteStatus();
+    return getPrerequisiteStatus(installResources.directory, [installResources.userDataDirectory]);
+  });
+  ipcMain.handle("desktop:ensure-virtual-audio", () => {
+    if (!installResources) throw new Error("PREREQUISITES_NOT_PACKAGED");
+    return ensureVirtualAudioResources({
+      fetchScriptPath: installResources.fetchScriptPath,
+      resourcesDirectory: installResources.directory,
+      userDataDirectory: installResources.userDataDirectory
+    });
+  });
   ipcMain.handle("desktop:install-prerequisite", async (_event, component: unknown) => {
     if (component !== "obs" && component !== "virtual-audio") throw new Error("INVALID_PREREQUISITE");
     if (!installResources) throw new Error("PREREQUISITES_NOT_PACKAGED");
-    return installPrerequisite({ component, scriptPath: installResources.scriptPath, resourcesDirectory: installResources.directory });
+    return installPrerequisite({
+      component,
+      scriptPath: installResources.scriptPath,
+      resourcesDirectory: installResources.directory,
+      extraResourceDirectories: [installResources.userDataDirectory],
+      logDirectory: path.join(installResources.userDataDirectory, "..", "logs")
+    });
   });
   ipcMain.handle("desktop:ensure-managed-obs", () => {
     if (!obsManager) throw new Error("OBS_MANAGER_UNAVAILABLE");

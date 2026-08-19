@@ -65,18 +65,36 @@ export function buildVoiceCloneBody(input: {
   };
 }
 
-export function parseVoiceCloneSpeakerId(payload: unknown, fallbackSpeakerId = "") {
-  if (!payload || typeof payload !== "object") return fallbackSpeakerId;
-  const record = payload as Record<string, unknown>;
-  const speakerId = typeof record.speaker_id === "string" ? record.speaker_id.trim() : "";
-  if (speakerId && speakerId !== "custom_speaker_id") return speakerId;
-  const nested = record.data && typeof record.data === "object"
-    ? (record.data as Record<string, unknown>).speaker_id
-    : "";
-  if (typeof nested === "string" && nested.trim() && nested !== "custom_speaker_id") {
-    return nested.trim();
+export function isVoiceCloneBusinessError(payload: unknown) {
+  if (!payload || typeof payload !== "object") return false;
+  const code = Number((payload as Record<string, unknown>).code);
+  return Number.isFinite(code) && code !== 0 && code !== 20_000_000;
+}
+
+function readSpeakerCandidate(record: Record<string, unknown>) {
+  for (const key of ["speaker_id", "custom_speaker_id", "speakerId", "customSpeakerId"]) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim() && value.trim() !== "custom_speaker_id") {
+      return value.trim();
+    }
   }
-  return fallbackSpeakerId;
+  return "";
+}
+
+export function parseVoiceCloneSpeakerId(payload: unknown, fallbackSpeakerId = "") {
+  if (!payload || typeof payload !== "object") return "";
+  if (isVoiceCloneBusinessError(payload)) return "";
+  const record = payload as Record<string, unknown>;
+  const direct = readSpeakerCandidate(record);
+  if (direct) return direct;
+  for (const nestedKey of ["data", "result"]) {
+    const nested = record[nestedKey];
+    if (nested && typeof nested === "object") {
+      const found = readSpeakerCandidate(nested as Record<string, unknown>);
+      if (found) return found;
+    }
+  }
+  return fallbackSpeakerId && isPrepaidSpeakerId(fallbackSpeakerId) ? fallbackSpeakerId.trim() : "";
 }
 
 export function buildUnidirectionalTtsBody(text: string, speaker: string) {

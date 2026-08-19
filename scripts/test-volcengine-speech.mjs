@@ -59,10 +59,24 @@ assert.equal(prepaid.speaker_id, "S_abc12345");
 assert.equal(prepaid.custom_speaker_id, undefined);
 
 assert.equal(speech.parseVoiceCloneSpeakerId({ speaker_id: "S_cloned01" }, "fallback"), "S_cloned01");
+assert.equal(speech.parseVoiceCloneSpeakerId({ speaker_id: "custom_speaker_id" }, "custom_zh_interviewer"), "");
 assert.equal(
-  speech.parseVoiceCloneSpeakerId({ speaker_id: "custom_speaker_id" }, "custom_zh_interviewer"),
+  speech.parseVoiceCloneSpeakerId({
+    speaker_id: "custom_speaker_id",
+    custom_speaker_id: "custom_zh_interviewer"
+  }),
   "custom_zh_interviewer"
 );
+assert.equal(
+  speech.parseVoiceCloneSpeakerId({ result: { speaker_id: "S_nested01" } }),
+  "S_nested01"
+);
+assert.equal(
+  speech.parseVoiceCloneSpeakerId({ code: 3001, speaker_id: "S_should_ignore", message: "failed" }),
+  ""
+);
+assert.equal(speech.isVoiceCloneBusinessError({ code: 3001 }), true);
+assert.equal(speech.isVoiceCloneBusinessError({ code: 0, speaker_id: "S_ok" }), false);
 
 const ttsBody = speech.buildUnidirectionalTtsBody("你好", "custom_zh_interviewer");
 assert.equal(ttsBody.req_params.speaker, "custom_zh_interviewer");

@@ -2,6 +2,45 @@
 
 每项新功能实施前，在此追加一条记录。
 
+## 虚拟声卡改用官方 VB-CABLE Pack45
+
+- 目标：在 Windows 11 内存完整性 / VBS 开启时，把 AI TTS 送到腾讯会议、飞书、Zoom 等会议麦克风。
+- 原因：已签名 [Virtual-Audio-Driver 25.7.14](https://github.com/VirtualDrivers/Virtual-Audio-Driver)（SignPath Foundation）Authenticode 有效，但 HVCI 以问题码 52（`CM_PROB_UNSIGNED_DRIVER` / `0xC0000428`）拒绝内核镜像，设备节点无法 Started。上游卡在微软 attestation（[issue #15](https://github.com/VirtualDrivers/Virtual-Audio-Driver/issues/15)）。应用不得关闭内存完整性或启用测试签名。同机 ToDesk 虚拟音频可用，是因为它通过了 Microsoft attestation。
+- 采用：官方 [VB-CABLE Pack45](https://vb-audio.com/Cable/) Donationware Simple。用户已授权随包分发（[VB-Audio licensing](https://vb-audio.com/Services/licensing.htm)）：标明来源 `www.vb-cable.com`、欢迎捐赠；不捆绑 A+B / C+D。钉死 `VBCABLE_Driver_Pack45.zip` SHA-256 `B950E39F01AF1D04EA623C8F6D8EB9B6EA5C477C637295FABF20631C85116BFB`，Setup 发布者 `BUREL VINCENT Entrepreneur individuel`。zip 与 OBS 一样 gitignore，不提交。无新增 npm 依赖。
+- 安装：提权运行解压目录中的 `VBCABLE_Setup_x64.exe -i -h`（失败则可见窗口 `-i`）。已出现成对 CABLE 端点，或驱动库已有 `vbaudio_cable` / `vbMmeCable` 时跳过 Setup（再跑会进入卸载）。卸载本应用时不卸载 VB-CABLE。遗留 `ROOT\VIRTUALAUDIODRIVER` 问题码 52 不得判失败、不得再一键安装该节点。
+- 检测：`virtualAudioInstalled` 认成对端点：录音端 `CABLE Output` 或 `麦克风 (…VB-Audio…)`，播放端 `CABLE Input` / `CABLE In 16 Ch` 或 `扬声器 (…VB-Audio…)`；兼容已有 Voicemeeter 成对设备，以及仍能 Started 的遗留开源驱动。设备已出现即成功，不再要求重启；仅当安装后成对端点仍未出现时才提示重启。
+- 会议用法：会议麦克风选 `CABLE Output`；AI 语音 `setSinkId` 到播放端（英文系统 `CABLE Input`，中文系统常显示 `CABLE In 16 Ch` 或 `扬声器 (VB-Audio Virtual Cable)`）。
+- 授权与捐赠：VB-CABLE 为 Donationware，来源 `www.vb-cable.com`，欢迎向 VB-Audio 捐赠；说明只写在本文档与 README，设置页不堆授权文案。
+- 限制：仍需一次 UAC；安装后若设备未出现需重启；捐赠软件非开源；不关闭 VBS。
+
+## 虚拟声卡安装冒烟与失败详情
+
+- 目标：不再靠设置页反复点按钮；用与 Electron 相同的 `installPrerequisite` 入口冒烟，直到 `ROOT\VirtualAudioDriver` 处于 Started，并把失败原文留在页面和日志里。
+- 采用：`scripts/smoke-virtual-audio-install.mjs` 调用现有 `desktop/prerequisites/windows-install.ts`。官方 `pnputil` 仍不能创建设备节点，继续用系统 `setupapi.dll` / `newdev.dll`，不打包 WDK `devgen`。安装前清未 Started 的幽灵 ROOT 节点；驱动库已有或 pnputil 报「已存在/冲突」时继续绑定。失败始终输出一行 JSON，并写入 `%APPDATA%/AI Virtual Assistant/logs/`。
+- 限制：冒烟和一键安装仍需一次 UAC。官方 `pnputil` 没有 `/add-device`，不打包 WDK `devgen`。Windows 11 在 VBS/内存完整性强制下会以问题代码 52（`CM_PROB_UNSIGNED_DRIVER` / `0xC0000428`）拒绝 SignPath 内核镜像，即使 Authenticode 有效；设备节点可以创建，但不能进入 Started。此时 JSON/`signature-rejected` 会写明关闭“核心隔离 > 内存完整性”并重启，而不是笼统的「系统组件处理过程中发生异常」。`Status: Problem` 不得被误判为 Started。
+
+## 虚拟声卡 ROOT 设备创建与重启误判修复
+
+- 目标：一键安装不再把「驱动已进库、设备未出现」误报成必须重启；重启后也不再因本地 INF 缺失而重新下载。
+- 采用：继续使用已签名 [Virtual-Audio-Driver 25.7.14](https://github.com/VirtualDrivers/Virtual-Audio-Driver)（MIT/MS-PL，硬件 ID `ROOT\VirtualAudioDriver`）。微软对 `devcon install` 的替代是 WDK `devgen`，用户机没有该工具，因此在现有提权 `install-prerequisite.ps1` 中用系统自带 `setupapi.dll` / `newdev.dll` 注册 ROOT 设备，再用 `pnputil /add-driver /install` 绑定。提权进程用同一脚本的 `-Worker` 入口（短命令行），不再把整段脚本放进 `-EncodedCommand`，避免超过 Windows 32767 上限导致 UAC 后安装静默失败。不引入新 npm 依赖，不打包 WDK/devcon。
+- 检测：`virtualAudioInstalled` 认 `ROOT\VIRTUALAUDIODRIVER` 实例及 Media/AudioEndpoint 名称；`virtualAudioPresentInDriverStore` 为真时跳过下载。`rebootRequired` 只来自 pnputil/`UpdateDriverForPlugAndPlayDevices` 的明确重启标志，且设备仍未 Started。
+- 限制：安装仍需一次 UAC；仅 Windows 明确要求时才重启；会议软件仍需手动选择虚拟麦克风。
+
+## 项目托管虚拟声卡一键下载
+
+- 目标：设置页「一键授权并检测」不再把「Windows 驱动库为空」误报成安装包缺文件；源码/预览客户端可把官方签名驱动拉进项目托管目录后提权安装，用户不用另找安装包或改路径。
+- 采用：继续使用 [Virtual-Audio-Driver 25.7.14](https://github.com/VirtualDrivers/Virtual-Audio-Driver) 官方签名 zip（MIT/MS-PL，发布者 SignPath Foundation）。复用现有 `scripts/fetch-prerequisites.ps1`（新增 `-Component virtual-audio`）、`install-prerequisite.ps1` / `pnputil` 与 SHA-256 钉死值，不新增 npm 依赖，也不把大体积 zip 提交进 git。
+- 托管目录：源码/`npx electron .` 使用 `resources/prerequisites/virtual-audio-driver`；打包客户端优先 `process.resourcesPath/prerequisites`，资源目录不可写时下载到 `userData/prerequisites`。`virtualAudioDriverStaged` 只认目录中的 `VirtualAudioDriver.inf` + `.cat` + `.sys`；设备是否出现仍看 `pnputil /enum-devices`；驱动库有条目但设备未出现仍标等待重启。
+- 限制：安装仍需 UAC；部分环境需重启 Windows；会议软件仍需手动选择虚拟麦克风。下载依赖 GitHub 可达。
+
+## 虚拟声卡一键安装与声音刻录启用
+
+- 目标：设置页「一键授权并检测」能补装已签名 Virtual Audio Driver，真实摄像头模式不依赖 OBS 即可把 AI 语音送进会议麦克风；声音刻录成功后回传音色 ID、绑定当前登录账号并启用该音色播报。
+- 采用：继续复用 Virtual-Audio-Driver 25.7.14（MIT/MS-PL）与现有 `installPrerequisite` / `pnputil`；环回路测和舞台播报复用浏览器 `HTMLAudioElement.setSinkId`（人工接管已使用）；豆包 OpenSpeech `voice_clone` + 现有 `user_speech_voices` 账号绑定。不新增依赖。
+- 检测：兼容中文/括号设备名；播放端标签被 Chromium 隐藏时先认虚拟麦克风，再用 `setSinkId` / `selectAudioOutput` 配对，不把成对失败当成驱动未装。
+- 刻录：克隆请求带上与 TTS 相同的 `X-Api-Resource-Id`；解析嵌套 `speaker_id`/`custom_speaker_id`；业务错误不得回退成 `custom_zh_interviewer`。账号已绑定 `S_*` 等音色且豆包密钥可用时，TTS 走豆包该 ID，不被阿里云 `xiaoyun` 覆盖。
+- 限制：驱动安装仍需 UAC；可能要重启 Windows；会议软件仍需手动选择虚拟麦克风。
+
 ## 工作台精简与对方声音本机监听
 
 - 目标：工作台去掉与右上角重复的资料上传块，以及占位大的会议接入/音频桥接整卡；接入失败时仅提示。操作者需本机听到对方，才能决定是否打断 AI。

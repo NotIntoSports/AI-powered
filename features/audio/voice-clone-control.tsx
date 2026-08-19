@@ -18,6 +18,8 @@ type VoiceCloneStatus = {
   ttsAvailable: boolean;
   speakerId: string;
   provider?: string;
+  cloned?: boolean;
+  enabled?: boolean;
 };
 
 export function VoiceCloneControl() {
@@ -25,7 +27,9 @@ export function VoiceCloneControl() {
     available: false,
     ttsAvailable: false,
     speakerId: "",
-    provider: "none"
+    provider: "none",
+    cloned: false,
+    enabled: false
   });
   const [pastedId, setPastedId] = useState("");
   const [recording, setRecording] = useState(false);
@@ -34,6 +38,7 @@ export function VoiceCloneControl() {
   const [audioBase64, setAudioBase64] = useState("");
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [messageKind, setMessageKind] = useState<"info" | "success" | "error">("info");
   const [message, setMessage] = useState("按稿朗读 15–20 秒。使用本机真实麦克风，不要选虚拟线路。");
   const chunksRef = useRef<Float32Array[]>([]);
   const contextRef = useRef<AudioContext | null>(null);
@@ -47,19 +52,22 @@ export function VoiceCloneControl() {
     return () => stopTracks();
   }, []);
 
-  async function refreshStatus() {
+  async function refreshStatus(preserveSpeakerId = "") {
     try {
       const response = await fetch("/api/voice-clone", { cache: "no-store" });
       const data = await response.json() as VoiceCloneStatus;
+      const speakerId = String(data.speakerId || preserveSpeakerId || "");
       setStatus({
         available: Boolean(data.available),
-        ttsAvailable: Boolean(data.ttsAvailable),
-        speakerId: String(data.speakerId || ""),
-        provider: String(data.provider || "")
+        ttsAvailable: Boolean(data.ttsAvailable || speakerId),
+        speakerId,
+        provider: speakerId ? "volcengine" : String(data.provider || ""),
+        cloned: Boolean(data.cloned || speakerId),
+        enabled: Boolean(data.enabled || speakerId)
       });
-      if (data.speakerId) setPastedId(String(data.speakerId));
+      if (speakerId) setPastedId(speakerId);
     } catch {
-      setStatus({ available: false, ttsAvailable: false, speakerId: "", provider: "none" });
+      setStatus({ available: false, ttsAvailable: false, speakerId: "", provider: "none", cloned: false, enabled: false });
     }
   }
 
@@ -188,31 +196,50 @@ export function VoiceCloneControl() {
         message?: string;
         code?: string;
         bound?: boolean;
+        enabled?: boolean;
       };
       if (!response.ok) {
         if (data.code === "VOICE_BIND_FAILED") {
           const speakerId = String(data.speakerId || "");
           if (speakerId) {
-            setStatus((current) => ({ ...current, speakerId, ttsAvailable: Boolean(speakerId) }));
+            setStatus((current) => ({
+              ...current,
+              speakerId,
+              ttsAvailable: true,
+              cloned: true,
+              enabled: false,
+              provider: "volcengine"
+            }));
             setPastedId(speakerId);
           }
+          setMessageKind("error");
           setMessage(data.message || "刻录完成，但账号同步失败，请确认已登录桌面账号后再保存音色 ID。");
-          await refreshStatus();
+          await refreshStatus(speakerId);
           return;
         }
+        setMessageKind("error");
         setMessage(data.message || "声音刻录失败。");
         return;
       }
       const speakerId = String(data.speakerId || "");
-      setStatus((current) => ({ ...current, speakerId, ttsAvailable: Boolean(speakerId) }));
+      setStatus((current) => ({
+        ...current,
+        speakerId,
+        ttsAvailable: Boolean(speakerId),
+        cloned: Boolean(speakerId),
+        enabled: Boolean(data.enabled ?? data.bound ?? speakerId),
+        provider: speakerId ? "volcengine" : current.provider
+      }));
       setPastedId(speakerId);
+      setMessageKind("success");
       setMessage(
         speakerId
-          ? `刻录成功，已绑定本账号音色 ${speakerId}`
+          ? `刻录成功，已启用音色 ID：${speakerId}`
           : "刻录成功，已绑定本账号。"
       );
-      await refreshStatus();
+      await refreshStatus(speakerId);
     } catch {
+      setMessageKind("error");
       setMessage("声音刻录失败，请检查网络和语音配置。");
     } finally {
       setBusy(false);
@@ -246,9 +273,17 @@ export function VoiceCloneControl() {
         );
         return;
       }
-      setStatus((current) => ({ ...current, speakerId: String(data.speakerId || speakerId), ttsAvailable: true }));
-      setMessage(`已绑定本账号音色 ${data.speakerId || speakerId}，可点试听。`);
-      await refreshStatus();
+      setStatus((current) => ({
+        ...current,
+        speakerId: String(data.speakerId || speakerId),
+        ttsAvailable: true,
+        cloned: true,
+        enabled: true,
+        provider: "volcengine"
+      }));
+      setMessageKind("success");
+      setMessage(`已启用音色 ID：${data.speakerId || speakerId}，可点试听。`);
+      await refreshStatus(String(data.speakerId || speakerId));
     } catch {
       setMessage("无法保存音色 ID。");
     } finally {
@@ -285,14 +320,14 @@ export function VoiceCloneControl() {
     <article className="card voiceClone">
       <div className="cardHeading">
         <h2>助手声音刻录</h2>
-        <span className={status.ttsAvailable ? "ready" : ""}>
-          {status.ttsAvailable
-            ? status.provider === "aliyun"
+        <span className={status.cloned || status.enabled ? "ready" : ""}>
+          {status.cloned && status.speakerId
+            ? `已启用本账号音色 ${status.speakerId}`
+            : status.provider === "aliyun"
               ? `阿里云语音已配置 ${status.speakerId || "xiaoyun"}（系统音色，非个人刻录）`
-              : `已绑定本账号音色 ${status.speakerId}`
-            : status.available
-              ? "密钥已就绪，待刻录（将绑定当前登录账号）"
-              : "请先在管理后台配置豆包语音，或在本机配置阿里云语音"}
+              : status.available
+                ? "密钥已就绪，待刻录（将绑定当前登录账号）"
+                : "请先在管理后台配置豆包语音，或在本机配置阿里云语音"}
         </span>
       </div>
       <p className="voiceCloneTips">安静环境、用真实麦克风、语速自然，不要念成播音腔。朗读稿不可改，以保证复刻质量。</p>
@@ -317,7 +352,7 @@ export function VoiceCloneControl() {
         <input value={pastedId} onChange={(event) => setPastedId(event.target.value)} placeholder={DEFAULT_CUSTOM_SPEAKER_ID} />
       </label>
       <button className="secondary" type="button" disabled={busy} onClick={() => void savePastedId()}>保存音色 ID</button>
-      <p className="modelSettingsMessage" aria-live="polite">{message}</p>
+      <p className={`modelSettingsMessage ${messageKind === "success" ? "voiceCloneSuccess" : ""}`} aria-live="polite">{message}</p>
     </article>
   );
 }

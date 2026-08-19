@@ -7,7 +7,7 @@ import {
   localSettingsDirectory,
   unprotectLocalSecret
 } from "./runtime-config";
-import { DEFAULT_ASR_RESOURCE_ID, DEFAULT_TTS_RESOURCE_ID } from "./volcengine-speech";
+import { DEFAULT_ASR_RESOURCE_ID, DEFAULT_TTS_RESOURCE_ID, isPrepaidSpeakerId } from "./volcengine-speech";
 
 const speechSettingsSchema = z.object({
   provider: z.enum(["aliyun", "volcengine"]).default("volcengine"),
@@ -48,6 +48,14 @@ const globalSpeech = globalThis as typeof globalThis & {
   decryptedSpeechAccessToken?: string;
   decryptedSpeechSecretKey?: string;
 };
+
+export function isClonedSpeakerId(speakerId: string, aliyunVoice = DEFAULT_ALIYUN_VOICE) {
+  const trimmed = speakerId.trim();
+  if (!trimmed) return false;
+  if (trimmed === DEFAULT_ALIYUN_VOICE || trimmed === aliyunVoice.trim()) return false;
+  if (isPrepaidSpeakerId(trimmed)) return true;
+  return /^[A-Za-z][A-Za-z0-9_-]{7,255}$/.test(trimmed);
+}
 
 function emptySpeech(source: SpeechRuntimeConfig["source"] = "none"): SpeechRuntimeConfig {
   return {
@@ -125,6 +133,27 @@ function fromManagement(data: {
   aliyunAppKey?: string;
   aliyunVoice?: string;
 }): SpeechRuntimeConfig | null {
+  const aliyunVoice = String(data.aliyunVoice || DEFAULT_ALIYUN_VOICE);
+  const speakerId = String(data.speakerId || "").trim();
+  const volcengineReady = Boolean(
+    (typeof data.apiKey === "string" && data.apiKey) ||
+    (data.appId && data.accessToken)
+  );
+  if (isClonedSpeakerId(speakerId, aliyunVoice) && volcengineReady) {
+    const config = withAvailability({
+      provider: "volcengine",
+      apiKey: typeof data.apiKey === "string" ? data.apiKey : "",
+      appId: String(data.appId || ""),
+      accessToken: typeof data.accessToken === "string" ? data.accessToken : "",
+      accessKeyId: "",
+      accessKeySecret: "",
+      speakerId,
+      ttsResourceId: String(data.ttsResourceId || DEFAULT_TTS_RESOURCE_ID),
+      asrResourceId: String(data.asrResourceId || DEFAULT_ASR_RESOURCE_ID),
+      source: "management"
+    });
+    if (config.available) return config;
+  }
   const provider = data.activeProvider === "aliyun" ? "aliyun" : "volcengine";
   if (provider === "aliyun") {
     const config = withAvailability({
@@ -239,6 +268,71 @@ function fromVolcengineEnv(): SpeechRuntimeConfig {
   });
 }
 
+type ManagementSpeechPayload = {
+  available?: boolean;
+  activeProvider?: string;
+  appId?: string;
+  speakerId?: string;
+  ttsResourceId?: string;
+  asrResourceId?: string;
+  apiKey?: string;
+  accessToken?: string;
+  accessKeyId?: string;
+  accessKeySecret?: string;
+  aliyunToken?: string;
+  aliyunAppKey?: string;
+  aliyunVoice?: string;
+};
+
+function pickBoundSpeakerId(...candidates: Array<string | undefined>) {
+  return candidates.map((value) => String(value || "").trim()).find((value) => isClonedSpeakerId(value)) || "";
+}
+
+function volcengineFromPayload(data: ManagementSpeechPayload, speakerId: string): SpeechRuntimeConfig | null {
+  const config = withAvailability({
+    provider: "volcengine",
+    apiKey: typeof data.apiKey === "string" ? data.apiKey : "",
+    appId: String(data.appId || ""),
+    accessToken: typeof data.accessToken === "string" ? data.accessToken : "",
+    accessKeyId: "",
+    accessKeySecret: "",
+    speakerId,
+    ttsResourceId: String(data.ttsResourceId || DEFAULT_TTS_RESOURCE_ID),
+    asrResourceId: String(data.asrResourceId || DEFAULT_ASR_RESOURCE_ID),
+    source: "management"
+  });
+  return config.available ? config : null;
+}
+
+export async function getVolcengineSpeechConfig(): Promise<SpeechRuntimeConfig | null> {
+  const data = await fetchDesktopControlJson<ManagementSpeechPayload>("/api/v1/client/settings/speech");
+  const stored = await getStoredSpeech();
+  const env = fromVolcengineEnv();
+  const speakerId = pickBoundSpeakerId(data?.speakerId, stored?.speakerId, env.speakerId);
+  if (data) {
+    const management = volcengineFromPayload(data, speakerId || String(data.speakerId || ""));
+    if (management) return management;
+  }
+  if (stored && !stored.disabled) {
+    const local = fromStoredSpeech({ ...stored, speakerId: speakerId || stored.speakerId });
+    if (local.provider === "volcengine" && local.available) return local;
+  }
+  if (env.available) {
+    return withAvailability({ ...env, speakerId: speakerId || env.speakerId });
+  }
+  return null;
+}
+
+export async function getTtsRuntimeConfig(): Promise<SpeechRuntimeConfig> {
+  const volcengine = await getVolcengineSpeechConfig();
+  const stored = await getStoredSpeech();
+  const bound = pickBoundSpeakerId(volcengine?.speakerId, stored?.speakerId);
+  if (volcengine?.available && bound) {
+    return withAvailability({ ...volcengine, speakerId: bound });
+  }
+  return getSpeechRuntimeConfig();
+}
+
 export async function getSpeechRuntimeConfig(): Promise<SpeechRuntimeConfig> {
   const preferred = (process.env.SPEECH_PROVIDER || "auto").trim().toLowerCase();
   const management = await getManagementSpeechConfig();
@@ -247,11 +341,10 @@ export async function getSpeechRuntimeConfig(): Promise<SpeechRuntimeConfig> {
   const volcengineEnv = fromVolcengineEnv();
   const local = stored && !stored.disabled ? fromStoredSpeech(stored) : null;
 
-  // Management is the source of truth when the desktop session can read it.
   if (management?.available && preferred === "auto") {
     return withAvailability({
       ...management,
-      speakerId: management.speakerId || stored?.speakerId || management.speakerId
+      speakerId: pickBoundSpeakerId(management.speakerId, stored?.speakerId) || management.speakerId || stored?.speakerId || management.speakerId
     });
   }
   if (preferred === "aliyun") {

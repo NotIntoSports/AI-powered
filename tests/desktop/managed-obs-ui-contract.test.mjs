@@ -51,6 +51,19 @@ test("managed OBS failures always become actionable Chinese messages", async () 
   assert.match(formatPrerequisiteInstallError({ code: "signature-rejected" }), /数字签名/);
   assert.match(formatPrerequisiteInstallError({ code: "module-load-failed" }), /PowerShell/);
   assert.match(formatPrerequisiteInstallError({ code: "registration-failed" }), /注册/);
+  assert.match(formatPrerequisiteInstallError({ code: "download-failed" }), /下载或校验失败/);
+  assert.match(
+    formatPrerequisiteInstallError({ code: "unknown", message: "The filename or extension is too long" }),
+    /filename or extension is too long/
+  );
+  assert.match(
+    formatPrerequisiteInstallError({ code: "signature-rejected", message: "problem 52 Memory integrity SignPath VirtualAudioDriver" }),
+    /VB-CABLE/
+  );
+  assert.doesNotMatch(
+    formatPrerequisiteInstallError({ code: "signature-rejected", message: "Windows blocked VirtualAudioDriver with problem 52" }),
+    /SignPath|VirtualAudioDriver/
+  );
   assert.equal(managedObsBadgeLabel("idle"), "未连接");
   assert.equal(managedObsBadgeLabel("starting"), "正在启动");
   assert.equal(managedObsBadgeLabel("connecting"), "正在连接");
@@ -82,4 +95,7 @@ test("renderer controls managed OBS only through the restricted desktop bridge",
   assert.match(setup, /obsBundled/);
   assert.match(setup, /virtualCameraRegistered/);
   assert.match(setup, /install\("obs"\)/);
+  assert.match(setup, /ensureVirtualAudio\(/);
+  assert.match(setup, /正在下载官方 VB-CABLE/);
+  assert.doesNotMatch(setup, /安装包中的虚拟音频驱动资源缺失/);
 });
