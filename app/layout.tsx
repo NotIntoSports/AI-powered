@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import "./styles.css";
+import { AutoBridgeController } from "../features/rtc/auto-bridge-controller";
 
 export const metadata = {
   title: "AI虚拟助手",
@@ -9,7 +10,10 @@ export const metadata = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="zh-CN">
-      <body>{children}</body>
+      <body>
+        <AutoBridgeController />
+        {children}
+      </body>
     </html>
   );
 }

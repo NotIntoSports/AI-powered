@@ -56,9 +56,14 @@ export function AutoBridgeController() {
     let machine: AutoBridgeMachine = initialAutoBridgeMachine();
     let busy = false;
     let disposed = false;
+    let pendingRetick = false;
 
     async function tick() {
-      if (busy || disposed) return;
+      if (disposed) return;
+      if (busy) {
+        pendingRetick = true;
+        return;
+      }
       busy = true;
       try {
         const enabled = loadAutoBridgeEnabled();
@@ -71,6 +76,7 @@ export function AutoBridgeController() {
         }
         const bridge = getDesktopBridge();
         const processes = bridge ? await bridge.listMeetingProcesses() : [];
+        if (disposed) return;
         const manualRunning = isBridgeSessionRunning() && getBridgeSessionHandle()?.owner === "manual";
         const decision = decideAutoBridge(processes, {
           now: Date.now(),
@@ -116,6 +122,10 @@ export function AutoBridgeController() {
         }
       } finally {
         busy = false;
+        if (pendingRetick) {
+          pendingRetick = false;
+          void tick();
+        }
       }
     }
 
