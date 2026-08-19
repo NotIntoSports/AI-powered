@@ -37,13 +37,15 @@ export function RtcBridgeControl() {
   const [running, setRunning] = useState(false);
   const [provider, setProvider] = useState<SubtitleProvider>("volcengine");
   const [network, setNetwork] = useState(getNetworkQuality);
-  const [autoEnabled, setAutoEnabled] = useState(loadAutoBridgeEnabled);
-  const [autoSoftware, setAutoSoftware] = useState(loadAutoBridgeSoftware);
+  const [autoEnabled, setAutoEnabled] = useState(false);
+  const [autoSoftware, setAutoSoftware] = useState("");
   const [autoStatus, setAutoStatus] = useState(getAutoBridgeStatus);
 
   useEffect(() => subscribeNetworkQuality(() => setNetwork(getNetworkQuality())), []);
 
   useEffect(() => {
+    setAutoEnabled(loadAutoBridgeEnabled());
+    setAutoSoftware(loadAutoBridgeSoftware());
     const stopStore = subscribeAutoBridgeStore(() => {
       setAutoEnabled(loadAutoBridgeEnabled());
       setAutoSoftware(loadAutoBridgeSoftware());
@@ -133,7 +135,7 @@ export function RtcBridgeControl() {
           ))}
         </select>
       </label>
-      {autoEnabled && autoSoftware ? (
+      {autoEnabled ? (
         <p className="muted">自动状态：{autoStatus.text}</p>
       ) : null}
       <div className="obsActions">
