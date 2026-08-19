@@ -15,9 +15,13 @@ test("NSIS uses an elevated machine installation for mandatory drivers", async (
   assert.match(config, /createStartMenuShortcut:\s*true/);
   assert.match(include, /APP_FILENAME "AI Digital Human"/);
   assert.match(include, /install-prerequisite\.ps1/);
+  assert.match(config, /install-prerequisite\.ps1/);
+  assert.match(config, /fetch-prerequisites\.ps1/);
+  assert.match(include, /VB-CABLE/);
   assert.match(include, /-Component obs[\s\S]*-Operation install/);
   assert.match(include, /-Component virtual-audio[\s\S]*-Operation install/);
   assert.match(include, /-Component obs[\s\S]*-Operation uninstall/);
+  assert.doesNotMatch(include, /-Component virtual-audio[^\r\n]*uninstall/);
   assert.doesNotMatch(include, /regsvr32\.exe/);
   assert.doesNotMatch(include, /pnputil\.exe/);
   assert.match(include, /Abort/);

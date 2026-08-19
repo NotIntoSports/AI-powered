@@ -13,9 +13,9 @@ function environmentMessage(status: PrerequisiteStatus) {
   if (!status.obsBundled) return "客户端中的专用 OBS 资源缺失，请重新安装客户端。";
   if (!status.virtualCameraRegistered) return "专用 OBS 已内置；还需管理员授权注册 OBS 虚拟摄像头。";
   if (!status.virtualAudioInstalled) {
-    return status.virtualAudioDriverStaged
-      ? "OBS 已就绪；虚拟音频驱动已内置，等待管理员授权安装。"
-      : "OBS 已就绪；安装包中的虚拟音频驱动资源缺失。";
+    return status.virtualAudioDriverStaged || status.virtualAudioPresentInDriverStore
+      ? "OBS 已就绪；VB-CABLE 已内置，等待授权安装。"
+      : "OBS 已就绪；VB-CABLE 安装包尚未下载到本机托管目录。";
   }
   return "专用 OBS、OBS 虚拟摄像头与虚拟音频设备均已就绪。";
 }
@@ -70,16 +70,28 @@ export function PrerequisiteSetup() {
     setMessage(
       component === "obs"
         ? "正在验证 OBS 官方组件，Windows 随后会请求管理员授权注册虚拟摄像头…"
-        : "正在验证并安装签名虚拟音频驱动，Windows 将请求管理员授权…"
+        : "正在验证 VB-Audio VB-CABLE，Windows 将请求管理员授权…"
     );
     try {
+      if (component === "virtual-audio") {
+        const current = status ?? await bridge.getPrerequisiteStatus();
+        if (!current.virtualAudioDriverStaged && !current.virtualAudioPresentInDriverStore) {
+          setMessage("正在下载官方 VB-CABLE…");
+          const ensured = await bridge.ensureVirtualAudio();
+          if (!ensured.staged) {
+            setMessage(formatPrerequisiteInstallError(ensured.error));
+            return;
+          }
+        }
+        setMessage("正在验证 VB-Audio VB-CABLE，Windows 将请求管理员授权…");
+      }
       const result = await bridge.installPrerequisite(component);
       if (!result.installed) {
         setMessage(formatPrerequisiteInstallError(result.error));
         return;
       }
       if (result.rebootRequired) {
-        setMessage("虚拟音频驱动已加入 Windows，重启电脑后再点击“重新检测”。");
+        setMessage("VB-CABLE 已安装。若设备还没出现，重启电脑后再检测。");
         return;
       }
       const next = await bridge.getPrerequisiteStatus();
@@ -117,7 +129,7 @@ export function PrerequisiteSetup() {
           {working === "obs" ? "正在等待授权…" : "授权注册 OBS 虚拟摄像头"}
         </button>
         <button
-          disabled={busy || status?.virtualAudioInstalled || !status?.virtualAudioDriverStaged}
+          disabled={busy || status?.virtualAudioInstalled}
           onClick={() => void install("virtual-audio")}
         >
           {working === "virtual-audio" ? "正在等待授权…" : "安装虚拟音频"}
@@ -127,7 +139,7 @@ export function PrerequisiteSetup() {
         </button>
       </div>
       <p aria-live="polite">{message}</p>
-      <p className="muted">只使用固定版本、哈希匹配且带官方签名的组件；不会创建防火墙例外或启用 Windows 测试签名模式。</p>
+      <p className="muted">只安装固定版本且 Authenticode 有效的组件；卸载本客户端不会卸载 VB-CABLE。</p>
     </article>
   );
 }

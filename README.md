@@ -82,12 +82,12 @@ npm run start:whisper
 7. 回到控制台查看“OBS 输出自检”，点击“播放测试语音”确认 OBS 音量表有波动。
 8. 若舞台提示“点击启用声音并重播”，在 OBS 中右键舞台源选择“交互”，点击一次该按钮；这是 Chromium 自动播放策略的首次授权。
 
-会议软件通常不会把 OBS Virtual Camera 的声音当作麦克风。低预算 Windows 方案可安装
-开源的 [Virtual-Audio-Driver](https://github.com/VirtualDrivers/Virtual-Audio-Driver/releases)，
-或使用 OBS 官方教程采用的 VB-CABLE 作为成熟兜底。控制台的“AI 语音 → 会议麦克风”
-会检测虚拟录音设备并显示具体接线步骤。OBS 自动配置会将舞台源设为“仅监听”；
-仍需把 OBS 监听设备设为 `CABLE Input`（或对应虚拟播放端），会议麦克风选择
-`CABLE Output`（或对应虚拟录音端）。
+会议软件通常不会把 OBS Virtual Camera 的声音当作麦克风。客户端内置官方
+[VB-CABLE](https://vb-audio.com/Cable/)（Donationware，来源 www.vb-cable.com，欢迎捐赠）：
+设置页「一键授权并检测」会提权安装；安装后若设备未出现需重启一次。
+会议麦克风选择 `CABLE Output`；AI 语音播放到 `CABLE Input`
+（中文系统可能显示 `CABLE In 16 Ch` 或 `扬声器 (VB-Audio Virtual Cable)`）。
+OBS 自动配置会将舞台源设为“仅监听”；使用 OBS 监听时同样选择该播放端。
 
 ## Windows 快速启动
 

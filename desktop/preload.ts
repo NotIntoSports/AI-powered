@@ -17,6 +17,7 @@ const bridge: DesktopBridge = Object.freeze({
     return () => ipcRenderer.removeListener("desktop:audio-event", handler);
   },
   getPrerequisiteStatus: () => ipcRenderer.invoke("desktop:get-prerequisite-status"),
+  ensureVirtualAudio: () => ipcRenderer.invoke("desktop:ensure-virtual-audio"),
   installPrerequisite: (component: "obs" | "virtual-audio") => ipcRenderer.invoke("desktop:install-prerequisite", component),
   ensureManagedObs: () => ipcRenderer.invoke("desktop:ensure-managed-obs"),
   getManagedObsState: () => ipcRenderer.invoke("desktop:get-managed-obs-state"),

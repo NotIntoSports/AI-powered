@@ -323,6 +323,7 @@ a.accountDockTrigger { color: #eaf1ff; }
 .audioRoute .cardHeading span.ready { color: #72e5a7; }
 .audioRouteStatus { display: flex; align-items: center; gap: 10px; padding: 11px 12px; border: 1px solid #4b3d28; border-radius: 10px; background: #17130d; }
 .audioRouteStatus.ready { border-color: #254936; background: #0d1712; }
+.audioRouteStatus.reboot { border-color: #5a4a28; background: #17130d; }
 .audioRouteStatus i { display: grid; place-items: center; width: 25px; height: 25px; flex: 0 0 auto; border-radius: 50%; background: #4b3920; color: #f1ce83; font-style: normal; font-weight: 800; }
 .audioRouteStatus.ready i { background: #163525; color: #72e5a7; }
 .audioRouteStatus p { margin: 0; color: #b8b0a2; font-size: 13px; }
@@ -370,6 +371,7 @@ a.accountDockTrigger { color: #eaf1ff; }
 .voiceCloneActions { display: flex; flex-wrap: wrap; gap: 8px; }
 .voiceClonePreview { width: 100%; }
 .voiceClone label { display: grid; gap: 6px; color: #8d99aa; font-size: 12px; }
+.voiceCloneSuccess { color: #72e5a7 !important; font-weight: 700; }
 .recordsGrid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(360px, .9fr); gap: 16px; align-items: start; }
 .recordsLoading { min-height: 180px; display: grid; place-items: center; }
 .currentReport { min-height: 280px; }

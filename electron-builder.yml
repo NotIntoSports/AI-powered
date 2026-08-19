@@ -20,6 +20,8 @@ extraResources:
     to: prerequisites
   - from: scripts/install-prerequisite.ps1
     to: scripts/install-prerequisite.ps1
+  - from: scripts/fetch-prerequisites.ps1
+    to: scripts/fetch-prerequisites.ps1
   - from: LICENSE
     to: licenses/LICENSE
   - from: THIRD_PARTY_NOTICES.md

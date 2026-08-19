@@ -122,7 +122,11 @@ if (!hasLock) {
         scriptPath: app.isPackaged
           ? path.join(process.resourcesPath, "scripts", "install-prerequisite.ps1")
           : path.join(process.cwd(), "scripts", "install-prerequisite.ps1"),
-        directory: prerequisitesDirectory
+        fetchScriptPath: app.isPackaged
+          ? path.join(process.resourcesPath, "scripts", "fetch-prerequisites.ps1")
+          : path.join(process.cwd(), "scripts", "fetch-prerequisites.ps1"),
+        directory: prerequisitesDirectory,
+        userDataDirectory: path.join(app.getPath("userData"), "prerequisites")
       },
       obsManager
     );

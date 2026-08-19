@@ -155,7 +155,8 @@ test("renderer contract exposes bounded OBS control without connection secrets",
     "desktop:set-managed-obs-virtual-camera",
     "desktop:set-managed-obs-intervention-routing",
     "desktop:stop-managed-obs",
-    "desktop:reset-managed-obs-config"
+    "desktop:reset-managed-obs-config",
+    "desktop:ensure-virtual-audio"
   ]) {
     assert.match(ipc, new RegExp(channel));
     assert.match(preload, new RegExp(channel));
@@ -180,7 +181,8 @@ test("OBS IPC validates booleans and intervention actions before calling the man
       "./audio/meeting-processes": { async listMeetingProcesses() { return []; } },
       "./prerequisites/windows-install": {
         getPrerequisiteStatus() { return {}; },
-        async installPrerequisite() { return { installed: true, rebootRequired: false }; }
+        async installPrerequisite() { return { installed: true, rebootRequired: false }; },
+        async ensureVirtualAudioResources() { return { staged: true }; }
       }
     }
   );
@@ -197,7 +199,7 @@ test("OBS IPC validates booleans and intervention actions before calling the man
     () => ({ ready: true, baseUrl: null, serverOwned: false }),
     () => null,
     "AudioBridge.exe",
-    { scriptPath: "install.ps1", directory: "prerequisites" },
+    { scriptPath: "install.ps1", fetchScriptPath: "fetch.ps1", directory: "prerequisites", userDataDirectory: "user-data-prerequisites" },
     obsManager
   );
 
@@ -222,6 +224,37 @@ test("OBS IPC validates booleans and intervention actions before calling the man
   ]);
 });
 
+test("prerequisite status IPC passes the hosted resources directory", async () => {
+  const handlers = new Map();
+  const statusCalls = [];
+  const { registerDesktopIpc } = await loadTypeScriptModule(
+    new URL("../../desktop/ipc.ts", import.meta.url),
+    {
+      electron: { shell: { async openExternal() {} } },
+      "./audio/capture-process": { AudioCaptureProcess: class AudioCaptureProcess { start() {} stop() {} } },
+      "./audio/meeting-processes": { async listMeetingProcesses() { return []; } },
+      "./prerequisites/windows-install": {
+        getPrerequisiteStatus(...args) {
+          statusCalls.push(args);
+          return { virtualAudioDriverStaged: false };
+        },
+        async installPrerequisite() { return { installed: true, rebootRequired: false }; },
+        async ensureVirtualAudioResources() { return { staged: true }; }
+      }
+    }
+  );
+  registerDesktopIpc(
+    { handle(channel, handler) { handlers.set(channel, handler); } },
+    () => ({ ready: true, baseUrl: null, serverOwned: false }),
+    () => null,
+    "AudioBridge.exe",
+    { scriptPath: "install.ps1", fetchScriptPath: "fetch.ps1", directory: "prerequisites", userDataDirectory: "user-data-prerequisites" }
+  );
+  await handlers.get("desktop:get-prerequisite-status")({});
+  assert.deepEqual(statusCalls, [["prerequisites", ["user-data-prerequisites"]]]);
+  assert.equal(typeof handlers.get("desktop:ensure-virtual-audio"), "function");
+});
+
 test("packaged OBS smoke supports explicit control and real modes without implicit UAC", async () => {
   const smoke = await readFile(new URL("../../scripts/test-packaged-runtime.mjs", import.meta.url), "utf8");
   assert.match(smoke, /AI_INTERVIEWER_PACKAGED_OBS_SMOKE/);
@@ -236,7 +269,7 @@ test("packaged OBS smoke supports explicit control and real modes without implic
 
 test("prerequisite status distinguishes bundled OBS from system camera registration", async () => {
   const types = await readFile(new URL("../../desktop/types.ts", import.meta.url), "utf8");
-  for (const field of ["obsBundled", "virtualCameraRegistered", "virtualAudioInstalled", "virtualAudioDriverStaged"]) {
+  for (const field of ["obsBundled", "virtualCameraRegistered", "virtualAudioInstalled", "virtualAudioDriverStaged", "virtualAudioPresentInDriverStore"]) {
     assert.match(types, new RegExp(`${field}:\\s*boolean`));
   }
   assert.doesNotMatch(types, /obsInstalled:\s*boolean/);
@@ -249,4 +282,7 @@ test("packaging uses the pinned official portable release", async () => {
   assert.match(manifest, /db64a2934f8261f85b1410b84be011207a0afda5400d008289f1f1e211bcc7de/i);
   assert.match(fetcher, /portable_mode\.txt/);
   assert.match(fetcher, /OBS Project/);
+  assert.match(fetcher, /ValidateSet\("all", "obs", "virtual-audio"\)/);
+  assert.match(fetcher, /BUREL VINCENT Entrepreneur individuel/);
+  assert.match(fetcher, /B950E39F01AF1D04EA623C8F6D8EB9B6EA5C477C637295FABF20631C85116BFB/);
 });

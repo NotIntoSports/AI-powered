@@ -1,7 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { loadVirtualAudioRoute } from "../../features/audio/virtual-audio-route";
 import type { InterviewSession } from "../../lib/interview";
+
+type SinkAudioElement = HTMLAudioElement & {
+  setSinkId?: (deviceId: string) => Promise<void>;
+};
 
 type AvatarMetadata = {
   available: boolean;
@@ -82,7 +87,20 @@ export default function StagePage() {
       if (speechToken.current !== token) return;
       const url = URL.createObjectURL(await response.blob());
       audioUrlRef.current = url;
-      const audio = new Audio(url);
+      const audio = new Audio(url) as SinkAudioElement;
+      const route = loadVirtualAudioRoute();
+      if (route?.outputDeviceId && audio.setSinkId) {
+        try {
+          await audio.setSinkId(route.outputDeviceId);
+        } catch {
+          // Keep default output if the saved virtual sink is missing.
+        }
+      }
+      if (speechToken.current !== token) {
+        URL.revokeObjectURL(url);
+        audioUrlRef.current = "";
+        return;
+      }
       audioRef.current = audio;
       audio.onplay = () => {
         if (speechToken.current !== token) return;

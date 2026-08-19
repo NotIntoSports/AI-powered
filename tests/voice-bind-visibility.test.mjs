@@ -23,7 +23,20 @@ test("speech runtime no longer swallows account sync failures", () => {
 
 test("voice clone control shows bind success and sync failure copy", () => {
   const control = readFileSync(join(root, "features", "audio", "voice-clone-control.tsx"), "utf8");
-  assert.match(control, /刻录成功，已绑定本账号音色/);
+  assert.match(control, /刻录成功，已启用音色 ID/);
   assert.match(control, /VOICE_BIND_FAILED/);
   assert.match(control, /账号同步失败/);
+});
+
+test("cloned speaker is enabled for TTS even when Aliyun is the active line", () => {
+  const runtime = readFileSync(join(root, "lib", "speech-runtime.ts"), "utf8");
+  const route = readFileSync(join(root, "app", "api", "voice-clone", "route.ts"), "utf8");
+  const tts = readFileSync(join(root, "app", "api", "tts", "route.ts"), "utf8");
+  assert.match(runtime, /export function isClonedSpeakerId/);
+  assert.match(runtime, /export async function getTtsRuntimeConfig/);
+  assert.match(runtime, /export async function getVolcengineSpeechConfig/);
+  assert.match(route, /resourceId: volcengine\.ttsResourceId/);
+  assert.match(route, /enabled: true/);
+  assert.match(route, /getVolcengineSpeechConfig/);
+  assert.match(tts, /getTtsRuntimeConfig/);
 });

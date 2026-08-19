@@ -39,3 +39,37 @@ test("OBS automatic connection uses a bounded 30 second cold-start window", asyn
   assert.match(source, /Date\.now\(\) \+ MANAGED_OBS_STARTUP_TIMEOUT_MS/);
   assert.match(source, /OBS_PORT_NOT_READY/);
 });
+
+test("virtual audio one-click installs the signed driver and stages TTS to the virtual sink", async () => {
+  const audioRoute = await readFile(new URL("../../features/audio/audio-route-control.tsx", import.meta.url), "utf8");
+  const stage = await readFile(new URL("../../app/stage/page.tsx", import.meta.url), "utf8");
+  assert.match(audioRoute, /CABLE Output/);
+  assert.match(audioRoute, /CABLE Input/);
+  assert.doesNotMatch(audioRoute, /www\.vb-cable\.com/);
+  assert.doesNotMatch(audioRoute, /捐赠/);
+  assert.match(audioRoute, /重启电脑后再检测/);
+  assert.match(audioRoute, /ensureVirtualAudio\(/);
+  assert.match(audioRoute, /installPrerequisite\("virtual-audio"\)/);
+  assert.match(audioRoute, /virtualAudioPresentInDriverStore/);
+  assert.match(audioRoute, /一键授权并检测/);
+  assert.match(audioRoute, /setSinkId/);
+  assert.match(audioRoute, /loadReadinessSnapshot/);
+  assert.doesNotMatch(audioRoute, /安装包中的虚拟音频驱动资源缺失/);
+  assert.doesNotMatch(audioRoute, /\/api\/stage-test-speech/);
+  assert.match(stage, /loadVirtualAudioRoute/);
+  assert.match(stage, /setSinkId/);
+});
+
+test("voice clone returns an ID, binds the account, and TTS prefers that speaker", async () => {
+  const route = await readFile(new URL("../../app/api/voice-clone/route.ts", import.meta.url), "utf8");
+  const runtime = await readFile(new URL("../../lib/speech-runtime.ts", import.meta.url), "utf8");
+  const tts = await readFile(new URL("../../app/api/tts/route.ts", import.meta.url), "utf8");
+  const control = await readFile(new URL("../../features/audio/voice-clone-control.tsx", import.meta.url), "utf8");
+  assert.match(route, /resourceId: volcengine\.ttsResourceId/);
+  assert.match(route, /enabled: true/);
+  assert.match(route, /getVolcengineSpeechConfig/);
+  assert.match(runtime, /export async function getTtsRuntimeConfig/);
+  assert.match(runtime, /isClonedSpeakerId/);
+  assert.match(tts, /getTtsRuntimeConfig/);
+  assert.match(control, /刻录成功，已启用音色 ID/);
+});

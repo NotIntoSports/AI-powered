@@ -9,6 +9,7 @@ export interface PrerequisiteStatus {
   virtualCameraRegistered: boolean;
   virtualAudioInstalled: boolean;
   virtualAudioDriverStaged: boolean;
+  virtualAudioPresentInDriverStore: boolean;
 }
 
 export interface DesktopBridge {
@@ -19,6 +20,7 @@ export interface DesktopBridge {
   onAudioPcm(listener: (data: Uint8Array) => void): () => void;
   onAudioEvent(listener: (event: unknown) => void): () => void;
   getPrerequisiteStatus(): Promise<PrerequisiteStatus>;
+  ensureVirtualAudio(): Promise<EnsureVirtualAudioResult>;
   installPrerequisite(component: "obs" | "virtual-audio"): Promise<PrerequisiteInstallResult>;
   ensureManagedObs(): Promise<ManagedObsState>;
   getManagedObsState(): Promise<ManagedObsState>;
@@ -45,7 +47,12 @@ export type PrerequisiteInstallErrorCode =
   | "hash-mismatch"
   | "registration-failed"
   | "install-failed"
+  | "download-failed"
   | "unknown";
+
+export type EnsureVirtualAudioResult =
+  | { staged: true }
+  | { staged: false; error: { code: PrerequisiteInstallErrorCode; message: string } };
 
 export type PrerequisiteInstallResult =
   | { installed: true; rebootRequired: boolean }

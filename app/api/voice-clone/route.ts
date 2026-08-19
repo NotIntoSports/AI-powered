@@ -1,12 +1,19 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { MAX_CLONE_AUDIO_BYTES } from "../../../lib/pcm-wav";
-import { getSpeechRuntimeConfig, saveSpeechSpeakerId, SpeechAccountBindError } from "../../../lib/speech-runtime";
-import { VOICE_CLONE_SCRIPT, DEFAULT_CUSTOM_SPEAKER_ID } from "../../../lib/voice-clone-script";
+import {
+  getSpeechRuntimeConfig,
+  getTtsRuntimeConfig,
+  getVolcengineSpeechConfig,
+  isClonedSpeakerId,
+  saveSpeechSpeakerId,
+  SpeechAccountBindError
+} from "../../../lib/speech-runtime";
+import { DEFAULT_CUSTOM_SPEAKER_ID, VOICE_CLONE_SCRIPT } from "../../../lib/voice-clone-script";
 import {
   buildVoiceCloneBody,
+  isVoiceCloneBusinessError,
   parseVoiceCloneSpeakerId,
-  resolveCloneSpeaker,
   VOLCENGINE_CLONE_URL,
   volcengineJsonRequest
 } from "../../../lib/volcengine-speech";
@@ -22,13 +29,22 @@ const postSchema = z.object({
 
 export async function GET() {
   const speech = await getSpeechRuntimeConfig();
+  const volcengine = await getVolcengineSpeechConfig();
+  const tts = await getTtsRuntimeConfig();
+  const speakerId = tts.provider === "volcengine" && isClonedSpeakerId(tts.speakerId)
+    ? tts.speakerId
+    : volcengine && isClonedSpeakerId(volcengine.speakerId)
+      ? volcengine.speakerId
+      : "";
   return NextResponse.json({
-    available: speech.provider === "volcengine" && speech.available,
-    ttsAvailable: speech.ttsAvailable,
+    available: Boolean(volcengine?.available),
+    ttsAvailable: tts.ttsAvailable,
     asrAvailable: speech.asrAvailable,
-    speakerId: speech.speakerId,
-    source: speech.source,
-    provider: speech.provider
+    speakerId,
+    cloned: Boolean(speakerId),
+    enabled: Boolean(speakerId && tts.provider === "volcengine"),
+    source: tts.source,
+    provider: tts.provider
   });
 }
 
@@ -40,14 +56,12 @@ export async function POST(request: Request) {
       { status: 422 }
     );
   }
-  const speech = await getSpeechRuntimeConfig();
-  if (speech.provider !== "volcengine" || !speech.available) {
+  const volcengine = await getVolcengineSpeechConfig();
+  if (!volcengine?.available) {
     return NextResponse.json(
       {
         code: "SPEECH_UNAVAILABLE",
-        message: speech.provider === "aliyun"
-          ? "当前使用阿里云语音。声音复刻仍需配置豆包语音"
-          : "请先在管理后台或本机环境变量配置豆包语音密钥"
+        message: "请先在管理后台配置豆包语音密钥后再刻录"
       },
       { status: 503 }
     );
@@ -72,7 +86,9 @@ export async function POST(request: Request) {
     );
   }
 
-  const speakerHint = parsed.data.speakerId?.trim() || speech.speakerId || DEFAULT_CUSTOM_SPEAKER_ID;
+  const speakerHint = parsed.data.speakerId?.trim()
+    || (isClonedSpeakerId(volcengine.speakerId) ? volcengine.speakerId : "")
+    || DEFAULT_CUSTOM_SPEAKER_ID;
   const body = buildVoiceCloneBody({
     audioBase64: parsed.data.audioBase64,
     format: parsed.data.format || "wav",
@@ -83,12 +99,13 @@ export async function POST(request: Request) {
   try {
     const { response, text } = await volcengineJsonRequest({
       url: VOLCENGINE_CLONE_URL,
-      auth: speech,
+      auth: volcengine,
       body,
+      resourceId: volcengine.ttsResourceId,
       timeoutMs: 60_000
     });
     const payload = parseJson(text);
-    if (!response.ok) {
+    if (!response.ok || isVoiceCloneBusinessError(payload)) {
       return NextResponse.json(
         {
           code: "VOICE_CLONE_FAILED",
@@ -97,8 +114,7 @@ export async function POST(request: Request) {
         { status: 502 }
       );
     }
-    const fallback = resolveCloneSpeaker(speakerHint).custom_speaker_id || speakerHint;
-    const speakerId = parseVoiceCloneSpeakerId(payload, fallback);
+    const speakerId = parseVoiceCloneSpeakerId(payload);
     if (!speakerId) {
       return NextResponse.json(
         { code: "VOICE_CLONE_FAILED", message: "声音刻录未返回音色 ID" },
@@ -117,7 +133,12 @@ export async function POST(request: Request) {
 async function bindSpeakerId(speakerId: string, cloned: boolean) {
   try {
     await saveSpeechSpeakerId(speakerId);
-    return NextResponse.json({ speakerId, cloned, bound: true });
+    return NextResponse.json({
+      speakerId,
+      cloned,
+      bound: true,
+      enabled: true
+    });
   } catch (error) {
     if (error instanceof SpeechAccountBindError) {
       return NextResponse.json(
@@ -126,7 +147,8 @@ async function bindSpeakerId(speakerId: string, cloned: boolean) {
           message: error.message,
           speakerId,
           cloned,
-          bound: false
+          bound: false,
+          enabled: false
         },
         { status: 502 }
       );
@@ -137,7 +159,8 @@ async function bindSpeakerId(speakerId: string, cloned: boolean) {
         message: "账号音色同步失败，请确认已登录桌面账号",
         speakerId,
         cloned,
-        bound: false
+        bound: false,
+        enabled: false
       },
       { status: 502 }
     );

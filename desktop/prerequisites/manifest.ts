@@ -8,10 +8,11 @@ export const PREREQUISITES = Object.freeze({
   },
   virtualAudio: {
     id: "virtual-audio",
-    version: "25.7.14",
-    fileName: "Virtual.Audio.Driver.Signed.-.25.7.14.zip",
-    url: "https://github.com/VirtualDrivers/Virtual-Audio-Driver/releases/download/25.7.14/Virtual.Audio.Driver.Signed.-.25.7.14.zip",
-    sha256: "dd10560994de65a7e587fb8b93c0d7e9838292d9c3566a0976c2786d727292bd",
-    publisherPattern: "SignPath Foundation"
+    version: "45",
+    fileName: "VBCABLE_Driver_Pack45.zip",
+    url: "https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip",
+    sha256: "b950e39f01af1d04ea623c8f6d8eb9b6ea5c477c637295fabf20631c85116bfb",
+    publisherPattern: "BUREL VINCENT Entrepreneur individuel",
+    setupFileName: "VBCABLE_Setup_x64.exe"
   }
 });
