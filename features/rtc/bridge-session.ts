@@ -77,6 +77,7 @@ type ActiveSession = {
   cleanup: () => Promise<void>;
 };
 let active: ActiveSession | null = null;
+let starting = false;
 
 export function isBridgeSessionRunning(): boolean {
   return active !== null;
@@ -96,79 +97,98 @@ export async function startBridgeSession(
   roomIdPrefix: string,
   events: BridgeSessionEvents
 ): Promise<BridgeSessionHandle> {
-  if (active) throw new Error("BRIDGE_SESSION_ALREADY_RUNNING");
-  const bridge = getDesktopBridge();
-  if (!bridge) throw new Error("请在 Windows 客户端中使用音频桥接功能。");
-  events.onStatus("正在建立音频轨道和字幕线路…");
-  const sessionId = makeBridgeRoomId(roomIdPrefix);
-  const userId = `bridge_${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`;
-  const tokenResponse = await fetch("/api/rtc/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ roomId: sessionId, userId })
-  });
-  const token = await tokenResponse.json() as RtcTokenResponse;
-  if (!tokenResponse.ok) throw new Error(token.message || "RTC Token 获取失败");
-  const activeProvider: SubtitleProvider = token.provider === "livekit" ? "livekit" : "volcengine";
-  const language = token.language || "zh";
-  const roomId = token.roomId || sessionId;
-  const pcm = createPcmTrack(loadRemoteMonitorEnabled());
-  const stopMonitorSync = subscribeRemoteMonitor(() => pcm.setMonitorEnabled(loadRemoteMonitorEnabled()));
-  subtitleSink.reset();
-  let engine: ReturnType<typeof VERTC.createEngine> | undefined;
-  let transport: SubtitleTransport;
-  if (activeProvider === "volcengine") {
-    if (!token.appId || !token.token) throw new Error("RTC Token 获取失败");
-    engine = VERTC.createEngine(token.appId);
-    transport = await createSubtitleTransport("volcengine", subtitleSink, engine as never);
-  } else {
-    transport = await createSubtitleTransport("livekit", subtitleSink);
-  }
-  await transport.connect({
-    sessionId,
-    language,
-    track: pcm.track,
-    token: token.token || "",
-    roomId,
-    userId: token.userId || userId,
-    appId: token.appId,
-    url: token.url
-  });
-  const removePcm = bridge.onAudioPcm(pcm.push);
-  const removeEvent = bridge.onAudioEvent((event) => {
-    const value = event as { type?: string; peak?: number; message?: string };
-    if (value.type === "level") events.onLevel(value.peak || 0);
-    if (value.type === "process-exited") events.onProcessExited();
-    if (value.type === "error") events.onStatus(value.message || "音频捕获失败");
-  });
-  await bridge.startAudioCapture(pid);
+  if (active || starting) throw new Error("BRIDGE_SESSION_ALREADY_RUNNING");
+  starting = true;
+  try {
+    const bridge = getDesktopBridge();
+    if (!bridge) throw new Error("请在 Windows 客户端中使用音频桥接功能。");
+    events.onStatus("正在建立音频轨道和字幕线路…");
+    const sessionId = makeBridgeRoomId(roomIdPrefix);
+    const userId = `bridge_${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`;
+    const tokenResponse = await fetch("/api/rtc/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ roomId: sessionId, userId })
+    });
+    const token = await tokenResponse.json() as RtcTokenResponse;
+    if (!tokenResponse.ok) throw new Error(token.message || "RTC Token 获取失败");
+    const activeProvider: SubtitleProvider = token.provider === "livekit" ? "livekit" : "volcengine";
+    const language = token.language || "zh";
+    const roomId = token.roomId || sessionId;
+    const pcm = createPcmTrack(loadRemoteMonitorEnabled());
+    let stopMonitorSync: (() => void) | undefined;
+    let removePcm: (() => void) | undefined;
+    let removeEvent: (() => void) | undefined;
+    let engine: ReturnType<typeof VERTC.createEngine> | undefined;
+    let transport: SubtitleTransport | undefined;
+    try {
+      stopMonitorSync = subscribeRemoteMonitor(() => pcm.setMonitorEnabled(loadRemoteMonitorEnabled()));
+      subtitleSink.reset();
+      if (activeProvider === "volcengine") {
+        if (!token.appId || !token.token) throw new Error("RTC Token 获取失败");
+        engine = VERTC.createEngine(token.appId);
+        transport = await createSubtitleTransport("volcengine", subtitleSink, engine as never);
+      } else {
+        transport = await createSubtitleTransport("livekit", subtitleSink);
+      }
+      await transport.connect({
+        sessionId,
+        language,
+        track: pcm.track,
+        token: token.token || "",
+        roomId,
+        userId: token.userId || userId,
+        appId: token.appId,
+        url: token.url
+      });
+      removePcm = bridge.onAudioPcm(pcm.push);
+      removeEvent = bridge.onAudioEvent((event) => {
+        const value = event as { type?: string; peak?: number; message?: string };
+        if (value.type === "level") events.onLevel(value.peak || 0);
+        if (value.type === "process-exited") events.onProcessExited();
+        if (value.type === "error") events.onStatus(value.message || "音频捕获失败");
+      });
+      await bridge.startAudioCapture(pid);
 
-  const statsTimer = window.setInterval(() => {
-    const stats = transport.getNetworkStats?.();
-    Promise.resolve(stats).then((value) => {
-      setRtcNetwork({ connected: true, rttMs: value?.rttMs ?? null, packetLossPct: value?.packetLossPct ?? null });
-    }).catch(() => undefined);
-  }, 2_000);
+      const statsTimer = window.setInterval(() => {
+        const stats = transport!.getNetworkStats?.();
+        Promise.resolve(stats).then((value) => {
+          setRtcNetwork({ connected: true, rttMs: value?.rttMs ?? null, packetLossPct: value?.packetLossPct ?? null });
+        }).catch(() => undefined);
+      }, 2_000);
 
-  const handle: BridgeSessionHandle = { owner, roomId, provider: activeProvider };
-  active = {
-    handle,
-    events,
-    cleanup: async () => {
-      window.clearInterval(statsTimer);
-      removePcm();
-      removeEvent();
-      stopMonitorSync();
-      setRtcNetwork({ connected: false });
-      await bridge.stopAudioCapture().catch(() => undefined);
-      await transport.disconnect().catch(() => undefined);
+      const handle: BridgeSessionHandle = { owner, roomId, provider: activeProvider };
+      active = {
+        handle,
+        events,
+        cleanup: async () => {
+          window.clearInterval(statsTimer);
+          removePcm?.();
+          removeEvent?.();
+          stopMonitorSync?.();
+          setRtcNetwork({ connected: false });
+          await bridge.stopAudioCapture().catch(() => undefined);
+          await transport?.disconnect().catch(() => undefined);
+          if (engine) VERTC.destroyEngine(engine);
+          pcm.track.stop();
+          await pcm.context.close().catch(() => undefined);
+          subtitleSink.reset(sessionId);
+        }
+      };
+      return handle;
+    } catch (error) {
+      stopMonitorSync?.();
+      removePcm?.();
+      removeEvent?.();
+      await transport?.disconnect().catch(() => undefined);
       if (engine) VERTC.destroyEngine(engine);
       pcm.track.stop();
       await pcm.context.close().catch(() => undefined);
-      subtitleSink.reset(sessionId);
+      throw error;
     }
-  };
-  return handle;
+  } finally {
+    starting = false;
+  }
 }
 
 export async function stopBridgeSession(): Promise<void> {

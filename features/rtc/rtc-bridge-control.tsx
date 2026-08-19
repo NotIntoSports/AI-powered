@@ -9,6 +9,7 @@ import {
 } from "./network-quality.ts";
 import type { SubtitleProvider } from "../../lib/subtitles/transport.ts";
 import {
+  getBridgeSessionHandle,
   getDesktopBridge,
   providerLabel,
   startBridgeSession,
@@ -35,7 +36,12 @@ export function RtcBridgeControl() {
     setStatus(result.length ? "选择进程后可启动实时字幕。" : "未发现正在通话的受支持会议软件窗口。");
   }
 
-  useEffect(() => { void refresh(); return () => { void stopBridgeSession(); }; }, []);
+  useEffect(() => {
+    void refresh();
+    return () => {
+      if (getBridgeSessionHandle()?.owner === "manual") void stopBridgeSession();
+    };
+  }, []);
 
   async function start() {
     if (!pid) return;
