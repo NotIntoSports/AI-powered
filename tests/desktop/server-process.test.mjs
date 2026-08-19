@@ -8,6 +8,7 @@ import {
   buildServerEnvironment,
   getAvailableLoopbackPort,
   LocalServerStartError,
+  resolveLoopbackPort,
   sanitizeServerOutput,
   startLocalServer,
   stopOwnedProcess
@@ -17,6 +18,18 @@ test("selects an available loopback port", async () => {
   const port = await getAvailableLoopbackPort();
   assert.ok(Number.isInteger(port));
   assert.ok(port > 0 && port <= 65535);
+});
+
+test("reuses the persisted local-server-port when free", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "ai-interviewer-port-"));
+  const portFile = path.join(directory, "local-server-port");
+  const first = await resolveLoopbackPort(portFile);
+  assert.equal(Number.parseInt(await readFile(portFile, "utf8"), 10), first);
+  assert.equal(await resolveLoopbackPort(portFile), first);
+
+  await writeFile(portFile, "not-a-port");
+  const fallback = await resolveLoopbackPort(portFile);
+  assert.notEqual(fallback, 0);
 });
 
 test("builds an Electron-as-Node server environment", () => {

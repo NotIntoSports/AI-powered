@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { appendFile, mkdir, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import net from "node:net";
 import path from "node:path";
 
@@ -42,6 +42,34 @@ export function getAvailableLoopbackPort(): Promise<number> {
   });
 }
 
+function isLoopbackPortFree(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const probe = net.createServer();
+    probe.unref();
+    probe.once("error", () => resolve(false));
+    probe.listen(port, "127.0.0.1", () => {
+      probe.close((error) => resolve(!error));
+    });
+  });
+}
+
+// The renderer persists verified audio routes and readiness snapshots per origin;
+// reusing the previous loopback port keeps that storage readable across launches.
+export async function resolveLoopbackPort(portFile: string): Promise<number> {
+  try {
+    const stored = Number.parseInt((await readFile(portFile, "utf8")).trim(), 10);
+    if (Number.isInteger(stored) && stored > 0 && stored <= 65535 && (await isLoopbackPortFree(stored))) {
+      return stored;
+    }
+  } catch {
+    // Missing or unreadable port file falls through to a fresh port.
+  }
+  const port = await getAvailableLoopbackPort();
+  await mkdir(path.dirname(portFile), { recursive: true });
+  await writeFile(portFile, String(port), "utf8").catch(() => undefined);
+  return port;
+}
+
 export function buildServerEnvironment(
   port: number,
   inherited: NodeJS.ProcessEnv = process.env
@@ -76,8 +104,9 @@ export async function startLocalServer(options: {
   cwd: string;
   logPath?: string;
   timeoutMs?: number;
+  port?: number;
 }): Promise<OwnedProcess & { baseUrl: string; child: ChildProcess }> {
-  const port = await getAvailableLoopbackPort();
+  const port = options.port ?? await getAvailableLoopbackPort();
   const baseUrl = `http://127.0.0.1:${port}`;
 
   if (options.logPath) {

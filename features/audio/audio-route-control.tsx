@@ -1,11 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { classifyAudioDevices, type VirtualAudioRoute } from "./audio-devices";
+import {
+  classifyAudioDevices,
+  type AudioDeviceCandidate,
+  type VirtualAudioRoute
+} from "./audio-devices";
 import { calculatePcmRms, hasMeaningfulAudioSignal } from "./audio-signal";
 import {
   clearVirtualAudioRoute,
   loadVirtualAudioRoute,
+  resolveStoredRouteAgainstDevices,
   saveVirtualAudioRoute
 } from "./virtual-audio-route";
 import {
@@ -14,7 +19,8 @@ import {
 } from "../obs/managed-obs-state";
 import {
   getSnapshotReadiness,
-  loadReadinessSnapshot
+  loadReadinessSnapshot,
+  setReadinessVerification
 } from "../readiness/readiness-snapshot";
 
 type RouteState = "idle" | "checking" | "ready" | "missing" | "denied" | "reboot";
@@ -29,78 +35,61 @@ type SelectableMediaDevices = MediaDevices & {
   selectAudioOutput?: (options?: { deviceId?: string }) => Promise<MediaDeviceInfo>;
 };
 
-const VERIFICATION_TTL_MS = 5 * 60_000;
+const RENEWAL_INTERVAL_MS = 4 * 60_000;
+const AUTO_CHECK_DELAY_MS = 800;
+const DEVICE_CHANGE_DEBOUNCE_MS = 1_500;
+
+const DEFAULT_IDLE_MESSAGE =
+  "把 AI 语音送进会议麦克风。已安装 VB-CABLE 时打开页面会自动检测；未安装时点下方按钮授权安装。";
+
+let silentCheckRunning = false;
 
 export function AudioRouteControl({ onReadyChange }: AudioRouteControlProps) {
   const readyRef = useRef(false);
   const stateRef = useRef<RouteState>("idle");
-  const expiryTimerRef = useRef<number | null>(null);
+  const renewalTimerRef = useRef<number | null>(null);
   const checkGenerationRef = useRef(0);
   const restoredRef = useRef(false);
   const [state, setState] = useState<RouteState>("idle");
   const [inputs, setInputs] = useState<string[]>([]);
   const [outputs, setOutputs] = useState<string[]>([]);
-  const [message, setMessage] = useState(
-    "把 AI 语音送进会议麦克风。未安装时点下方按钮授权安装，已安装直接检测。"
-  );
+  const [message, setMessage] = useState(DEFAULT_IDLE_MESSAGE);
 
   const updateState = useCallback((next: RouteState) => {
-    if (expiryTimerRef.current !== null) {
-      window.clearTimeout(expiryTimerRef.current);
-      expiryTimerRef.current = null;
+    if (renewalTimerRef.current !== null) {
+      window.clearTimeout(renewalTimerRef.current);
+      renewalTimerRef.current = null;
     }
     readyRef.current = next === "ready";
     stateRef.current = next;
     setState(next);
     onReadyChange?.(next === "ready");
-    if (next === "ready") {
-      expiryTimerRef.current = window.setTimeout(() => {
-        readyRef.current = false;
-        setState("idle");
-        setMessage("虚拟音频检测已超过 5 分钟，请在使用前重新检测。");
-        onReadyChange?.(false);
-      }, VERIFICATION_TTL_MS);
-    } else {
-      clearVirtualAudioRoute();
-    }
+    if (next !== "ready" && next !== "checking") clearVirtualAudioRoute();
   }, [onReadyChange]);
 
-  useEffect(() => {
-    if (restoredRef.current) return;
-    restoredRef.current = true;
-    const snapshot = getSnapshotReadiness(loadReadinessSnapshot());
-    const route = loadVirtualAudioRoute();
-    if (!snapshot.virtualAudioReady || !route) return;
+  function scheduleRenewal() {
+    if (renewalTimerRef.current !== null) window.clearTimeout(renewalTimerRef.current);
+    renewalTimerRef.current = window.setTimeout(() => {
+      renewalTimerRef.current = null;
+      renewRef.current();
+    }, RENEWAL_INTERVAL_MS);
+  }
+
+  function applyReady(route: VirtualAudioRoute, persist: boolean) {
+    if (persist) saveVirtualAudioRoute({ ...route, verifiedAt: Date.now() });
+    if (renewalTimerRef.current !== null) {
+      window.clearTimeout(renewalTimerRef.current);
+      renewalTimerRef.current = null;
+    }
     readyRef.current = true;
     stateRef.current = "ready";
     setState("ready");
-    setMessage(`${route.label} 已检测：请把会议麦克风选为“${route.input}”。`);
     onReadyChange?.(true);
-    expiryTimerRef.current = window.setTimeout(() => {
-      readyRef.current = false;
-      setState("idle");
-      setMessage("虚拟音频检测已超过 5 分钟，请在使用前重新检测。");
-      onReadyChange?.(false);
-    }, VERIFICATION_TTL_MS);
-  }, [onReadyChange]);
-
-  useEffect(() => {
-    const mediaDevices = navigator.mediaDevices;
-    if (!mediaDevices?.addEventListener) return;
-    const handleDeviceChange = () => {
-      checkGenerationRef.current += 1;
-      if (stateRef.current !== "ready" && stateRef.current !== "checking") return;
-      updateState("idle");
-      setMessage("音频设备列表已变化，原线路验证已失效，请重新检测。");
-    };
-    mediaDevices.addEventListener("devicechange", handleDeviceChange);
-    return () => mediaDevices.removeEventListener("devicechange", handleDeviceChange);
-  }, [updateState]);
-
-  useEffect(() => () => {
-    checkGenerationRef.current += 1;
-    if (expiryTimerRef.current !== null) window.clearTimeout(expiryTimerRef.current);
-  }, []);
+    setMessage(
+      `${route.label} 端到端信号通过：播放“${route.output}”已到达会议麦克风“${route.input}”。请在会议软件里选择该麦克风。`
+    );
+    scheduleRenewal();
+  }
 
   async function measurePeakRms(
     analyser: AnalyserNode,
@@ -203,16 +192,18 @@ export function AudioRouteControl({ onReadyChange }: AudioRouteControlProps) {
     }
   }
 
+  async function readDeviceCandidates(): Promise<AudioDeviceCandidate[]> {
+    return (await navigator.mediaDevices.enumerateDevices())
+      .filter((device) => device.kind === "audioinput" || device.kind === "audiooutput")
+      .map((device) => ({
+        kind: device.kind as "audioinput" | "audiooutput",
+        label: device.label,
+        deviceId: device.deviceId
+      }));
+  }
+
   async function enumerateCandidates() {
-    return classifyAudioDevices(
-      (await navigator.mediaDevices.enumerateDevices())
-        .filter((device) => device.kind === "audioinput" || device.kind === "audiooutput")
-        .map((device) => ({
-          kind: device.kind as "audioinput" | "audiooutput",
-          label: device.label,
-          deviceId: device.deviceId
-        }))
-    );
+    return classifyAudioDevices(await readDeviceCandidates());
   }
 
   async function resolveRoute(generation: number): Promise<VirtualAudioRoute | null> {
@@ -296,6 +287,182 @@ export function AudioRouteControl({ onReadyChange }: AudioRouteControlProps) {
     return result.rebootRequired;
   }
 
+  // Silent verification used on mount, device changes and periodic renewal.
+  // It never triggers driver downloads or UAC; installation stays button-only.
+  async function silentAutoCheck(trigger: "mount" | "devicechange") {
+    if (silentCheckRunning || !getManagedObsDesktopBridge()) return;
+    if (stateRef.current === "ready") return;
+    silentCheckRunning = true;
+    const generation = checkGenerationRef.current + 1;
+    checkGenerationRef.current = generation;
+    updateState("checking");
+    setMessage("正在自动检测虚拟声卡线路…");
+    const failToIdle = (text: string) => {
+      updateState("idle");
+      setMessage(text);
+    };
+    try {
+      if (!navigator.mediaDevices?.enumerateDevices || !navigator.mediaDevices?.getUserMedia) {
+        failToIdle("当前浏览器不支持音频设备检测，请使用最新版 Edge 或 Chrome。");
+        return;
+      }
+      const candidates = await readDeviceCandidates();
+      if (checkGenerationRef.current !== generation) return;
+      const classified = classifyAudioDevices(candidates);
+      setInputs(classified.inputs);
+      setOutputs(classified.outputs);
+
+      const stored = loadVirtualAudioRoute();
+      const resolvedStored = stored ? resolveStoredRouteAgainstDevices(stored, candidates) : null;
+      if (resolvedStored) {
+        if (await verifyRouteSignal(resolvedStored.inputDeviceId, resolvedStored.outputDeviceId, generation)) {
+          applyReady(resolvedStored, true);
+          return;
+        }
+        if (checkGenerationRef.current !== generation) return;
+      }
+
+      const status = await getManagedObsDesktopBridge()?.getPrerequisiteStatus();
+      if (checkGenerationRef.current !== generation) return;
+      if (!status?.virtualAudioInstalled) {
+        failToIdle(DEFAULT_IDLE_MESSAGE);
+        return;
+      }
+
+      const permissionStream = await requestAudioStream({ audio: true }, generation);
+      permissionStream.getTracks().forEach((track) => track.stop());
+      if (checkGenerationRef.current !== generation) return;
+      const route = await resolveRoute(generation);
+      if (!route) {
+        failToIdle(
+          trigger === "devicechange"
+            ? "音频设备列表已变化，自动重验未通过，请点按钮重新检测。"
+            : DEFAULT_IDLE_MESSAGE
+        );
+        return;
+      }
+      const signalReady = route.output === "虚拟播放端"
+        ? true
+        : await verifyRouteSignal(route.inputDeviceId, route.outputDeviceId, generation);
+      if (checkGenerationRef.current !== generation) return;
+      if (!signalReady) {
+        failToIdle("自动检测到设备配对，但线路没有通过信号实测，请点按钮重新检测。");
+        return;
+      }
+      applyReady(route, true);
+    } catch (cause) {
+      if (cause instanceof Error && cause.message === "DEVICE_CHECK_CANCELLED") return;
+      if (checkGenerationRef.current !== generation) return;
+      if (cause instanceof DOMException && (cause.name === "NotAllowedError" || cause.name === "SecurityError")) {
+        updateState("denied");
+        setMessage("Windows 已阻止麦克风访问。请打开隐私设置，开启麦克风访问和桌面应用访问后重试。");
+      } else {
+        failToIdle(DEFAULT_IDLE_MESSAGE);
+      }
+    } finally {
+      silentCheckRunning = false;
+    }
+  }
+
+  async function renewVerification() {
+    if (silentCheckRunning || stateRef.current !== "ready") return;
+    const generation = checkGenerationRef.current + 1;
+    checkGenerationRef.current = generation;
+    const stored = loadVirtualAudioRoute();
+    try {
+      if (!stored || !navigator.mediaDevices?.enumerateDevices) {
+        updateState("idle");
+        setMessage("虚拟声卡线路自动复核未通过，请重新检测。");
+        return;
+      }
+      const resolved = resolveStoredRouteAgainstDevices(stored, await readDeviceCandidates());
+      if (checkGenerationRef.current !== generation) return;
+      if (!resolved) {
+        updateState("idle");
+        setMessage("音频设备列表已变化，自动重验未通过，请点按钮重新检测。");
+        return;
+      }
+      const ok = await verifyRouteSignal(resolved.inputDeviceId, resolved.outputDeviceId, generation);
+      if (checkGenerationRef.current !== generation) return;
+      if (!ok) {
+        updateState("idle");
+        setMessage("虚拟声卡线路自动复核未通过，请重新检测。");
+        return;
+      }
+      saveVirtualAudioRoute({ ...stored, verifiedAt: Date.now() });
+      setReadinessVerification("virtualAudioReady", true);
+      scheduleRenewal();
+    } catch (cause) {
+      if (cause instanceof Error && cause.message === "DEVICE_CHECK_CANCELLED") return;
+      if (checkGenerationRef.current !== generation) return;
+      updateState("idle");
+      setMessage("虚拟声卡线路自动复核未通过，请重新检测。");
+    }
+  }
+
+  const renewRef = useRef<() => void>(() => undefined);
+  renewRef.current = () => { void renewVerification(); };
+  const silentRef = useRef<(trigger: "mount" | "devicechange") => void>(() => undefined);
+  silentRef.current = (trigger) => { void silentAutoCheck(trigger); };
+
+  useEffect(() => {
+    if (restoredRef.current) return;
+    restoredRef.current = true;
+    void (async () => {
+      const snapshot = getSnapshotReadiness(loadReadinessSnapshot());
+      const stored = loadVirtualAudioRoute();
+      if (
+        snapshot.virtualAudioReady &&
+        stored &&
+        typeof navigator.mediaDevices?.enumerateDevices === "function"
+      ) {
+        try {
+          const resolved = resolveStoredRouteAgainstDevices(stored, await readDeviceCandidates());
+          if (resolved && stateRef.current !== "ready" && checkGenerationRef.current === 0) {
+            readyRef.current = true;
+            stateRef.current = "ready";
+            setState("ready");
+            onReadyChange?.(true);
+            setMessage(`${resolved.label} 已检测：请把会议麦克风选为“${resolved.input}”。`);
+            scheduleRenewal();
+            return;
+          }
+        } catch {
+          // Fall through to the silent check below.
+        }
+      }
+      window.setTimeout(() => {
+        if (checkGenerationRef.current === 0 && stateRef.current === "idle") silentRef.current("mount");
+      }, AUTO_CHECK_DELAY_MS);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const mediaDevices = navigator.mediaDevices;
+    if (!mediaDevices?.addEventListener) return;
+    let debounceId: number | null = null;
+    const handleDeviceChange = () => {
+      if (debounceId !== null) window.clearTimeout(debounceId);
+      debounceId = window.setTimeout(() => {
+        debounceId = null;
+        checkGenerationRef.current += 1;
+        if (stateRef.current === "ready") renewRef.current();
+        else if (stateRef.current !== "checking") silentRef.current("devicechange");
+      }, DEVICE_CHANGE_DEBOUNCE_MS);
+    };
+    mediaDevices.addEventListener("devicechange", handleDeviceChange);
+    return () => {
+      if (debounceId !== null) window.clearTimeout(debounceId);
+      mediaDevices.removeEventListener("devicechange", handleDeviceChange);
+    };
+  }, []);
+
+  useEffect(() => () => {
+    checkGenerationRef.current += 1;
+    if (renewalTimerRef.current !== null) window.clearTimeout(renewalTimerRef.current);
+  }, []);
+
   async function checkDevices() {
     const generation = checkGenerationRef.current + 1;
     checkGenerationRef.current = generation;
@@ -339,21 +506,7 @@ export function AudioRouteControl({ onReadyChange }: AudioRouteControlProps) {
         );
         return;
       }
-      saveVirtualAudioRoute(route);
-      readyRef.current = true;
-      stateRef.current = "ready";
-      setState("ready");
-      onReadyChange?.(true);
-      if (expiryTimerRef.current !== null) window.clearTimeout(expiryTimerRef.current);
-      expiryTimerRef.current = window.setTimeout(() => {
-        readyRef.current = false;
-        setState("idle");
-        setMessage("虚拟音频检测已超过 5 分钟，请在使用前重新检测。");
-        onReadyChange?.(false);
-      }, VERIFICATION_TTL_MS);
-      setMessage(
-        `${route.label} 端到端信号通过：播放“${route.output}”已到达会议麦克风“${route.input}”。请在会议软件里选择该麦克风。`
-      );
+      applyReady(route, true);
     } catch (cause) {
       if (cause instanceof Error && cause.message === "DEVICE_CHECK_CANCELLED") return;
       if (cause instanceof DOMException && (cause.name === "NotAllowedError" || cause.name === "SecurityError")) {
@@ -396,7 +549,7 @@ export function AudioRouteControl({ onReadyChange }: AudioRouteControlProps) {
         {state === "denied" && <button className="secondary" onClick={() => void openMicrophoneSettings()}>打开 Windows 麦克风权限</button>}
       </div>
       <ol>
-        <li>未安装时点上方按钮授权安装；安装后若设备未出现，重启电脑再检测。</li>
+        <li>未安装时点上方按钮授权安装；安装后若设备未出现，重启电脑后再检测。</li>
         <li>会议麦克风选 CABLE Output；AI 语音播放到 CABLE Input（中文系统可能显示 CABLE In 16 Ch 或 扬声器 (VB-Audio Virtual Cable)）。</li>
       </ol>
       {(inputs.length > 0 || outputs.length > 0) && (

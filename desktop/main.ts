@@ -6,7 +6,7 @@ import { applyLocalEnvFile, resolveDesktopEnvFiles } from "./load-env";
 import { ManagedObsController } from "./managed-obs";
 import { ManagedObsSecretStore } from "./obs-secret-store";
 import { getPrerequisiteStatus } from "./prerequisites/windows-install";
-import { LocalServerStartError, startLocalServer, stopOwnedProcess } from "./server-process";
+import { LocalServerStartError, resolveLoopbackPort, startLocalServer, stopOwnedProcess } from "./server-process";
 import type { DesktopStatus, OwnedProcess } from "./types";
 
 for (const envFile of resolveDesktopEnvFiles(process.cwd())) {
@@ -81,7 +81,8 @@ if (!hasLock) {
       executablePath: process.execPath,
       serverPath: path.join(runtimeRoot, "server.js"),
       cwd: runtimeRoot,
-      logPath: path.join(app.getPath("userData"), "logs", "desktop-startup.log")
+      logPath: path.join(app.getPath("userData"), "logs", "desktop-startup.log"),
+      port: await resolveLoopbackPort(path.join(app.getPath("userData"), "local-server-port"))
     });
     const baseUrl = server.baseUrl;
     session.defaultSession.setPermissionCheckHandler((_webContents, permission, requestingOrigin, details) =>
