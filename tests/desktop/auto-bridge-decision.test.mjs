@@ -66,9 +66,18 @@ test("needs manual after 3 attempts once backoff elapses", () => {
 });
 
 test("new meeting re-arms after needs-manual", () => {
-  const machine = { attempts: 3, lastFailureAt: 1000, awaitingManual: true, capturedPid: null };
+  const machine = { attempts: 3, lastFailureAt: 1000, awaitingManual: true, capturedPid: null, failedPid: 11 };
   const other = { pid: 30, name: "WeMeetApp.exe", title: "下一场" };
   const decision = decideAutoBridge([other], { ...base, machine, enabled: true, software: "wemeetapp.exe" });
   assert.deepEqual(decision.action, { type: "start", pid: 30 });
   assert.equal(decision.machine.awaitingManual, false);
+});
+
+test("needs-manual persists while the same failed meeting stays open", () => {
+  const machine = { attempts: 3, lastFailureAt: 1000, awaitingManual: true, capturedPid: null, failedPid: 11 };
+  const decision = decideAutoBridge([wemeet], { ...base, machine, enabled: true, software: "wemeetapp.exe" });
+  assert.equal(decision.action, "needs-manual");
+  const gone = decideAutoBridge([], { ...base, machine, enabled: true, software: "wemeetapp.exe" });
+  assert.equal(gone.action, "waiting");
+  assert.equal(gone.machine.failedPid, null);
 });

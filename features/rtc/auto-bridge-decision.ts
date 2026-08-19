@@ -9,6 +9,7 @@ export type AutoBridgeMachine = {
   attempts: number;
   lastFailureAt: number | null;
   awaitingManual: boolean;
+  failedPid: number | null;
 };
 
 export type AutoBridgeAction =
@@ -21,7 +22,7 @@ export type AutoBridgeAction =
   | { type: "start"; pid: number };
 
 export function initialAutoBridgeMachine(): AutoBridgeMachine {
-  return { capturedPid: null, attempts: 0, lastFailureAt: null, awaitingManual: false };
+  return { capturedPid: null, attempts: 0, lastFailureAt: null, awaitingManual: false, failedPid: null };
 }
 
 /**
@@ -60,17 +61,29 @@ export function decideAutoBridge(
   // 手动会话正在运行：自动桥接让位，不触发新捕获。
   if (input.sessionRunning) return { action: "holding", machine };
 
-  // 已标记需要人工介入：会议消失则复位；新会议出现则重新武装并立即尝试捕获。
+  // 已标记需要人工介入：失败会议仍在则持续挂起（停止自动重试）；
+  // 失败进程消失或换了新会议则整体复位，重新武装。
   if (machine.awaitingManual) {
-    if (matches.length === 0) return { action: "waiting", machine: initialAutoBridgeMachine() };
-    return { action: { type: "start", pid: matches[0].pid }, machine: initialAutoBridgeMachine() };
+    if (
+      machine.failedPid !== null &&
+      matches.some((process) => process.pid === machine.failedPid)
+    ) {
+      return { action: "needs-manual", machine };
+    }
+    const reset = initialAutoBridgeMachine();
+    const next = matches[0];
+    if (!next) return { action: "waiting", machine: reset };
+    return { action: { type: "start", pid: next.pid }, machine: reset };
   }
 
   // 失败退避：未到退避窗口则等待；退避结束后尝试次数已耗尽则转人工。
   if (machine.lastFailureAt !== null) {
     if (now - machine.lastFailureAt < AUTO_BRIDGE_BACKOFF_MS) return { action: "backoff", machine };
     if (machine.attempts >= AUTO_BRIDGE_MAX_ATTEMPTS) {
-      return { action: "needs-manual", machine: { ...machine, awaitingManual: true } };
+      return {
+        action: "needs-manual",
+        machine: { ...machine, awaitingManual: true, failedPid: matches[0]?.pid ?? machine.failedPid }
+      };
     }
   }
 
@@ -80,8 +93,8 @@ export function decideAutoBridge(
 }
 
 /** 启动尝试登记（controller 在每次 startBridgeSession 调用前使用）。 */
-export function recordAttempt(machine: AutoBridgeMachine, now: number): AutoBridgeMachine {
-  return { ...machine, attempts: machine.attempts + 1, lastFailureAt: now };
+export function recordAttempt(machine: AutoBridgeMachine, now: number, pid: number): AutoBridgeMachine {
+  return { ...machine, attempts: machine.attempts + 1, lastFailureAt: now, failedPid: pid };
 }
 
 /** 启动成功后登记捕获的 pid。 */
