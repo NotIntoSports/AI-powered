@@ -610,3 +610,11 @@
 - 目标：最大化/全屏后三栏工作台随视口拉伸；「索引失败」直接展示 `indexError` 可读原因。
 - 采用：现有 CSS 与 API 字段，无新依赖。`.console.workspacePage` 宽度改为 `min(1800px, 100% - 32px)`；窄屏断点调至 1280px。客户端与管理端展示已返回的 `indexError`，并对扫描件/`.doc`/embedding 不可用做中文映射。
 - 未采用：第三方布局库；单独「重新索引」客户端按钮（管理端已有）。
+
+# 2026-08-19：会议音频自动桥接（自动检测会议进程并推流到 RTC 房间）
+
+- 目标：客户端预选一款会议软件后，检测到其进程自动捕获音频并长连接推流到 LiveKit/火山云 RTC 房间（每场会议一个房间）；散会自动停止，失败退避重试最多 3 次后转人工。
+- 结论：零新增依赖，复用现有能力。
+- 复用：Electron IPC `listMeetingProcesses` / AudioBridge 捕获；`/api/rtc/token` + LiveKit/火山云 transport（bridge-session 单例）；localStorage 偏好模式（同 remote-monitor.ts）。
+- 未采用：`@livekit/rtc-node`（主进程推流）——火山云无对应 Node SDK，双供应商无法统一，且违反「优先复用现有能力」。
+- 设计文档：docs/superpowers/specs/2026-08-19-auto-meeting-bridge-design.md
