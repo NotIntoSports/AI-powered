@@ -3,7 +3,10 @@ import test from "node:test";
 
 import {
   initialAutoBridgeMachine,
-  decideAutoBridge
+  decideAutoBridge,
+  recordAttempt,
+  recordCaptured,
+  recordFailure
 } from "../../features/rtc/auto-bridge-decision.ts";
 
 const base = { now: 1000, machine: initialAutoBridgeMachine() };
@@ -28,6 +31,19 @@ test("name match is case-insensitive and ignores other software", () => {
   const zoom = { pid: 20, name: "zoom.exe", title: "call" };
   const decision = decideAutoBridge([zoom], { ...base, enabled: true, software: "wemeetapp.exe" });
   assert.equal(decision.action, "waiting");
+  assert.deepEqual(
+    decideAutoBridge([wemeet], { ...base, enabled: true, software: "WeMeetApp.EXE" }).action,
+    { type: "start", pid: 11 }
+  );
+});
+
+test("record helpers maintain machine contract", () => {
+  const attempted = recordAttempt(initialAutoBridgeMachine(), 1000, 11);
+  assert.deepEqual(attempted, { ...initialAutoBridgeMachine(), attempts: 1, lastFailureAt: 1000, failedPid: 11 });
+  const captured = recordCaptured(attempted, 11);
+  assert.equal(captured.capturedPid, 11);
+  const failed = recordFailure(attempted, 2000);
+  assert.equal(failed.lastFailureAt, 2000);
 });
 
 test("ignores matching process with empty title", () => {
@@ -63,6 +79,15 @@ test("needs manual after 3 attempts once backoff elapses", () => {
   const blocked = decideAutoBridge([wemeet], { now: 99_999, machine: exhausted, enabled: true, software: "wemeetapp.exe" });
   assert.equal(blocked.action, "needs-manual");
   assert.equal(blocked.machine.awaitingManual, true);
+});
+
+test("needs-manual keeps the originally failed pid when a new meeting appears during backoff", () => {
+  // 3 次尝试均针对 pid 11 失败；pid 11 消失后新会议 pid 30 出现，退避结束时不应把 30 误标为失败会议
+  const machine = { ...initialAutoBridgeMachine(), attempts: 3, lastFailureAt: 1000, failedPid: 11 };
+  const newMeeting = { pid: 30, name: "WeMeetApp.exe", title: "新会议" };
+  const decision = decideAutoBridge([newMeeting], { now: 99_999, machine, enabled: true, software: "wemeetapp.exe" });
+  assert.equal(decision.action, "needs-manual");
+  assert.equal(decision.machine.failedPid, 11);
 });
 
 test("new meeting re-arms after needs-manual", () => {

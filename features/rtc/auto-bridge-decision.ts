@@ -82,7 +82,7 @@ export function decideAutoBridge(
     if (machine.attempts >= AUTO_BRIDGE_MAX_ATTEMPTS) {
       return {
         action: "needs-manual",
-        machine: { ...machine, awaitingManual: true, failedPid: matches[0]?.pid ?? machine.failedPid }
+        machine: { ...machine, awaitingManual: true, failedPid: machine.failedPid ?? matches[0]?.pid ?? null }
       };
     }
   }
