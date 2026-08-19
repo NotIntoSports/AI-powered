@@ -597,6 +597,14 @@
 - 未采用：录音文件落库与克隆任务历史（与当前「只存 speaker_id」模型不一致）；管理端清绑操作（本次仅可见性）。
 - 限制：录音本身仍不落库；「提交成功」以账号是否写入有效 `speaker_id` 为准。
 
+# 2026-08-19：虚拟声卡线路自动检测（去除每次手动检测）
+
+- 目标：设置页「AI 语音 → 会议麦克风」不再要求每次手动点「一键授权并检测」；打开页面自动静默验证，ready 状态周期续期，设备变化自动重验。
+- 根因：桌面壳每次启动用随机回环端口，origin 变化导致 `localStorage` 已验证线路与 `sessionStorage` readiness 快照读不到；且 5 分钟硬过期要求重点按钮。
+- 采用：不新增依赖。`desktop/server-process.ts` 新增 `resolveLoopbackPort`，把端口写入 `userData/local-server-port`，空闲则复用，保持 origin 稳定；`features/audio/virtual-audio-route.ts` 存储增加 `verifiedAt`（key 升 v2，兼容读 v1），并新增 `resolveStoredRouteAgainstDevices` 按设备标签重解析 `deviceId`；`features/audio/audio-route-control.tsx` 挂载后静默跑「快照恢复 → 存储线路 tone 实测 → 已安装时完整 resolveRoute+实测」，ready 期间每 4 分钟静默续期，`devicechange` 防抖后静默重验；静默路径不触发下载/UAC，安装仍只由按钮触发。舞台页 TTS sink 先按标签重解析再 `setSinkId`。
+- 可行性：Electron 已对本地 origin 自动授予 media 权限，且默认 autoplay policy 为 `no-user-gesture-required`，`AudioContext`/`audio.play()` 无需用户手势。
+- 限制：未安装 VB-CABLE 的新环境不弹 UAC、保持手动按钮；静默检测失败回 idle 并提示。
+
 # 2026-08-17：工作台全屏宽度与简历索引错误可见性
 
 - 目标：最大化/全屏后三栏工作台随视口拉伸；「索引失败」直接展示 `indexError` 可读原因。

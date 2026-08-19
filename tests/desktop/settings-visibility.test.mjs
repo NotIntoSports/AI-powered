@@ -54,9 +54,13 @@ test("virtual audio one-click installs the signed driver and stages TTS to the v
   assert.match(audioRoute, /一键授权并检测/);
   assert.match(audioRoute, /setSinkId/);
   assert.match(audioRoute, /loadReadinessSnapshot/);
+  assert.match(audioRoute, /正在自动检测虚拟声卡线路/);
+  assert.match(audioRoute, /resolveStoredRouteAgainstDevices/);
+  assert.match(audioRoute, /verifiedAt/);
   assert.doesNotMatch(audioRoute, /安装包中的虚拟音频驱动资源缺失/);
   assert.doesNotMatch(audioRoute, /\/api\/stage-test-speech/);
   assert.match(stage, /loadVirtualAudioRoute/);
+  assert.match(stage, /resolveStoredRouteAgainstDevices/);
   assert.match(stage, /setSinkId/);
 });
 

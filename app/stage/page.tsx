@@ -1,12 +1,36 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { loadVirtualAudioRoute } from "../../features/audio/virtual-audio-route";
+import {
+  loadVirtualAudioRoute,
+  resolveStoredRouteAgainstDevices
+} from "../../features/audio/virtual-audio-route";
 import type { InterviewSession } from "../../lib/interview";
 
 type SinkAudioElement = HTMLAudioElement & {
   setSinkId?: (deviceId: string) => Promise<void>;
 };
+
+// Stored deviceIds are origin-scoped and can go stale; re-resolve the verified
+// route by device label before steering TTS into the virtual sink.
+async function resolveVirtualAudioSinkId(): Promise<string | null> {
+  const route = loadVirtualAudioRoute();
+  if (!route?.outputDeviceId) return null;
+  try {
+    const devices = (await navigator.mediaDevices?.enumerateDevices?.()) ?? [];
+    const resolved = resolveStoredRouteAgainstDevices(
+      route,
+      devices.map((device) => ({
+        kind: device.kind as "audioinput" | "audiooutput",
+        label: device.label,
+        deviceId: device.deviceId
+      }))
+    );
+    return resolved?.outputDeviceId ?? null;
+  } catch {
+    return null;
+  }
+}
 
 type AvatarMetadata = {
   available: boolean;
@@ -88,10 +112,10 @@ export default function StagePage() {
       const url = URL.createObjectURL(await response.blob());
       audioUrlRef.current = url;
       const audio = new Audio(url) as SinkAudioElement;
-      const route = loadVirtualAudioRoute();
-      if (route?.outputDeviceId && audio.setSinkId) {
+      const sinkId = await resolveVirtualAudioSinkId();
+      if (sinkId && audio.setSinkId) {
         try {
-          await audio.setSinkId(route.outputDeviceId);
+          await audio.setSinkId(sinkId);
         } catch {
           // Keep default output if the saved virtual sink is missing.
         }
