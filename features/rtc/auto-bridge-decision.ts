@@ -61,6 +61,18 @@ export function decideAutoBridge(
   // 手动会话正在运行：自动桥接让位，不触发新捕获。
   if (input.sessionRunning) return { action: "holding", machine };
 
+  // 失败会议已退出（failedPid 不在快照中）且尝试次数尚未耗尽：
+  // 整体复位再决策，避免上一场会议的 attempts/lastFailureAt 泄漏给新会议。
+  // （耗尽场景由下方 needs-manual 分支负责上报，随后 awaitingManual 分支自行复位。）
+  if (
+    machine.lastFailureAt !== null &&
+    machine.failedPid !== null &&
+    machine.attempts < AUTO_BRIDGE_MAX_ATTEMPTS &&
+    !matches.some((process) => process.pid === machine.failedPid)
+  ) {
+    return decideAutoBridge(processes, { ...input, machine: initialAutoBridgeMachine() });
+  }
+
   // 已标记需要人工介入：失败会议仍在则持续挂起（停止自动重试）；
   // 失败进程消失或换了新会议则整体复位，重新武装。
   if (machine.awaitingManual) {
