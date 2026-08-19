@@ -282,11 +282,20 @@ test("needs manual after 3 attempts once backoff elapses", () => {
 });
 
 test("new meeting re-arms after needs-manual", () => {
-  const machine = { attempts: 3, lastFailureAt: 1000, awaitingManual: true, capturedPid: null };
+  const machine = { attempts: 3, lastFailureAt: 1000, awaitingManual: true, capturedPid: null, failedPid: 11 };
   const other = { pid: 30, name: "WeMeetApp.exe", title: "下一场" };
   const decision = decideAutoBridge([other], { ...base, machine, enabled: true, software: "wemeetapp.exe" });
   assert.deepEqual(decision.action, { type: "start", pid: 30 });
   assert.equal(decision.machine.awaitingManual, false);
+});
+
+test("needs-manual persists while the same failed meeting stays open", () => {
+  const machine = { attempts: 3, lastFailureAt: 1000, awaitingManual: true, capturedPid: null, failedPid: 11 };
+  const decision = decideAutoBridge([wemeet], { ...base, machine, enabled: true, software: "wemeetapp.exe" });
+  assert.equal(decision.action, "needs-manual");
+  const gone = decideAutoBridge([], { ...base, machine, enabled: true, software: "wemeetapp.exe" });
+  assert.equal(gone.action, "waiting");
+  assert.equal(gone.machine.failedPid, null);
 });
 ```
 
@@ -311,6 +320,7 @@ export type AutoBridgeMachine = {
   attempts: number;
   lastFailureAt: number | null;
   awaitingManual: boolean;
+  failedPid: number | null;
 };
 
 export type AutoBridgeAction =
@@ -323,7 +333,7 @@ export type AutoBridgeAction =
   | { type: "start"; pid: number };
 
 export function initialAutoBridgeMachine(): AutoBridgeMachine {
-  return { capturedPid: null, attempts: 0, lastFailureAt: null, awaitingManual: false };
+  return { capturedPid: null, attempts: 0, lastFailureAt: null, awaitingManual: false, failedPid: null };
 }
 
 export function decideAutoBridge(
@@ -359,14 +369,19 @@ export function decideAutoBridge(
   if (input.sessionRunning) return { action: "holding", machine };
 
   if (machine.awaitingManual) {
-    if (matches.length === 0) return { action: "waiting", machine: initialAutoBridgeMachine() };
-    return { action: "needs-manual", machine };
+    if (machine.failedPid !== null && matches.some((p) => p.pid === machine.failedPid)) {
+      return { action: "needs-manual", machine };
+    }
+    const reset = initialAutoBridgeMachine();
+    const next = matches[0];
+    if (!next) return { action: "waiting", machine: reset };
+    return { action: { type: "start", pid: next.pid }, machine: reset };
   }
 
   if (machine.lastFailureAt !== null) {
     if (now - machine.lastFailureAt < AUTO_BRIDGE_BACKOFF_MS) return { action: "backoff", machine };
     if (machine.attempts >= AUTO_BRIDGE_MAX_ATTEMPTS) {
-      return { action: "needs-manual", machine: { ...machine, awaitingManual: true } };
+      return { action: "needs-manual", machine: { ...machine, awaitingManual: true, failedPid: machine.failedPid ?? matches[0]?.pid ?? null } };
     }
   }
 
@@ -376,8 +391,8 @@ export function decideAutoBridge(
 }
 
 /** 启动尝试登记（controller 在每次 startBridgeSession 调用前使用）。 */
-export function recordAttempt(machine: AutoBridgeMachine, now: number): AutoBridgeMachine {
-  return { ...machine, attempts: machine.attempts + 1, lastFailureAt: now };
+export function recordAttempt(machine: AutoBridgeMachine, now: number, pid: number): AutoBridgeMachine {
+  return { ...machine, attempts: machine.attempts + 1, lastFailureAt: now, failedPid: pid };
 }
 
 /** 启动成功后登记捕获的 pid。 */
@@ -391,7 +406,7 @@ export function recordFailure(machine: AutoBridgeMachine, now: number): AutoBrid
 }
 ```
 
-注意：`decideAutoBridge` 本身不修改 attempts/lastFailureAt（保持纯函数），尝试计数由 controller 通过 `recordAttempt`（start 调用前，attempts+1 并记录退避起点）维护；启动成功后 `recordCaptured` 登记 pid（`lastFailureAt` 保留但捕获存活期间不会进入失败分支，进程消失时整体复位）；启动抛错则不额外操作，状态机已含失败信息，下一轮进入 backoff。
+注意：`decideAutoBridge` 本身不修改 attempts/lastFailureAt（保持纯函数），尝试计数由 controller 通过 `recordAttempt(machine, now, pid)`（start 调用前，attempts+1、记录退避起点与失败 pid）维护；启动成功后 `recordCaptured` 登记 pid；启动抛错则不额外操作，状态机已含失败信息，下一轮进入 backoff。`failedPid` 用于 needs-manual 持续期判定：同一失败会议仍在则持续挂起不重试，该进程消失后整体复位重新武装（commit 24debdb 修正）。
 
 - [ ] **Step 4: 运行确认通过**
 
@@ -781,7 +796,7 @@ export function AutoBridgeController() {
         }
         // action = { type: "start", pid }
         publishStatus({ text: "检测到会议，正在自动建立推流…", state: "starting" });
-        machine = recordAttempt(machine, Date.now());
+        machine = recordAttempt(machine, Date.now(), action.pid);
         try {
           await startBridgeSession(action.pid, "auto", "meet", {
             onStatus: (message) => publishStatus({ text: message, state: "captured" }),
