@@ -1,7 +1,7 @@
-import { MEETING_EXECUTABLE_NAMES } from "../../desktop/audio/meeting-processes.ts";
+import { MEETING_EXECUTABLE_NAMES } from "../../desktop/audio/meeting-software.ts";
 
 export { MEETING_EXECUTABLE_NAMES };
-export { MEETING_SOFTWARE_LABELS } from "../../desktop/audio/meeting-processes.ts";
+export { MEETING_SOFTWARE_LABELS } from "../../desktop/audio/meeting-software.ts";
 
 const ENABLED_KEY = "ai-auto-bridge-enabled";
 const SOFTWARE_KEY = "ai-auto-bridge-software";
