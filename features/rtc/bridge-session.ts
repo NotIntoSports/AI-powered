@@ -97,7 +97,7 @@ export async function startBridgeSession(
   roomIdPrefix: string,
   events: BridgeSessionEvents
 ): Promise<BridgeSessionHandle> {
-  if (active || starting) throw new Error("BRIDGE_SESSION_ALREADY_RUNNING");
+  if (active || starting) throw new Error("已有桥接会话正在运行，请先停止后再启动。");
   starting = true;
   try {
     const bridge = getDesktopBridge();

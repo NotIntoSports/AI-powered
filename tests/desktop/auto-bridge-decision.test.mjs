@@ -98,6 +98,16 @@ test("new meeting re-arms after needs-manual", () => {
   assert.equal(decision.machine.awaitingManual, false);
 });
 
+test("failed meeting exiting before exhaustion resets count for the next meeting", () => {
+  // 会议 A（pid 100）失败 2 次后、尝试次数耗尽前退出；新会议 B（pid 200）应从 0 重新计次
+  const machine = { ...initialAutoBridgeMachine(), attempts: 2, lastFailureAt: 80_000, failedPid: 100 };
+  const meetingB = { pid: 200, name: "feishu.exe", title: "会议B" };
+  const decision = decideAutoBridge([meetingB], { now: 100_000, machine, enabled: true, software: "feishu.exe" });
+  assert.deepEqual(decision.action, { type: "start", pid: 200 });
+  assert.equal(decision.machine.attempts, 0);
+  assert.equal(decision.machine.failedPid, null);
+});
+
 test("needs-manual persists while the same failed meeting stays open", () => {
   const machine = { attempts: 3, lastFailureAt: 1000, awaitingManual: true, capturedPid: null, failedPid: 11 };
   const decision = decideAutoBridge([wemeet], { ...base, machine, enabled: true, software: "wemeetapp.exe" });
