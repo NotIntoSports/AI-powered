@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
-const meetingExecutableNames = new Set([
+export const MEETING_EXECUTABLE_NAMES: ReadonlySet<string> = new Set([
   "teams.exe",
   "ms-teams.exe",
   "wemeetapp.exe",
@@ -11,6 +11,17 @@ const meetingExecutableNames = new Set([
   "dingtalk.exe",
   "zoom.exe"
 ]);
+
+/** 前端下拉框显示名；键为小写可执行名。 */
+export const MEETING_SOFTWARE_LABELS: Record<string, string> = {
+  "teams.exe": "Microsoft Teams",
+  "ms-teams.exe": "Microsoft Teams (新版)",
+  "wemeetapp.exe": "腾讯会议",
+  "feishu.exe": "飞书",
+  "lark.exe": "Lark",
+  "dingtalk.exe": "钉钉",
+  "zoom.exe": "Zoom"
+};
 
 export type MeetingProcess = {
   pid: number;
@@ -26,7 +37,7 @@ export function filterMeetingProcesses(processes: unknown[]): MeetingProcess[] {
       const pid = typeof value.pid === "number" ? value.pid : Number(value.pid);
       const name = typeof value.name === "string" ? value.name : "";
       const title = typeof value.title === "string" ? value.title : "";
-      return Number.isInteger(pid) && pid > 0 && title.trim() && meetingExecutableNames.has(name.toLowerCase())
+      return Number.isInteger(pid) && pid > 0 && title.trim() && MEETING_EXECUTABLE_NAMES.has(name.toLowerCase())
         ? [{ pid, name, title }]
         : [];
     })
