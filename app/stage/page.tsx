@@ -53,6 +53,7 @@ export default function StagePage() {
   const [ttsError, setTtsError] = useState("");
   const [lastSpeechAt, setLastSpeechAt] = useState(0);
   const [mediaReady, setMediaReady] = useState(true);
+  const [captureState, setCaptureState] = useState<"off" | "capturing" | "silent">("off");
   const playbackBlocked = ttsState === "error" && /not.?allowed/i.test(ttsError);
 
   function releaseAudio() {
@@ -171,10 +172,17 @@ export default function StagePage() {
           text: string;
           createdAt: number;
         } | null;
-        const stageStatus = await stageStatusResponse.json() as { stopSpeechAt?: number };
+        const stageStatus = await stageStatusResponse.json() as {
+          stopSpeechAt?: number;
+          captureState?: "off" | "capturing" | "silent";
+          captureUpdatedAt?: number;
+        };
         if (!active) return;
         setSession(next);
         setAvatarMedia(nextAvatar);
+        // 采集状态超过 8 秒未刷新视为过期（主控台可能已关闭），避免展示 stale 状态。
+        const captureFresh = Date.now() - (stageStatus.captureUpdatedAt || 0) < 8_000;
+        setCaptureState(captureFresh ? stageStatus.captureState ?? "off" : "off");
         if ((stageStatus.stopSpeechAt || 0) > lastStopSpeechAt.current) {
           lastStopSpeechAt.current = stageStatus.stopSpeechAt || 0;
           speechToken.current += 1;
@@ -282,6 +290,13 @@ export default function StagePage() {
         </div>
         <i className={speaking ? "live" : ""}>{speaking ? "正在提问" : "正在聆听"}</i>
       </section>
+      {captureState !== "capturing" && (
+        <p className={captureState === "silent" ? "captureAlert" : "captureHint"}>
+          {captureState === "silent"
+            ? "采集已开启但未检测到语音：检查共享系统音频/对方是否说话"
+            : "未采集会议音频：在主控台点击“开始听取对方”"}
+        </p>
+      )}
       {currentSpeechText && <p className="caption">{currentSpeechText}</p>}
       {playbackBlocked && currentSpeechText && (
         <button

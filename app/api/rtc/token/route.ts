@@ -28,8 +28,10 @@ export async function POST(request: Request) {
     });
     const body = await response.json().catch(() => null);
     if (response.ok) {
+      console.log(`[rtc-token] path=control-api status=${response.status} provider=${body?.provider || "unknown"} roomId=${body?.roomId || ""} urlPresent=${Boolean(body?.url)}`);
       return NextResponse.json(body, { headers: { "Cache-Control": "no-store" } });
     }
+    console.warn(`[rtc-token] path=control-api status=${response.status} code=${body?.code || "unknown"}${response.status === 503 || response.status === 404 ? " fallback=local" : ""}`);
     if (response.status !== 503 && response.status !== 404) {
       return NextResponse.json(
         { code: body?.code || "RTC_TOKEN_FAILED", message: body?.message || "无法获取 RTC 短期 Token" },
@@ -37,11 +39,15 @@ export async function POST(request: Request) {
       );
     }
   }
+  if (!token) console.warn("[rtc-token] path=local-fallback reason=no-control-api-cookie");
   try {
-    return NextResponse.json(await issueRtcToken(parsed.data.roomId, parsed.data.userId), {
+    const issued = await issueRtcToken(parsed.data.roomId, parsed.data.userId);
+    console.log(`[rtc-token] path=local-fallback status=ok provider=${issued.provider} roomId=${issued.roomId}`);
+    return NextResponse.json(issued, {
       headers: { "Cache-Control": "no-store" }
     });
   } catch (cause) {
+    console.error(`[rtc-token] path=local-fallback status=503 code=${cause instanceof Error ? cause.message : "RTC_TOKEN_FAILED"}`);
     return NextResponse.json(
       { code: cause instanceof Error ? cause.message : "RTC_TOKEN_FAILED", message: "无法获取 RTC 短期 Token" },
       { status: 503 }

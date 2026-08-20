@@ -627,3 +627,12 @@
 - 合成：复刻音色只能走 CosyVoice 大模型，采用 NLS `FlowingSpeechSynthesizer` WebSocket 协议（JSON 指令帧 + 二进制音频帧，wav 拼接），用 Node 24 原生 WebSocket，不引入 `ws`。
 - 未采用：本地 CosyVoice 开源模型（需 GPU、与桌面端定位不符）；百炼 DashScope 线路（当前控制台是智能语音交互 NLS，无百炼 API Key）；阿里云 OSS 中转（项目已有腾讯云 COS，不新增云厂商配置面）。
 - 限制：复刻音色每 UID 上限 1000 个、不支持删除、1 年未用自动下线；合成需在控制台开通「语音合成 CosyVoice 大模型」商用版（冒烟脚本 `scripts/smoke-aliyun-cosyvoice.mjs` 已验证 token/POP 签名/WebSocket 连通，商用版未开通时网关返回 40000010/FREE_TRIAL_EXPIRED）。
+
+# 2026-08-20：桌面端 UI 改版与会议音频自动提交链路
+
+- 目标：客户端界面对齐定稿画面（角色下拉重排、中栏移除「对方回答」区块）；字幕 final 行自动作为对方回答提交，打通虚拟声卡桥接的全自动链路。
+- 结论：零新增依赖，全部复用现有能力。
+- 复用：`subtitleSink.subscribeFinal`（lib/subtitles）提交转写结果；`canAutoSubmitTranscription`（features/audio/transcription-turn）做轮次守卫；AutoBridgeController + AudioBridge + RTC 转写线路（features/rtc）；Electron `globalShortcut` 注册 Ctrl+, 打开设置页（无新包）。
+- 新增文件：`features/rtc/auto-answer-submit.ts`（仅用项目内模块，无外部依赖）。
+- 未采用：任何新 UI 库/状态管理库——现有 CSS + React 状态即可满足；窗口画面捕获（getDisplayMedia 视频轨）用户明确暂缓。
+- 设计文档：docs/superpowers/specs/2026-08-20-desktop-ui-redesign-auto-meeting-audio-design.md

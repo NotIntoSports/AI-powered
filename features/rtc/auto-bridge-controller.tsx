@@ -117,6 +117,7 @@ export function AutoBridgeController() {
           });
           machine = recordCaptured(machine, action.pid);
         } catch (cause) {
+          console.error(`[auto-bridge] start failed pid=${action.pid}: ${cause instanceof Error ? cause.message : String(cause)}`, cause);
           machine = recordFailure(machine, Date.now());
           publishStatus({ text: `自动推流失败：${cause instanceof Error ? cause.message : "未知错误"}`, state: "backoff" });
         }

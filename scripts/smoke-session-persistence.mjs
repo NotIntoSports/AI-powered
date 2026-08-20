@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -61,7 +61,7 @@ const modelServer = createServer(async (request, response) => {
       return;
     }
     const systemPrompt = String(payload.messages?.[0]?.content || "");
-    const content = systemPrompt.includes("面试记录整理助手")
+    const content = systemPrompt.includes("互动记录整理助手")
       ? JSON.stringify({
           summary: "候选人描述了组件架构和性能优化经历。",
           evidence: [{
@@ -165,8 +165,11 @@ try {
     password: "managed-obs-smoke-password",
     stageUrl: ""
   });
+  // 源防护只拦截变更类请求，必须显式 POST（默认 GET 会被放行）。
   const crossSiteObsRuntime = await fetch(`http://127.0.0.1:${appPort}/api/obs/runtime`, {
-    headers: { Origin: "https://attacker.example", "Sec-Fetch-Site": "cross-site" }
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: "https://attacker.example", "Sec-Fetch-Site": "cross-site" },
+    body: JSON.stringify({})
   });
   assert.equal(crossSiteObsRuntime.status, 403);
 
@@ -554,7 +557,7 @@ try {
   }).then((response) => response.json());
   assert.equal(finalAnswer.status, "finished");
   assert.equal(finalAnswer.transcript.length, 8);
-  assert.match(finalAnswer.transcript[7].text, /本次面试到这里/);
+  assert.match(finalAnswer.transcript[7].text, /本次互动到这里/);
   assert.equal(finalAnswer.transcript[7].kind, "closing");
   const invalidSayAfterFinish = await fetch(`http://127.0.0.1:${appPort}/api/session`, {
     method: "POST",
@@ -608,9 +611,9 @@ try {
   assert.match(archivedMarkdownResponse.headers.get("content-type") || "", /text\/markdown/);
   assert.match(archivedMarkdownResponse.headers.get("content-disposition") || "", /\.md/);
   const archivedMarkdown = await archivedMarkdownResponse.text();
-  assert.match(archivedMarkdown, /^# 面试记录/m);
+  assert.match(archivedMarkdown, /^# 互动记录/m);
   assert.match(archivedMarkdown, /候选人描述了组件架构和性能优化经历/);
-  assert.match(archivedMarkdown, /必须结合岗位标准和对话原文进行人工复核/);
+  assert.match(archivedMarkdown, /必须结合场景标准和对话原文进行人工复核/);
 
   await stopApp();
   await startApp();
@@ -733,9 +736,11 @@ try {
   assert.equal(encryptedModelProbe.modelFound, true);
   assert.equal(lastModelAuthorization, `Bearer ${secretValue}`);
 
-  const storedModelConfigText = withDatabase((database) => database.prepare(
-    "SELECT value FROM app_settings WHERE key = 'model'"
-  ).get().value, { readOnly: true });
+  // 模型配置已从 sqlite app_settings 迁到数据目录下的 model.json 文件。
+  const storedModelConfigText = await readFile(
+    path.join(temporaryDirectory, "model.json"),
+    "utf8"
+  );
   assert.equal(storedModelConfigText.includes(secretValue), false);
   const storedModelConfig = JSON.parse(storedModelConfigText);
   assert.ok(storedModelConfig.encryptedApiKey);
@@ -779,9 +784,11 @@ try {
   );
   assert.equal(localWithoutKeyProbeResponse.status, 200);
   assert.equal(lastModelAuthorization, undefined);
-  const localStoredModelConfig = JSON.parse(withDatabase((database) => database.prepare(
-    "SELECT value FROM app_settings WHERE key = 'model'"
-  ).get().value, { readOnly: true }));
+  // 模型配置已从 sqlite app_settings 迁到数据目录下的 model.json 文件。
+  const localStoredModelConfig = JSON.parse(await readFile(
+    path.join(temporaryDirectory, "model.json"),
+    "utf8"
+  ));
   assert.equal(localStoredModelConfig.encryptedApiKey, null);
 
   const clearModelConfigResponse = await fetch(

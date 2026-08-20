@@ -35,8 +35,15 @@ export class LiveKitRtcAdapter implements SubtitleTransport {
   async connect(config: SubtitleConnectConfig): Promise<void> {
     if (!config.url) throw new Error("LIVEKIT_URL_MISSING");
     this.sessionId = config.sessionId;
+    console.log(`[livekit] connecting url=${config.url} roomId=${config.roomId} userId=${config.userId} tokenPresent=${Boolean(config.token)}`);
     const room = new Room();
     this.room = room;
+    room.on(RoomEvent.Disconnected, (reason) => {
+      console.warn(`[livekit] disconnected reason=${String(reason)} roomId=${this.sessionId}`);
+    });
+    room.on(RoomEvent.Reconnecting, () => {
+      console.warn(`[livekit] reconnecting roomId=${this.sessionId}`);
+    });
     room.on(RoomEvent.DataReceived, (payload, _participant, _kind, topic) => {
       if (topic && topic !== SUBTITLE_DATA_TOPIC) return;
       const mapped = mapLiveKitDataPacket(payload, this.sessionId);
@@ -53,14 +60,27 @@ export class LiveKitRtcAdapter implements SubtitleTransport {
         if (mapped) this.sink.publish(mapped);
       }
     });
-    await room.connect(config.url, config.token);
+    const connectStartedAt = Date.now();
+    try {
+      await room.connect(config.url, config.token);
+    } catch (error) {
+      console.error(`[livekit] room.connect failed url=${config.url} after=${Date.now() - connectStartedAt}ms error=${error instanceof Error ? error.message : String(error)}`);
+      throw error;
+    }
+    console.log(`[livekit] room connected after=${Date.now() - connectStartedAt}ms state=${room.state}`);
     const mediaTrack = config.track as MediaStreamTrack;
-    await room.localParticipant.publishTrack(mediaTrack, {
-      name: "candidate-loopback",
-      source: Track.Source.Microphone,
-      dtx: false,
-      red: false
-    });
+    try {
+      await room.localParticipant.publishTrack(mediaTrack, {
+        name: "candidate-loopback",
+        source: Track.Source.Microphone,
+        dtx: false,
+        red: false
+      });
+    } catch (error) {
+      console.error(`[livekit] publishTrack failed error=${error instanceof Error ? error.message : String(error)}`);
+      throw error;
+    }
+    console.log("[livekit] track published name=candidate-loopback");
   }
 
   async getNetworkStats(): Promise<RtcNetworkStats | null> {

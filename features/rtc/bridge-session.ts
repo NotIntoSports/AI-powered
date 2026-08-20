@@ -100,8 +100,10 @@ export async function startBridgeSession(
   if (active || starting) throw new Error("已有桥接会话正在运行，请先停止后再启动。");
   starting = true;
   try {
+    const debugWeb = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("bridgeDebug") === "1";
     const bridge = getDesktopBridge();
-    if (!bridge) throw new Error("请在 Windows 客户端中使用音频桥接功能。");
+    if (!bridge && !debugWeb) throw new Error("请在 Windows 客户端中使用音频桥接功能。");
+    console.log(`[bridge] start owner=${owner} pid=${pid} mode=${bridge ? "desktop" : "web-debug"}`);
     events.onStatus("正在建立音频轨道和字幕线路…");
     const sessionId = makeBridgeRoomId(roomIdPrefix);
     const userId = `bridge_${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`;
@@ -111,11 +113,35 @@ export async function startBridgeSession(
       body: JSON.stringify({ roomId: sessionId, userId })
     });
     const token = await tokenResponse.json() as RtcTokenResponse;
+    console.log(`[bridge] token status=${tokenResponse.status} provider=${token.provider || "volcengine"} urlPresent=${Boolean(token.url)} appIdPresent=${Boolean(token.appId)} tokenPresent=${Boolean(token.token)} roomId=${token.roomId || sessionId} code=${tokenResponse.ok ? "-" : token.message || "unknown"}`);
     if (!tokenResponse.ok) throw new Error(token.message || "RTC Token 获取失败");
     const activeProvider: SubtitleProvider = token.provider === "livekit" ? "livekit" : "volcengine";
     const language = token.language || "zh";
     const roomId = token.roomId || sessionId;
     const pcm = createPcmTrack(loadRemoteMonitorEnabled());
+    // web-debug 旁路：无桌面捕获时用本地音轨走完 token → transport → connect 链路
+    let debugTrack: MediaStreamTrack | null = null;
+    let debugAudioContext: AudioContext | null = null;
+    if (!bridge) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        debugTrack = stream.getAudioTracks()[0] || null;
+        console.log("[bridge] web-debug: using microphone track");
+      } catch (error) {
+        console.warn(`[bridge] web-debug: microphone unavailable (${error instanceof Error ? error.message : String(error)}), using silent track`);
+        debugAudioContext = new AudioContext({ sampleRate: 48_000 });
+        const destination = debugAudioContext.createMediaStreamDestination();
+        const oscillator = debugAudioContext.createOscillator();
+        const silence = debugAudioContext.createGain();
+        silence.gain.value = 0;
+        oscillator.connect(silence);
+        silence.connect(destination);
+        oscillator.start();
+        debugTrack = destination.stream.getAudioTracks()[0] || null;
+      }
+      if (!debugTrack) throw new Error("web-debug 模式无法创建本地音轨");
+    }
+    const publishTrack = bridge ? pcm.track : debugTrack!;
     let stopMonitorSync: (() => void) | undefined;
     let removePcm: (() => void) | undefined;
     let removeEvent: (() => void) | undefined;
@@ -131,24 +157,37 @@ export async function startBridgeSession(
       } else {
         transport = await createSubtitleTransport("livekit", subtitleSink);
       }
-      await transport.connect({
-        sessionId,
-        language,
-        track: pcm.track,
-        token: token.token || "",
-        roomId,
-        userId: token.userId || userId,
-        appId: token.appId,
-        url: token.url
-      });
-      removePcm = bridge.onAudioPcm(pcm.push);
-      removeEvent = bridge.onAudioEvent((event) => {
-        const value = event as { type?: string; peak?: number; message?: string };
-        if (value.type === "level") events.onLevel(value.peak || 0);
-        if (value.type === "process-exited") events.onProcessExited();
-        if (value.type === "error") events.onStatus(value.message || "音频捕获失败");
-      });
-      await bridge.startAudioCapture(pid);
+      console.log(`[bridge] transport created provider=${activeProvider}`);
+      const connectStartedAt = Date.now();
+      try {
+        await transport.connect({
+          sessionId,
+          language,
+          track: publishTrack,
+          token: token.token || "",
+          roomId,
+          userId: token.userId || userId,
+          appId: token.appId,
+          url: token.url
+        });
+      } catch (error) {
+        console.error(`[bridge] transport connect failed provider=${activeProvider} after=${Date.now() - connectStartedAt}ms`, error);
+        throw error;
+      }
+      console.log(`[bridge] transport connected provider=${activeProvider} after=${Date.now() - connectStartedAt}ms`);
+      if (bridge) {
+        removePcm = bridge.onAudioPcm(pcm.push);
+        removeEvent = bridge.onAudioEvent((event) => {
+          const value = event as { type?: string; peak?: number; message?: string };
+          if (value.type === "level") events.onLevel(value.peak || 0);
+          if (value.type === "process-exited") events.onProcessExited();
+          if (value.type === "error") events.onStatus(value.message || "音频捕获失败");
+        });
+        await bridge.startAudioCapture(pid);
+        console.log("[bridge] audio capture started");
+      } else {
+        console.log("[bridge] web-debug: skipped desktop audio capture");
+      }
 
       const statsTimer = window.setInterval(() => {
         const stats = transport!.getNetworkStats?.();
@@ -167,16 +206,20 @@ export async function startBridgeSession(
           removeEvent?.();
           stopMonitorSync?.();
           setRtcNetwork({ connected: false });
-          await bridge.stopAudioCapture().catch(() => undefined);
+          await bridge?.stopAudioCapture().catch(() => undefined);
           await transport?.disconnect().catch(() => undefined);
           if (engine) VERTC.destroyEngine(engine);
           pcm.track.stop();
           await pcm.context.close().catch(() => undefined);
+          debugTrack?.stop();
+          await debugAudioContext?.close().catch(() => undefined);
           subtitleSink.reset(sessionId);
         }
       };
+      console.log(`[bridge] session ready owner=${owner} roomId=${roomId} provider=${activeProvider}`);
       return handle;
     } catch (error) {
+      console.error("[bridge] session start failed", error);
       stopMonitorSync?.();
       removePcm?.();
       removeEvent?.();

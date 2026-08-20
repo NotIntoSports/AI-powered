@@ -16,6 +16,8 @@ import {
 } from "../features/audio/remote-monitor";
 import { InterventionControls } from "../features/intervention/intervention-controls";
 import { MeetingBridgeCard } from "../features/rtc/meeting-bridge-card";
+import { useAutoAnswerSubmit } from "../features/rtc/auto-answer-submit";
+import { UserAccountMenu } from "../features/settings/user-account-menu";
 import { LiveSubtitles } from "../features/subtitles/live-subtitles";
 import { getInterviewReadiness } from "../features/readiness/interview-readiness";
 import { getSnapshotReadiness, invalidateDeviceReadiness, loadReadinessSnapshot } from "../features/readiness/readiness-snapshot";
@@ -40,6 +42,9 @@ type Diagnostics = {
   transcriptionReady: boolean;
   transcriptionSource: "aliyun" | "volcengine" | "management" | "environment" | "whisper-cpp" | "none";
 };
+
+// 采集开启后超过该时长仍无任何语音片段时，提示用户检查共享音频/对方是否说话。
+const CAPTURE_SILENCE_WARN_MS = 45_000;
 
 const emptySession: InterviewSession = {
   sessionId: "",
@@ -80,7 +85,6 @@ export default function ConsolePage() {
   const [maxQuestions, setMaxQuestions] = useState(6);
   const [consentConfirmed, setConsentConfirmed] = useState(false);
   const [resumeIds, setResumeIds] = useState<string[]>([]);
-  const [answer, setAnswer] = useState("");
   const [manualText, setManualText] = useState("");
   const [busy, setBusy] = useState(false);
   const [diagnostics, setDiagnostics] = useState<Diagnostics>({
@@ -113,12 +117,14 @@ export default function ConsolePage() {
   const sessionRef = useRef(emptySession);
   const segmentTimerRef = useRef<number | null>(null);
   const uploadQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const lastCaptureActivityRef = useRef(0);
   const [capturingAudio, setCapturingAudio] = useState(false);
   const [pendingTranscriptions, setPendingTranscriptions] = useState(0);
   const [audioSource, setAudioSource] = useState("");
-  const [automaticFollowup, setAutomaticFollowup] = useState(false);
+  const [automaticFollowup, setAutomaticFollowup] = useState(true);
   const [echoGuardActive, setEchoGuardActive] = useState(false);
   const [candidateSpeaking, setCandidateSpeaking] = useState(false);
+  const [captureSilent, setCaptureSilent] = useState(false);
   const [error, setError] = useState("");
   const [outputMode, setOutputMode] = useState<OutputMode>("real");
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -157,6 +163,39 @@ export default function ConsolePage() {
   useEffect(() => {
     automaticFollowupRef.current = automaticFollowup;
   }, [automaticFollowup]);
+
+  // 采集开启后长时间没有任何语音片段（未触发 VAD/未产生转写）时提示静默，避免采集失败无感知。
+  useEffect(() => {
+    if (!capturingAudio) {
+      setCaptureSilent(false);
+      return;
+    }
+    const timer = window.setInterval(() => {
+      const lastActivity = lastCaptureActivityRef.current;
+      setCaptureSilent(lastActivity > 0 && Date.now() - lastActivity > CAPTURE_SILENCE_WARN_MS);
+    }, 5_000);
+    return () => window.clearInterval(timer);
+  }, [capturingAudio]);
+
+  // 采集状态接入 stage-status 上报，舞台/服务端可看到“未采集/采集中/静默”等静默失败。
+  // 采集期间每 5 秒心跳保活，服务端 8 秒未刷新视为过期。
+  useEffect(() => {
+    const report = () => {
+      const captureState = capturingAudio ? (captureSilent ? "silent" : "capturing") : "off";
+      void fetch("/api/stage-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          captureState,
+          captureSource: capturingAudio ? audioSource : ""
+        })
+      }).catch(() => undefined);
+    };
+    report();
+    if (!capturingAudio) return;
+    const timer = window.setInterval(report, 5_000);
+    return () => window.clearInterval(timer);
+  }, [capturingAudio, captureSilent, audioSource]);
 
   useEffect(() => {
     stageConnectedRef.current = diagnostics.stageConnected;
@@ -327,20 +366,17 @@ export default function ConsolePage() {
     }
   }
 
-  async function submitAnswer(event: FormEvent) {
-    event.preventDefault();
-    const value = answer.trim();
-    if (!value) return;
-    setAnswer("");
-    const succeeded = await act({
-      action: "answer",
-      answer: value,
-      expectedRevision: sessionRef.current.revision
-    });
-    if (!succeeded) {
-      setAnswer((current) => current.trim() || value);
-    }
-  }
+  // 字幕 final 行自动作为对方回答提交（取代已移除的手动转写输入框）。
+  useAutoAnswerSubmit({
+    enabled: automaticFollowup && session.status === "running" && !busy,
+    aiSpeaking: diagnostics.ttsState === "speaking",
+    getGate: () => ({
+      sessionStatus: sessionRef.current.status,
+      currentRevision: sessionRef.current.revision,
+      lastTranscriptRole: sessionRef.current.transcript.at(-1)?.role
+    }),
+    onAnswer: (text) => void act({ action: "answer", answer: text, expectedRevision: sessionRef.current.revision })
+  });
 
   function sayManual(event: FormEvent) {
     event.preventDefault();
@@ -387,6 +423,7 @@ export default function ConsolePage() {
       }
       captureStreamRef.current = stream;
       captureActiveRef.current = true;
+      lastCaptureActivityRef.current = Date.now();
       setCapturingAudio(true);
       setAudioSource(audioTrack.label || "系统音频");
       attachRemoteMonitor(stream);
@@ -424,6 +461,7 @@ export default function ConsolePage() {
       resumeStream: async () => new MediaStream(stream.getAudioTracks()),
       onSpeechStart: () => {
         vadSpeechRevisionRef.current = sessionRef.current.revision;
+        lastCaptureActivityRef.current = Date.now();
         setCandidateSpeaking(true);
       },
       onVADMisfire: () => {
@@ -496,6 +534,7 @@ export default function ConsolePage() {
     capturedRevision = sessionRef.current.revision
   ) {
     setPendingTranscriptions((count) => count + 1);
+    lastCaptureActivityRef.current = Date.now();
     uploadQueueRef.current = uploadQueueRef.current
       .then(async () => {
         const extension = mimeType.includes("mp4") ? "mp4" : "webm";
@@ -515,8 +554,7 @@ export default function ConsolePage() {
               lastTranscriptRole: current.transcript.at(-1)?.role
             })) {
               if (current.status === "running") {
-                setAnswer((existing) => [existing.trim(), text].filter(Boolean).join(" "));
-                setError("检测到对话轮次已变化，这段转写已放入输入框，请人工确认后再提交。");
+                setError("检测到对话轮次已变化，这段转写未自动提交，请稍后重试。");
               }
               return;
             }
@@ -528,13 +566,10 @@ export default function ConsolePage() {
                 expectedRevision: capturedRevision
               }));
             } catch (cause) {
-              setAnswer((existing) => [existing.trim(), text].filter(Boolean).join(" "));
               throw cause;
             } finally {
               setBusy(false);
             }
-          } else {
-            setAnswer((current) => [current.trim(), text].filter(Boolean).join(" "));
           }
         }
       })
@@ -548,6 +583,8 @@ export default function ConsolePage() {
 
   function stopAudioCapture() {
     captureActiveRef.current = false;
+    lastCaptureActivityRef.current = 0;
+    setCaptureSilent(false);
     if (segmentTimerRef.current !== null) {
       window.clearTimeout(segmentTimerRef.current);
       segmentTimerRef.current = null;
@@ -575,20 +612,24 @@ export default function ConsolePage() {
 
   return (
     <main className="console workspacePage">
-      <AppChrome
-        current="workspace"
-        upload={{
-          candidateName,
-          selectedIds: resumeIds,
-          onChangeSelection: setResumeIds,
-          open: uploadOpen,
-          onOpenChange: setUploadOpen
-        }}
-      />
       <header className="topbar">
         <div>
           <p className="eyebrow">LIVE INTERACTION</p>
           <h1>虚拟助手工作台</h1>
+        </div>
+        <div className="topbarRight">
+          <AppChrome
+            current="workspace"
+            showAccount={false}
+            upload={{
+              candidateName,
+              selectedIds: resumeIds,
+              onChangeSelection: setResumeIds,
+              open: uploadOpen,
+              onOpenChange: setUploadOpen
+            }}
+          />
+          <UserAccountMenu current="workspace" onOpenUpload={() => setUploadOpen(true)} />
         </div>
       </header>
 
@@ -709,59 +750,6 @@ export default function ConsolePage() {
           </article>
 
           <article className="card controls">
-          <h2>对方回答</h2>
-          <p className="muted">可采集会议窗口/整个屏幕的系统音频，转写结果会追加到下方文本框；提交前可以人工校对。</p>
-          <label className="autoFollowup">
-            <input
-              type="checkbox"
-              checked={automaticFollowup}
-              disabled={capturingAudio}
-              onChange={(event) => setAutomaticFollowup(event.target.checked)}
-            />
-            <span>
-              <strong>对方说完后自动回应</strong>
-              <small>本机 VAD 检测约 2.5 秒静音后自动转写并提交；互动中可随时停止听取。</small>
-            </span>
-          </label>
-          <div className="captureBar">
-            {!capturingAudio ? (
-              <button
-                type="button"
-                disabled={!diagnostics.transcriptionReady}
-                onClick={startAudioCapture}
-              >
-                开始听取对方
-              </button>
-            ) : (
-              <button type="button" className="danger" onClick={stopAudioCapture}>
-                停止听取
-              </button>
-            )}
-            <div>
-              <strong>
-                {echoGuardActive
-                  ? "AI 播报中，已暂停收音"
-                  : candidateSpeaking
-                    ? "检测到对方说话"
-                    : capturingAudio
-                      ? "正在聆听"
-                      : "未采集"}
-              </strong>
-              <span>
-                {capturingAudio
-                  ? `${audioSource} · ${automaticFollowup ? "半双工防回声 · 静音后自动追问" : "每10秒转写"}`
-                  : pendingTranscriptions > 0
-                    ? `仍有 ${pendingTranscriptions} 段正在转写`
-                    : "使用 Edge/Chrome 并勾选共享音频"}
-              </span>
-            </div>
-            {pendingTranscriptions > 0 && <i>{pendingTranscriptions}</i>}
-          </div>
-          <form onSubmit={submitAnswer}>
-            <textarea value={answer} onChange={(e) => setAnswer(e.target.value)} placeholder="输入对方的回答…" />
-            <button disabled={busy || session.status !== "running"}>{busy ? "正在生成…" : "生成追问"}</button>
-          </form>
-          <div className="divider" />
           <h2>AI 人工播报</h2>
           <form className="inlineForm" onSubmit={sayManual}>
             <input value={manualText} onChange={(e) => setManualText(e.target.value)} placeholder="让虚拟助手直接说一句话" />
