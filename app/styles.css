@@ -370,6 +370,9 @@ a.accountDockTrigger { color: #eaf1ff; }
 .voiceCloneScript { margin: 0; padding: 16px 18px; border: 1px solid #344052; border-radius: 12px; background: #101826; color: #e8eef7; font-size: 18px; line-height: 1.75; font-weight: 600; }
 .voiceCloneActions { display: flex; flex-wrap: wrap; gap: 8px; }
 .voiceClonePreview { width: 100%; }
+.voiceCloneAdvanced { display: grid; gap: 8px; padding: 10px 12px; border: 1px dashed #344052; border-radius: 10px; }
+.voiceCloneAdvanced summary { cursor: pointer; color: #8fa5c7; font-size: 12px; }
+.voiceCloneAdvanced label { display: grid; gap: 6px; color: #8d99aa; font-size: 12px; }
 .voiceClone label { display: grid; gap: 6px; color: #8d99aa; font-size: 12px; }
 .voiceCloneSuccess { color: #72e5a7 !important; font-weight: 700; }
 .recordsGrid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(360px, .9fr); gap: 16px; align-items: start; }

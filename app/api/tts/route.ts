@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getTtsRuntimeConfig, toAliyunNlsAuth } from "../../../lib/speech-runtime";
 import { synthesizeAliyunSpeech } from "../../../lib/aliyun-nls";
+import { isCosyVoiceSpeakerId, synthesizeCosyVoiceSpeech } from "../../../lib/aliyun-cosyvoice";
 import {
   buildUnidirectionalTtsBody,
   concatTtsAudioChunks,
@@ -45,6 +46,10 @@ async function synthesizeWithFallback(text: string) {
   const speech = await getTtsRuntimeConfig();
   if (speech.provider === "aliyun" && speech.ttsAvailable) {
     try {
+      // 复刻音色（cosyvoice-*）只能走 CosyVoice 大模型 WebSocket 合成，xiaoyun 等系统音色保持 HTTP 合成。
+      if (isCosyVoiceSpeakerId(speech.speakerId)) {
+        return await synthesizeCosyVoiceSpeech(toAliyunNlsAuth(speech), text);
+      }
       return await synthesizeAliyunSpeech(toAliyunNlsAuth(speech), text);
     } catch {
       // Fall back to Windows SAPI.

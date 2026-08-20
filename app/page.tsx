@@ -15,6 +15,7 @@ import {
   subscribeRemoteMonitor
 } from "../features/audio/remote-monitor";
 import { InterventionControls } from "../features/intervention/intervention-controls";
+import { MeetingBridgeCard } from "../features/rtc/meeting-bridge-card";
 import { LiveSubtitles } from "../features/subtitles/live-subtitles";
 import { getInterviewReadiness } from "../features/readiness/interview-readiness";
 import { getSnapshotReadiness, invalidateDeviceReadiness, loadReadinessSnapshot } from "../features/readiness/readiness-snapshot";
@@ -770,6 +771,7 @@ export default function ConsolePage() {
         </section>
 
         <aside className="workspaceTools" aria-label="会话工具">
+          <MeetingBridgeCard />
           <LiveSubtitles />
           <InterventionControls onAiPauseChange={(paused) => setAutomaticFollowup(!paused)} />
         </aside>

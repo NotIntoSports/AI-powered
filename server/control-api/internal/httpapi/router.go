@@ -19,6 +19,7 @@ type Dependencies struct {
 	PresenceAdmin     PresenceAdmin
 	ResumeAdmin       ResumeAdmin
 	KnowledgeAdmin    KnowledgeAdmin
+	VoiceSampleAdmin  VoiceSampleAdmin
 	LoginLimiter      *ratelimit.LoginLimiter
 	SessionTTL        time.Duration
 	CookieSecure      bool
@@ -110,7 +111,7 @@ func NewRouter(dependencies Dependencies) http.Handler {
 		})
 	}
 
-	if dependencies.ResumeAdmin != nil || dependencies.SettingsAdmin != nil {
+	if dependencies.ResumeAdmin != nil || dependencies.SettingsAdmin != nil || dependencies.VoiceSampleAdmin != nil {
 		r.Route("/api/v1/client", func(r chi.Router) {
 			r.Use(noStore)
 			r.Use(authentication.loadSession)
@@ -134,6 +135,11 @@ func NewRouter(dependencies Dependencies) http.Handler {
 				r.Get("/settings/speech", clientSettings.getClientSpeech)
 				r.Patch("/settings/speech", clientSettings.patchClientSpeech)
 				r.Post("/rtc/token", clientSettings.issueRTC)
+			}
+			if dependencies.VoiceSampleAdmin != nil {
+				clientVoiceSamples := newVoiceSampleHandler(dependencies.VoiceSampleAdmin)
+				r.Post("/voice-samples", clientVoiceSamples.upload)
+				r.Delete("/voice-samples/{id}", clientVoiceSamples.delete)
 			}
 		})
 	}

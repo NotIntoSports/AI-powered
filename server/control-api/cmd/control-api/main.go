@@ -21,6 +21,7 @@ import (
 	"github.com/ai-interviewer/ai-powered/control-api/internal/resumes"
 	"github.com/ai-interviewer/ai-powered/control-api/internal/secretbox"
 	"github.com/ai-interviewer/ai-powered/control-api/internal/settings"
+	"github.com/ai-interviewer/ai-powered/control-api/internal/voicesamples"
 )
 
 func main() {
@@ -88,6 +89,7 @@ func main() {
 			PresenceAdmin:     presence.NewStore(pool),
 			ResumeAdmin:       resumeAdmin,
 			KnowledgeAdmin:    knowledgeAdmin,
+			VoiceSampleAdmin:  voicesamples.NewService(pool, box, nil),
 			SessionTTL:        cfg.SessionTTL,
 			CookieSecure:      cfg.CookieSecure,
 			TrustedProxyCIDRs: cfg.TrustedProxyCIDRs,

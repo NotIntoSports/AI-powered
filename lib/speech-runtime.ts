@@ -2,6 +2,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { DEFAULT_ALIYUN_VOICE, type AliyunNlsAuth } from "./aliyun-nls";
+import { isCosyVoiceSpeakerId } from "./aliyun-cosyvoice";
 import {
   fetchDesktopControlJson,
   localSettingsDirectory,
@@ -330,7 +331,15 @@ export async function getTtsRuntimeConfig(): Promise<SpeechRuntimeConfig> {
   if (volcengine?.available && bound) {
     return withAvailability({ ...volcengine, speakerId: bound });
   }
-  return getSpeechRuntimeConfig();
+  const speech = await getSpeechRuntimeConfig();
+  // 阿里云线路：复刻音色（cosyvoice-*）只能走 CosyVoice 大模型合成，优先使用已绑定音色。
+  if (speech.provider === "aliyun") {
+    const aliyunBound = pickBoundSpeakerId(speech.speakerId, stored?.speakerId);
+    if (aliyunBound && isCosyVoiceSpeakerId(aliyunBound)) {
+      return withAvailability({ ...speech, speakerId: aliyunBound });
+    }
+  }
+  return speech;
 }
 
 export async function getSpeechRuntimeConfig(): Promise<SpeechRuntimeConfig> {

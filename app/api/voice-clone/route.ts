@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { MAX_CLONE_AUDIO_BYTES } from "../../../lib/pcm-wav";
+import { cloneCosyVoice, COSYVOICE_MAX_CLONE_SECONDS, COSYVOICE_VOICE_PREFIX, isCosyVoiceSpeakerId } from "../../../lib/aliyun-cosyvoice";
+import { MAX_CLONE_AUDIO_BYTES, truncateWavToSeconds } from "../../../lib/pcm-wav";
+import { fetchDesktopControlJson } from "../../../lib/runtime-config";
 import {
   getSpeechRuntimeConfig,
   getTtsRuntimeConfig,
@@ -31,18 +33,25 @@ export async function GET() {
   const speech = await getSpeechRuntimeConfig();
   const volcengine = await getVolcengineSpeechConfig();
   const tts = await getTtsRuntimeConfig();
-  const speakerId = tts.provider === "volcengine" && isClonedSpeakerId(tts.speakerId)
+  const volcSpeakerId = tts.provider === "volcengine" && isClonedSpeakerId(tts.speakerId)
     ? tts.speakerId
     : volcengine && isClonedSpeakerId(volcengine.speakerId)
       ? volcengine.speakerId
       : "";
+  const aliyunSpeakerId = !volcSpeakerId && tts.provider === "aliyun" && isCosyVoiceSpeakerId(tts.speakerId)
+    ? tts.speakerId
+    : "";
+  const speakerId = volcSpeakerId || aliyunSpeakerId;
+  const aliyunCloneReady = speech.provider === "aliyun"
+    && Boolean(speech.appId && speech.accessKeyId && speech.accessKeySecret);
   return NextResponse.json({
-    available: Boolean(volcengine?.available),
+    available: Boolean(volcengine?.available) || aliyunCloneReady,
+    aliyunCloneReady,
     ttsAvailable: tts.ttsAvailable,
     asrAvailable: speech.asrAvailable,
     speakerId,
     cloned: Boolean(speakerId),
-    enabled: Boolean(speakerId && tts.provider === "volcengine"),
+    enabled: Boolean(speakerId && (tts.provider === "volcengine" || isCosyVoiceSpeakerId(speakerId))),
     source: tts.source,
     provider: tts.provider
   });
@@ -57,11 +66,14 @@ export async function POST(request: Request) {
     );
   }
   const volcengine = await getVolcengineSpeechConfig();
-  if (!volcengine?.available) {
+  const speech = await getSpeechRuntimeConfig();
+  const aliyunCloneReady = speech.provider === "aliyun"
+    && Boolean(speech.appId && speech.accessKeyId && speech.accessKeySecret);
+  if (!volcengine?.available && !aliyunCloneReady) {
     return NextResponse.json(
       {
         code: "SPEECH_UNAVAILABLE",
-        message: "请先在管理后台配置豆包语音密钥后再刻录"
+        message: "请先在管理后台配置豆包或阿里云语音密钥后再刻录"
       },
       { status: 503 }
     );
@@ -84,6 +96,10 @@ export async function POST(request: Request) {
       { code: "INVALID_AUDIO_SIZE", message: "录音不能为空且不能超过 10MB" },
       { status: 413 }
     );
+  }
+
+  if (!volcengine?.available) {
+    return cloneWithAliyun(speech, audioBytes);
   }
 
   const speakerHint = parsed.data.speakerId?.trim()
@@ -128,6 +144,55 @@ export async function POST(request: Request) {
       { status: 502 }
     );
   }
+}
+
+/** 阿里云分支：上传 COS 换短时签名 URL → CosyVoiceClone 自动分配唯一音色 → 立即删除样本 → 绑定账号。 */
+async function cloneWithAliyun(speech: Awaited<ReturnType<typeof getSpeechRuntimeConfig>>, audioBytes: Buffer) {
+  const wav = truncateWavToSeconds(new Uint8Array(audioBytes), COSYVOICE_MAX_CLONE_SECONDS);
+  const sample = await uploadVoiceSample(wav);
+  if (!sample) {
+    return NextResponse.json(
+      { code: "VOICE_CLONE_FAILED", message: "音频上传失败，请确认管理端已配置腾讯云对象存储" },
+      { status: 502 }
+    );
+  }
+  try {
+    const voiceName = await cloneCosyVoice(
+      { accessKeyId: speech.accessKeyId, accessKeySecret: speech.accessKeySecret },
+      { url: sample.url, voicePrefix: COSYVOICE_VOICE_PREFIX }
+    );
+    return bindSpeakerId(voiceName, true);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    return NextResponse.json(
+      {
+        code: "VOICE_CLONE_FAILED",
+        message: message && !message.startsWith("ALIYUN_COSYVOICE_")
+          ? "声音刻录失败，请换安静环境后按稿再录一次"
+          : "声音刻录失败，请检查阿里云语音配置和网络"
+      },
+      { status: 502 }
+    );
+  } finally {
+    void deleteVoiceSample(sample.id);
+  }
+}
+
+async function uploadVoiceSample(wav: Uint8Array) {
+  const form = new FormData();
+  form.append("file", new Blob([wav], { type: "audio/wav" }), "voice-sample.wav");
+  return fetchDesktopControlJson<{ id: string; url: string }>("/api/v1/client/voice-samples", {
+    method: "POST",
+    body: form,
+    signal: AbortSignal.timeout(30_000)
+  });
+}
+
+async function deleteVoiceSample(id: string) {
+  await fetchDesktopControlJson(`/api/v1/client/voice-samples/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    signal: AbortSignal.timeout(5_000)
+  });
 }
 
 async function bindSpeakerId(speakerId: string, cloned: boolean) {

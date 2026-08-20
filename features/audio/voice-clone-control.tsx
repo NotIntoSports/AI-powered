@@ -15,12 +15,17 @@ import { DEFAULT_CUSTOM_SPEAKER_ID, VOICE_CLONE_SCRIPT } from "../../lib/voice-c
 
 type VoiceCloneStatus = {
   available: boolean;
+  aliyunCloneReady?: boolean;
   ttsAvailable: boolean;
   speakerId: string;
   provider?: string;
   cloned?: boolean;
   enabled?: boolean;
 };
+
+function isCosyVoiceId(speakerId: string) {
+  return speakerId.trim().toLowerCase().startsWith("cosyvoice-");
+}
 
 export function VoiceCloneControl() {
   const [status, setStatus] = useState<VoiceCloneStatus>({
@@ -59,9 +64,10 @@ export function VoiceCloneControl() {
       const speakerId = String(data.speakerId || preserveSpeakerId || "");
       setStatus({
         available: Boolean(data.available),
+        aliyunCloneReady: Boolean(data.aliyunCloneReady),
         ttsAvailable: Boolean(data.ttsAvailable || speakerId),
         speakerId,
-        provider: speakerId ? "volcengine" : String(data.provider || ""),
+        provider: String(data.provider || (speakerId ? (isCosyVoiceId(speakerId) ? "aliyun" : "volcengine") : "")),
         cloned: Boolean(data.cloned || speakerId),
         enabled: Boolean(data.enabled || speakerId)
       });
@@ -228,14 +234,16 @@ export function VoiceCloneControl() {
         ttsAvailable: Boolean(speakerId),
         cloned: Boolean(speakerId),
         enabled: Boolean(data.enabled ?? data.bound ?? speakerId),
-        provider: speakerId ? "volcengine" : current.provider
+        provider: speakerId ? (isCosyVoiceId(speakerId) ? "aliyun" : "volcengine") : current.provider
       }));
       setPastedId(speakerId);
       setMessageKind("success");
       setMessage(
-        speakerId
-          ? `刻录成功，已启用音色 ID：${speakerId}`
-          : "刻录成功，已绑定本账号。"
+        !speakerId
+          ? "刻录成功，已绑定本账号。"
+          : isCosyVoiceId(speakerId)
+            ? "刻录成功，已自动为你分配专属音色，可点试听。"
+            : `刻录成功，已启用音色 ID：${speakerId}`
       );
       await refreshStatus(speakerId);
     } catch {
@@ -322,9 +330,11 @@ export function VoiceCloneControl() {
         <h2>助手声音刻录</h2>
         <span className={status.cloned || status.enabled ? "ready" : ""}>
           {status.cloned && status.speakerId
-            ? `已启用本账号音色 ${status.speakerId}`
+            ? isCosyVoiceId(status.speakerId)
+              ? "已启用你的专属音色"
+              : `已启用本账号音色 ${status.speakerId}`
             : status.provider === "aliyun"
-              ? `阿里云语音已配置 ${status.speakerId || "xiaoyun"}（系统音色，非个人刻录）`
+              ? "阿里云语音已配置，待刻录（将自动分配专属音色）"
               : status.available
                 ? "密钥已就绪，待刻录（将绑定当前登录账号）"
                 : "请先在管理后台配置豆包语音，或在本机配置阿里云语音"}
@@ -347,11 +357,14 @@ export function VoiceCloneControl() {
         </button>
       </div>
       {previewUrl ? <audio className="voiceClonePreview" src={previewUrl} controls /> : null}
-      <label>
-        已有音色 ID（可粘贴 S_xxxx，跳过录音）
-        <input value={pastedId} onChange={(event) => setPastedId(event.target.value)} placeholder={DEFAULT_CUSTOM_SPEAKER_ID} />
-      </label>
-      <button className="secondary" type="button" disabled={busy} onClick={() => void savePastedId()}>保存音色 ID</button>
+      <details className="voiceCloneAdvanced">
+        <summary>高级选项（已有音色 ID）</summary>
+        <label>
+          已有音色 ID（可粘贴 S_xxxx，跳过录音）
+          <input value={pastedId} onChange={(event) => setPastedId(event.target.value)} placeholder={DEFAULT_CUSTOM_SPEAKER_ID} />
+        </label>
+        <button className="secondary" type="button" disabled={busy} onClick={() => void savePastedId()}>保存音色 ID</button>
+      </details>
       <p className={`modelSettingsMessage ${messageKind === "success" ? "voiceCloneSuccess" : ""}`} aria-live="polite">{message}</p>
     </article>
   );

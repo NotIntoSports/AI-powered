@@ -19,6 +19,7 @@ data/
 public/vendor/vad/
 out/
 dist/
+dist-new/
 dist-desktop/
 *.tsbuildinfo
 native/**/bin/

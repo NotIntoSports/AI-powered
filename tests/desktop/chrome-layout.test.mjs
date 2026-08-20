@@ -38,7 +38,7 @@ test("workspace chrome puts login bottom-left and upload top-right", async () =>
   assert.match(styles, /\.uploadDockAnchor\s*\{[^}]*right:\s*16px/s);
 });
 
-test("workspace keeps meeting access off the main page except failure tips", async () => {
+test("workspace keeps heavy meeting access off the main page but embeds the auto bridge card", async () => {
   const page = await readFile(new URL("../../app/page.tsx", import.meta.url), "utf8");
   const settings = await readFile(new URL("../../app/settings/page.tsx", import.meta.url), "utf8");
   const card = await readFile(new URL("../../features/meeting/meeting-access-card.tsx", import.meta.url), "utf8");
@@ -49,6 +49,7 @@ test("workspace keeps meeting access off the main page except failure tips", asy
 
   assert.doesNotMatch(page, /MeetingAccessCard/);
   assert.doesNotMatch(page, /RtcBridgeControl/);
+  assert.match(page, /MeetingBridgeCard/);
   assert.doesNotMatch(page, /readinessBanner/);
   assert.match(page, /IntegrationAlerts missing=\{readiness\.missing\}/);
   assert.match(page, /虚拟声卡可选/);
