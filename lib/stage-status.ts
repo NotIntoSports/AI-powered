@@ -1,3 +1,5 @@
+export type CaptureState = "off" | "capturing" | "silent";
+
 export type StageStatus = {
   connected: boolean;
   lastSeen: number;
@@ -8,6 +10,9 @@ export type StageStatus = {
   lastSpeechAt: number;
   mediaReady: boolean;
   stopSpeechAt: number;
+  captureState: CaptureState;
+  captureSource: string;
+  captureUpdatedAt: number;
 };
 
 export type StageTestSpeech = {
@@ -16,39 +21,67 @@ export type StageTestSpeech = {
   createdAt: number;
 };
 
-const globalStatus = globalThis as typeof globalThis & {
-  stageStatus?: Omit<StageStatus, "connected" | "stopSpeechAt">;
-  stageTestSpeech?: StageTestSpeech;
-  stageStopSpeechAt?: number;
-};
-
-export function updateStageStatus(status: {
+type StoredStageStatus = {
+  lastSeen: number;
   ttsSupported: boolean;
   voiceCount: number;
   ttsState: "idle" | "speaking" | "ready" | "error";
   ttsError: string;
   lastSpeechAt: number;
   mediaReady: boolean;
-}) {
-  globalStatus.stageStatus = {
-    ...status,
-    lastSeen: Date.now()
-  };
+  captureState: CaptureState;
+  captureSource: string;
+  captureUpdatedAt: number;
+};
+
+const globalStatus = globalThis as typeof globalThis & {
+  stageStatus?: Partial<StoredStageStatus>;
+  stageTestSpeech?: StageTestSpeech;
+  stageStopSpeechAt?: number;
+};
+
+export type StageStatusUpdate = {
+  ttsSupported?: boolean;
+  voiceCount?: number;
+  ttsState?: "idle" | "speaking" | "ready" | "error";
+  ttsError?: string;
+  lastSpeechAt?: number;
+  mediaReady?: boolean;
+  captureState?: CaptureState;
+  captureSource?: string;
+};
+
+// 合并式上报：舞台页只刷 TTS 字段，主控台只刷采集字段，互不覆盖。
+// lastSeen 仅由 TTS 字段上报刷新，避免采集上报把舞台误判为在线。
+export function updateStageStatus(status: StageStatusUpdate) {
+  const previous = globalStatus.stageStatus ?? {};
+  const next: Partial<StoredStageStatus> = { ...previous, ...status };
+  const touchesStage = ["ttsSupported", "voiceCount", "ttsState", "ttsError", "lastSpeechAt", "mediaReady"]
+    .some((key) => key in status);
+  if (touchesStage) {
+    next.lastSeen = Date.now();
+  }
+  if (status.captureState !== undefined) {
+    next.captureUpdatedAt = Date.now();
+  }
+  globalStatus.stageStatus = next;
 }
 
 export function getStageStatus(): StageStatus {
-  const status = globalStatus.stageStatus ?? {
-    lastSeen: 0,
-    ttsSupported: false,
-    voiceCount: 0,
-    ttsState: "idle",
-    ttsError: "",
-    lastSpeechAt: 0,
-    mediaReady: false
-  };
+  const status = globalStatus.stageStatus ?? {};
+  const lastSeen = status.lastSeen ?? 0;
   return {
-    ...status,
-    connected: Date.now() - status.lastSeen < 8_000,
+    ttsSupported: status.ttsSupported ?? false,
+    voiceCount: status.voiceCount ?? 0,
+    ttsState: status.ttsState ?? "idle",
+    ttsError: status.ttsError ?? "",
+    lastSpeechAt: status.lastSpeechAt ?? 0,
+    mediaReady: status.mediaReady ?? false,
+    captureState: status.captureState ?? "off",
+    captureSource: status.captureSource ?? "",
+    captureUpdatedAt: status.captureUpdatedAt ?? 0,
+    connected: Date.now() - lastSeen < 8_000,
+    lastSeen,
     stopSpeechAt: globalStatus.stageStopSpeechAt ?? 0
   };
 }

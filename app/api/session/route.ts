@@ -90,8 +90,10 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const startedAt = Date.now();
   const parsed = actionSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
+    console.warn("[session] invalid action payload");
     return NextResponse.json(
       { code: "INVALID_INPUT", message: "提交内容不符合要求" },
       { status: 422 }
@@ -136,7 +138,9 @@ export async function POST(request: Request) {
           { status: 409 }
         );
       }
-      return NextResponse.json(await resetSession(parsed.data));
+      const started = await resetSession(parsed.data);
+      console.log(`[session] started sessionId=${started.sessionId} elapsedMs=${Date.now() - startedAt}`);
+      return NextResponse.json(started);
     }
     if (parsed.data.action === "say") {
       return NextResponse.json(await appendInterviewerQuestion(parsed.data.text, "manual"));
@@ -230,16 +234,24 @@ export async function POST(request: Request) {
       session.revision !== parsed.data.expectedRevision ||
       session.transcript.at(-1)?.role !== "interviewer"
     ) {
+      console.warn(
+        `[session] answer rejected code=SESSION_CHANGED sessionId=${session.sessionId} status=${session.status} ` +
+          `revision=${session.revision} expected=${parsed.data.expectedRevision}`
+      );
       return NextResponse.json(
         { code: "SESSION_CHANGED", message: "对话轮次已变化，请刷新后重试" },
         { status: 409 }
       );
     }
     if (hasReachedQuestionLimit(session)) {
-      return NextResponse.json(await appendFinalAnswerAndFinish({
+      const finished = await appendFinalAnswerAndFinish({
         answer: parsed.data.answer,
         expectedRevision: parsed.data.expectedRevision
-      }));
+      });
+      console.log(
+        `[session] answer(final) sessionId=${session.sessionId} revision=${session.revision} elapsedMs=${Date.now() - startedAt}`
+      );
+      return NextResponse.json(finished);
     }
     const transcriptWithAnswer = [
       ...session.transcript,
@@ -256,13 +268,18 @@ export async function POST(request: Request) {
       transcript: transcriptWithAnswer,
       knowledgeContext: await knowledgeContextFor(session.resumeIds, session.transcript, parsed.data.answer)
     });
-    return NextResponse.json(await appendAnswerAndQuestion({
+    const updated = await appendAnswerAndQuestion({
       answer: parsed.data.answer,
       question,
       expectedRevision: parsed.data.expectedRevision
-    }));
+    });
+    console.log(
+      `[session] answer ok sessionId=${session.sessionId} revision=${session.revision} elapsedMs=${Date.now() - startedAt}`
+    );
+    return NextResponse.json(updated);
   } catch (error) {
     const message = error instanceof Error ? error.message : "UNKNOWN";
+    console.warn(`[session] action failed action=${parsed.data.action} code=${message} elapsedMs=${Date.now() - startedAt}`);
     const missingKey = message === "MISSING_API_KEY";
     const noAnswers = message === "NO_CANDIDATE_ANSWERS";
     const modelTimeout = message === "MODEL_TIMEOUT";

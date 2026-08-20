@@ -1,5 +1,5 @@
 import path from "node:path";
-import { app, BrowserWindow, dialog, ipcMain, safeStorage, session } from "electron";
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, safeStorage, session } from "electron";
 
 import { registerDesktopIpc } from "./ipc";
 import { applyLocalEnvFile, resolveDesktopEnvFiles } from "./load-env";
@@ -112,6 +112,10 @@ if (!hasLock) {
       serverOwned: server?.owned === true
     });
     mainWindow = createMainWindow(server.baseUrl);
+    // 与角色下拉菜单里的 Ctrl+, 提示对应：快捷跳转设置页。
+    globalShortcut.register("CommandOrControl+,", () => {
+      if (mainWindow && !mainWindow.isDestroyed()) void mainWindow.loadURL(`${baseUrl}/settings`);
+    });
     registerDesktopIpc(
       ipcMain,
       getStatus,
@@ -150,5 +154,8 @@ app.on("before-quit", (event) => {
   void Promise.all([
     stopOwnedProcess(server),
     obsManager?.stop() ?? Promise.resolve()
-  ]).finally(() => app.quit());
+  ]).finally(() => {
+    globalShortcut.unregisterAll();
+    app.quit();
+  });
 });

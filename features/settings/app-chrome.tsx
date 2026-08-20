@@ -5,10 +5,12 @@ import { UploadMaterialsDock, type UploadMaterialsDockProps } from "./upload-mat
 
 export function AppChrome({
   current,
-  upload
+  upload,
+  showAccount = true
 }: {
   current: AccountPage;
   upload?: UploadMaterialsDockProps;
+  showAccount?: boolean;
 }) {
   return (
     <>
@@ -17,7 +19,7 @@ export function AppChrome({
           <UploadMaterialsDock {...upload} />
         </div>
       ) : null}
-      <UserAccountMenu current={current} />
+      {showAccount ? <UserAccountMenu current={current} /> : null}
     </>
   );
 }

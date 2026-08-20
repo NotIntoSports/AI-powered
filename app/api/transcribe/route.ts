@@ -5,19 +5,29 @@ export const runtime = "nodejs";
 export const maxDuration = 120;
 
 export async function POST(request: Request) {
+  const startedAt = Date.now();
+  let audioBytes = 0;
   try {
     const form = await request.formData();
     const audio = form.get("audio");
     if (!(audio instanceof File)) {
+      console.warn("[transcribe] missing audio field");
       return NextResponse.json(
         { code: "MISSING_AUDIO", message: "没有收到音频片段" },
         { status: 422 }
       );
     }
+    audioBytes = audio.size;
     const text = await transcribeAudio(audio);
+    console.log(
+      `[transcribe] ok bytes=${audioBytes} textLen=${text.length} elapsedMs=${Date.now() - startedAt}`
+    );
     return NextResponse.json({ text });
   } catch (error) {
     const code = error instanceof Error ? error.message : "UNKNOWN";
+    console.warn(
+      `[transcribe] failed code=${code} bytes=${audioBytes} elapsedMs=${Date.now() - startedAt}`
+    );
     if (code === "INVALID_AUDIO_SIZE") {
       return NextResponse.json(
         { code, message: `音频不能为空且不能超过 ${MAX_AUDIO_BYTES / 1024 / 1024}MB` },

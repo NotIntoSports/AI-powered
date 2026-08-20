@@ -6,7 +6,13 @@ import { logoutControlSession, readControlSession } from "../auth/control-sessio
 
 export type AccountPage = "workspace" | "settings" | "records" | "login";
 
-export function UserAccountMenu({ current }: { current: AccountPage }) {
+export function UserAccountMenu({
+  current,
+  onOpenUpload
+}: {
+  current: AccountPage;
+  onOpenUpload?: () => void;
+}) {
   const [username, setUsername] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -76,45 +82,65 @@ export function UserAccountMenu({ current }: { current: AccountPage }) {
           {initial}
         </span>
         <span className="accountDockLabel">{username}</span>
+        <span className="accountCaret" aria-hidden>▼</span>
       </button>
       {open ? (
         <div className="accountMenu" role="menu" aria-label="账户菜单">
           <div className="accountMenuSection">
             <Link
               role="menuitem"
-              className={current === "settings" ? "active" : ""}
-              href="/settings"
+              className={current === "workspace" ? "active" : ""}
+              href="/"
               onClick={() => setOpen(false)}
             >
-              设置
+              工作台
             </Link>
+            <a role="menuitem" href="/stage" target="_blank" rel="noreferrer" onClick={() => setOpen(false)}>
+              舞台
+            </a>
+            {onOpenUpload ? (
+              <button
+                type="button"
+                role="menuitem"
+                className="accountMenuUpload"
+                onClick={() => {
+                  setOpen(false);
+                  onOpenUpload();
+                }}
+              >
+                上传资料
+              </button>
+            ) : null}
             <Link
               role="menuitem"
               className={current === "records" ? "active" : ""}
               href="/records"
               onClick={() => setOpen(false)}
             >
-              对话记录
+              记录
             </Link>
-            <Link role="menuitem" href="/settings?focus=virtual" onClick={() => setOpen(false)}>
-              会议接入（虚拟声卡）
+            <Link
+              role="menuitem"
+              className={current === "settings" ? "active" : ""}
+              href="/settings"
+              onClick={() => setOpen(false)}
+            >
+              设置<span className="menuKbd">Ctrl+,</span>
             </Link>
-            <a role="menuitem" href="/stage" target="_blank" rel="noreferrer" onClick={() => setOpen(false)}>
-              助手舞台 ↗
-            </a>
           </div>
           <div className="accountMenuDivider" />
           <button type="button" role="menuitem" className="accountMenuLogout" onClick={() => void logout()}>
-            退出
+            退出登录
           </button>
+          <div className="accountMenuDivider" />
           <div className="accountMenuFooter">
-            <span className="accountAvatar" aria-hidden>
-              {initial}
-            </span>
             <div>
               <strong>{username}</strong>
-              <span>客户端账号</span>
+              <span>Pro Plan</span>
             </div>
+            <Link className="accountGear" href="/settings" aria-label="设置" onClick={() => setOpen(false)}>
+              ⚙
+            </Link>
           </div>
         </div>
       ) : null}
