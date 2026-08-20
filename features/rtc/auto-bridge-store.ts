@@ -54,6 +54,35 @@ export function saveAutoBridgeSoftware(software: string) {
   window.dispatchEvent(new CustomEvent(CHANGE_EVENT));
 }
 
+/**
+ * 选择即武装：一次性写入预选软件并开启自动听取（白名单外的值会先被归一化为空串）。
+ * 主页面「会议接入」卡片使用；返回武装后的软件值，便于调用方回显。
+ */
+export function armAutoBridge(software: string): string {
+  if (typeof window === "undefined") return "";
+  const parsed = parseAutoBridgeSoftware(software);
+  try {
+    window.localStorage.setItem(SOFTWARE_KEY, parsed);
+    window.localStorage.setItem(ENABLED_KEY, parsed ? "1" : "0");
+  } catch {
+    // ignore quota / private mode
+  }
+  window.dispatchEvent(new CustomEvent(CHANGE_EVENT));
+  return parsed;
+}
+
+/** 解除武装：关闭自动听取并清空预选软件（用户主动选择"未选择"时使用）。 */
+export function disarmAutoBridge() {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(SOFTWARE_KEY, "");
+    window.localStorage.setItem(ENABLED_KEY, "0");
+  } catch {
+    // ignore quota / private mode
+  }
+  window.dispatchEvent(new CustomEvent(CHANGE_EVENT));
+}
+
 export function subscribeAutoBridgeStore(listener: () => void): () => void {
   if (typeof window === "undefined") return () => undefined;
   const onStorage = (event: StorageEvent) => {

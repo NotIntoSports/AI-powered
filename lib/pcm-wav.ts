@@ -92,6 +92,25 @@ export function wrapPcmAsWav(pcm: Uint8Array, sampleRate = CLONE_SAMPLE_RATE) {
   return new Uint8Array(buffer);
 }
 
+/** 把标准 PCM16 单声道 WAV 截断到最长 maxSeconds，并同步修正 RIFF/data 头长度。 */
+export function truncateWavToSeconds(wav: Uint8Array, maxSeconds: number, sampleRate = CLONE_SAMPLE_RATE) {
+  if (wav.length < 44) return wav;
+  const header = String.fromCharCode(...wav.slice(0, 4));
+  const wave = String.fromCharCode(...wav.slice(8, 12));
+  if (header !== "RIFF" || wave !== "WAVE") return wav;
+  const view = new DataView(wav.buffer, wav.byteOffset, wav.byteLength);
+  const rate = view.getUint32(24, true) || sampleRate;
+  const declaredDataSize = view.getUint32(40, true);
+  const maxBytes = Math.floor(maxSeconds * rate) * 2;
+  const available = Math.min(declaredDataSize, wav.length - 44);
+  if (available <= maxBytes) return wav;
+  const truncated = wav.slice(0, 44 + maxBytes);
+  const target = new DataView(truncated.buffer, truncated.byteOffset, truncated.byteLength);
+  target.setUint32(4, 36 + maxBytes, true);
+  target.setUint32(40, maxBytes, true);
+  return truncated;
+}
+
 function writeAscii(view: DataView, offset: number, value: string) {
   for (let index = 0; index < value.length; index += 1) {
     view.setUint8(offset + index, value.charCodeAt(index));

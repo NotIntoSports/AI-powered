@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import "./styles.css";
 import { AutoBridgeController } from "../features/rtc/auto-bridge-controller";
+import { VirtualAudioAutoSetup } from "../features/audio/virtual-audio-auto-setup";
 
 export const metadata = {
   title: "AI虚拟助手",
@@ -12,6 +13,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="zh-CN">
       <body>
         <AutoBridgeController />
+        <VirtualAudioAutoSetup />
         {children}
       </body>
     </html>

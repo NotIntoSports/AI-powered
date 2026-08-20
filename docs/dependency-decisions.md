@@ -618,3 +618,12 @@
 - 复用：Electron IPC `listMeetingProcesses` / AudioBridge 捕获；`/api/rtc/token` + LiveKit/火山云 transport（bridge-session 单例）；localStorage 偏好模式（同 remote-monitor.ts）。
 - 未采用：`@livekit/rtc-node`（主进程推流）——火山云无对应 Node SDK，双供应商无法统一，且违反「优先复用现有能力」。
 - 设计文档：docs/superpowers/specs/2026-08-19-auto-meeting-bridge-design.md
+
+# 2026-08-19：阿里云 CosyVoice 声音刻录（自动分配音色，用户零感知）
+
+- 目标：桌面端录音刻录助手声音时自动分配唯一音色，用户全程不需要知道任何音色 ID；阿里云线路可用时不再依赖豆包。
+- 结论：零新增依赖。官方 POP OpenAPI（`nls-slp.cn-shanghai.aliyuncs.com`，Version `2019-08-19`）+ 复用项目已有 POP HMAC-SHA1 签名机制（与 CreateToken 同源，`lib/aliyun-cosyvoice.ts`）；`CosyVoiceClone` 只传 `VoicePrefix=vh`，平台自动生成 `cosyvoice-vh-xxxxxxx` 唯一音色，天然空闲无需挑选。
+- 音频中转：复用已接入 control-api 的腾讯云 COS（新增 `POST/DELETE /api/v1/client/voice-samples`，存 `voice-samples/<uuid>.wav`，返回约 30 分钟预签名 GET URL，复刻后立即删除）；COS 密钥不下发客户端，桌面端无新环境变量。
+- 合成：复刻音色只能走 CosyVoice 大模型，采用 NLS `FlowingSpeechSynthesizer` WebSocket 协议（JSON 指令帧 + 二进制音频帧，wav 拼接），用 Node 24 原生 WebSocket，不引入 `ws`。
+- 未采用：本地 CosyVoice 开源模型（需 GPU、与桌面端定位不符）；百炼 DashScope 线路（当前控制台是智能语音交互 NLS，无百炼 API Key）；阿里云 OSS 中转（项目已有腾讯云 COS，不新增云厂商配置面）。
+- 限制：复刻音色每 UID 上限 1000 个、不支持删除、1 年未用自动下线；合成需在控制台开通「语音合成 CosyVoice 大模型」商用版（冒烟脚本 `scripts/smoke-aliyun-cosyvoice.mjs` 已验证 token/POP 签名/WebSocket 连通，商用版未开通时网关返回 40000010/FREE_TRIAL_EXPIRED）。

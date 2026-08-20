@@ -1012,6 +1012,70 @@ paths:
               schema: {$ref: '#/components/schemas/KnowledgeSearchResult'}
         '401':
           $ref: '#/components/responses/Unauthenticated'
+  /api/v1/client/voice-samples:
+    post:
+      operationId: uploadClientVoiceSample
+      summary: Upload a voice clone WAV sample to Tencent COS and return a ~30 minute presigned GET URL for Aliyun CosyVoice clone. COS secrets are never returned to the client.
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: {type: string, format: binary, description: Mono 16bit WAV, 24kHz, 5-25 seconds, max 10MB.}
+      responses:
+        '201':
+          description: Stored voice sample with short-lived presigned URL.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, url, sizeBytes, expiresIn]
+                properties:
+                  id: {type: string, description: Sample id used for deletion.}
+                  url: {type: string, description: Presigned GET URL readable by Aliyun for ~30 minutes.}
+                  sizeBytes: {type: integer}
+                  expiresIn: {type: integer, description: Presigned URL validity in seconds.}
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          $ref: '#/components/responses/InvalidInputUnprocessable'
+        '503':
+          $ref: '#/components/responses/SettingsUnavailable'
+  /api/v1/client/voice-samples/{id}:
+    delete:
+      operationId: deleteClientVoiceSample
+      summary: Delete a voice clone sample right after cloning so audio is not retained.
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, pattern: '^[0-9a-f]{32}$'}
+      responses:
+        '204':
+          description: Sample deleted (or already absent).
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '422':
+          $ref: '#/components/responses/InvalidInputUnprocessable'
+        '503':
+          $ref: '#/components/responses/SettingsUnavailable'
 components:
   securitySchemes:
     cookieAuth:
