@@ -636,3 +636,11 @@
 - 新增文件：`features/rtc/auto-answer-submit.ts`（仅用项目内模块，无外部依赖）。
 - 未采用：任何新 UI 库/状态管理库——现有 CSS + React 状态即可满足；窗口画面捕获（getDisplayMedia 视频轨）用户明确暂缓。
 - 设计文档：docs/superpowers/specs/2026-08-20-desktop-ui-redesign-auto-meeting-audio-design.md
+
+# 2026-08-21：control-api 用户与会话管理 MCP 服务（modelcontextprotocol/go-sdk）
+
+- 目标：把 control-api 的用户与会话管理能力（用户增删改、重置密码、吊销会话、会话/设备在线状态）暴露为 MCP 工具，供 AI 客户端以 Streamable HTTP 接入。
+- 结论：新增唯一依赖 [modelcontextprotocol/go-sdk v1.7.0](https://github.com/modelcontextprotocol/go-sdk)（MCP 官方 Go SDK，Apache-2.0，官方活跃维护，go ≥1.25；模块缓存已存在，离线可解析）。新增 `server/control-api/internal/mcpadmin` 与 `cmd/control-api-mcp`，进程内直接复用 `internal/identity` / `internal/presence` / `internal/users` 服务层，审计日志与管理员权限校验沿用现有机制。
+- 配置：`MCP_LISTEN_ADDRESS`（默认 127.0.0.1:8091）、`MCP_ADMIN_TOKEN`（Bearer，`subtle.ConstantTimeCompare` 校验）、`MCP_ACTOR_USERNAME`（工具调用归属的 active 管理员）。compose 以 `--profile mcp` 启动，Dockerfile 同镜像编译三个二进制。
+- 未采用：自研 JSON-RPC/SSE 实现（MCP 协议细节多、官方 SDK 已覆盖 Streamable HTTP 会话管理）；独立进程经 HTTP 转发 `/api/v1/*`（需处理浏览器 Cookie session 二次鉴权，损耗大且重复权限逻辑）；SDK 的 OAuth 授权流程（本期静态 Bearer Token 足够）。
+- 限制：仅暴露用户与会话管理域；工具归属单一管理员账号；远程客户端需自行经 TLS 代理接入。
