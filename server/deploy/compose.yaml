@@ -78,6 +78,24 @@ services:
     stdin_open: true
     restart: "no"
 
+  # MCP service exposing user and session administration over Streamable HTTP.
+  # Kept on the compose network; expose via TLS-terminating proxy if remote
+  # MCP clients need access. Start with: docker compose --profile mcp up -d
+  control-api-mcp:
+    image: control-api:local
+    build: ../control-api
+    profiles: ["mcp"]
+    entrypoint: ["/control-api-mcp"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      MCP_LISTEN_ADDRESS: 0.0.0.0:8091
+      MCP_ADMIN_TOKEN: ${MCP_ADMIN_TOKEN}
+      MCP_ACTOR_USERNAME: ${MCP_ACTOR_USERNAME}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
   management-web:
     image: management-web:local
     build: ../management-web

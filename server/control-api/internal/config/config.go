@@ -19,13 +19,16 @@ const (
 	defaultKnowledgeProvider = "local-pgvector"
 	defaultEmbeddingBaseURL  = "http://127.0.0.1:8090"
 	defaultEmbeddingModel    = "BAAI/bge-m3"
+	defaultMCPListenAddress  = "127.0.0.1:8091"
 )
 
 var (
-	ErrDatabaseURLRequired = errors.New("DATABASE_URL is required")
-	ErrSessionTTLRange     = errors.New("SESSION_TTL must be between 15m and 720h")
-	ErrTrustedProxyCIDRs   = errors.New("TRUSTED_PROXY_CIDRS must contain valid CIDR prefixes")
-	ErrSettingsMasterKey   = secretbox.ErrInvalidMasterKey
+	ErrDatabaseURLRequired      = errors.New("DATABASE_URL is required")
+	ErrSessionTTLRange          = errors.New("SESSION_TTL must be between 15m and 720h")
+	ErrTrustedProxyCIDRs        = errors.New("TRUSTED_PROXY_CIDRS must contain valid CIDR prefixes")
+	ErrSettingsMasterKey        = secretbox.ErrInvalidMasterKey
+	ErrMCPAdminTokenRequired    = errors.New("MCP_ADMIN_TOKEN is required for the MCP service")
+	ErrMCPActorUsernameRequired = errors.New("MCP_ACTOR_USERNAME is required for the MCP service")
 )
 
 type Config struct {
@@ -38,6 +41,9 @@ type Config struct {
 	KnowledgeProvider string
 	EmbeddingBaseURL  string
 	EmbeddingModel    string
+	MCPListenAddress  string
+	MCPAdminToken     string
+	MCPActorUsername  string
 }
 
 func Load(getenv func(string) string) (Config, error) {
@@ -49,6 +55,7 @@ func Load(getenv func(string) string) (Config, error) {
 		KnowledgeProvider: defaultKnowledgeProvider,
 		EmbeddingBaseURL:  defaultEmbeddingBaseURL,
 		EmbeddingModel:    defaultEmbeddingModel,
+		MCPListenAddress:  defaultMCPListenAddress,
 	}
 	if cfg.DatabaseURL == "" {
 		return Config{}, ErrDatabaseURLRequired
@@ -96,6 +103,11 @@ func Load(getenv func(string) string) (Config, error) {
 	if value := strings.TrimSpace(getenv("EMBEDDING_MODEL")); value != "" {
 		cfg.EmbeddingModel = value
 	}
+	if value := strings.TrimSpace(getenv("MCP_LISTEN_ADDRESS")); value != "" {
+		cfg.MCPListenAddress = value
+	}
+	cfg.MCPAdminToken = strings.TrimSpace(getenv("MCP_ADMIN_TOKEN"))
+	cfg.MCPActorUsername = strings.TrimSpace(getenv("MCP_ACTOR_USERNAME"))
 
 	return cfg, nil
 }
