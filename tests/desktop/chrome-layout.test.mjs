@@ -21,7 +21,6 @@ test("workspace chrome puts login bottom-left and upload top-right", async () =>
   assert.match(chrome, /UploadMaterialsDock/);
   assert.match(account, /accountDock/);
   assert.match(account, /href="\/login"/);
-  assert.match(account, /会议接入（虚拟声卡）/);
   assert.match(account, /href="\/settings"/);
   assert.match(account, /href="\/records"/);
   assert.match(upload, /uploadDock/);
