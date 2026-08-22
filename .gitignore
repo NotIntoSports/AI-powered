@@ -22,6 +22,8 @@ dist/
 dist-new/
 dist-desktop/
 *.tsbuildinfo
+__pycache__/
+*.py[cod]
 native/**/bin/
 native/**/obj/
 native/**/publish/

@@ -644,3 +644,12 @@
 - 配置：`MCP_LISTEN_ADDRESS`（默认 127.0.0.1:8091）、`MCP_ADMIN_TOKEN`（Bearer，`subtle.ConstantTimeCompare` 校验）、`MCP_ACTOR_USERNAME`（工具调用归属的 active 管理员）。compose 以 `--profile mcp` 启动，Dockerfile 同镜像编译三个二进制。
 - 未采用：自研 JSON-RPC/SSE 实现（MCP 协议细节多、官方 SDK 已覆盖 Streamable HTTP 会话管理）；独立进程经 HTTP 转发 `/api/v1/*`（需处理浏览器 Cookie session 二次鉴权，损耗大且重复权限逻辑）；SDK 的 OAuth 授权流程（本期静态 Bearer Token 足够）。
 - 限制：仅暴露用户与会话管理域；工具归属单一管理员账号；远程客户端需自行经 TLS 代理接入。
+
+## 2026-08-22 LiveKit 字幕 Agent 改用阿里云 NLS 实时识别
+
+- 目标：LiveKit Agent 自动订阅会议音轨，转为 16 kHz 单声道 PCM，送入阿里云智能语音交互实时识别，并把中间/最终结果发布到既有 `subtitle.v1` topic；桌面端和 AI 自动回答继续消费现有字幕协议。
+- 官方方案：阿里云 `alibabacloud-nls-python-sdk` 1.1.0（Apache-2.0）覆盖实时识别，但官方包会额外安装 `oss2`、`aliyun-python-sdk-core>=2.13.3`、`matplotlib>=3.3.4`，对单用途常驻 Agent 体积和供应链面过大，且 OpenAPI V1 已进入基础安全维护阶段，因此不直接接入整包。
+- 采用：按阿里云官方 `SpeechTranscriber` WebSocket 协议发送 `StartTranscription` / PCM / `StopTranscription`，复用项目已有 CreateToken HMAC-SHA1 契约；网络层使用 `websockets>=17.0.1,<18`（BSD-3-Clause，持续维护，支持 Python 3.12）。LiveKit 官方 `AudioStream(sample_rate=16000, num_channels=1)` 完成音轨重采样与声道转换，无 FFmpeg、GPU 或本地模型开销。
+- 兼容与成本：服务运行在 Linux/Python 3.12 容器，桌面 Windows、浏览器、OBS 和 Next.js 均不新增运行时依赖；CPU/内存只增加流式 PCM 与单条 WebSocket，费用按阿里云实时识别用量计费，需在阿里云控制台开通对应项目/商用额度。
+- 安全：Appkey 与 AccessKey/临时 Token 仅由 `server/deploy/.env` 注入 Agent；不进入浏览器、字幕数据或日志。日志只记录 provider、room 和状态；配置缺失时进程立即失败。
+- 限制：当前每条 LiveKit 远端音轨建立一条阿里云识别连接；依赖阿里云公网 NLS 网关，不提供离线降级。管理端中已保存的加密密钥不会自动导出到容器环境，部署时需在 175 的 `.env` 配置同一组凭据。
