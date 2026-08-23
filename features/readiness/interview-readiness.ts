@@ -22,7 +22,7 @@ export type InterviewReadinessItem = {
 
 const labels: Record<keyof Omit<InterviewReadinessInput, "outputMode">, string> = {
   modelConfigured: "AI 模型已配置",
-  stageConnected: "助手舞台在线",
+  stageConnected: "播报引擎在线",
   mediaReady: "助手画面已加载",
   speechReady: "中文语音可播放",
   obsConnected: "OBS 已连接",

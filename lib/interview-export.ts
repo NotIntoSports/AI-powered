@@ -43,7 +43,6 @@ export function renderInterviewMarkdown(session: InterviewSession) {
     "",
     `- 补充说明：${valueOrUnknown(session.jobDescription)}`,
     `- 对话重点：${valueOrUnknown(session.interviewFocus)}`,
-    `- 问题上限：${session.maxQuestions}`,
     "",
     "## 对话原文",
     ""

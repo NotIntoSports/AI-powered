@@ -1,6 +1,7 @@
 import VERTC from "@volcengine/rtc";
 import { createSubtitleTransport } from "../../desktop/rtc/create-transport.ts";
 import { loadRemoteMonitorEnabled, subscribeRemoteMonitor } from "../audio/remote-monitor.ts";
+import { emitPipelineEvent } from "../diagnostics/pipeline-log.ts";
 import { setRtcNetwork } from "./network-quality.ts";
 import { subtitleSink } from "../../lib/subtitles/sink.ts";
 import type { SubtitleProvider, SubtitleTransport } from "../../lib/subtitles/transport.ts";
@@ -118,6 +119,11 @@ export async function startBridgeSession(
     const activeProvider: SubtitleProvider = token.provider === "livekit" ? "livekit" : "volcengine";
     const language = token.language || "zh";
     const roomId = token.roomId || sessionId;
+    void emitPipelineEvent({
+      event: "bridge.token-received",
+      traceId: roomId,
+      fields: { httpStatus: tokenResponse.status, provider: activeProvider, status: tokenResponse.ok ? "ok" : "failed" }
+    });
     const pcm = createPcmTrack(loadRemoteMonitorEnabled());
     // web-debug 旁路：无桌面捕获时用本地音轨走完 token → transport → connect 链路
     let debugTrack: MediaStreamTrack | null = null;
@@ -175,8 +181,24 @@ export async function startBridgeSession(
         throw error;
       }
       console.log(`[bridge] transport connected provider=${activeProvider} after=${Date.now() - connectStartedAt}ms`);
+      void emitPipelineEvent({
+        event: "bridge.transport-connected",
+        traceId: roomId,
+        fields: { provider: activeProvider, durationMs: Date.now() - connectStartedAt }
+      });
       if (bridge) {
-        removePcm = bridge.onAudioPcm(pcm.push);
+        let receivedFirstPcmFrame = false;
+        removePcm = bridge.onAudioPcm((data) => {
+          pcm.push(data);
+          if (!receivedFirstPcmFrame) {
+            receivedFirstPcmFrame = true;
+            void emitPipelineEvent({
+              event: "bridge.pcm-first-frame",
+              traceId: roomId,
+              fields: { bytes: data.byteLength, pid }
+            });
+          }
+        });
         removeEvent = bridge.onAudioEvent((event) => {
           const value = event as { type?: string; peak?: number; message?: string };
           if (value.type === "level") events.onLevel(value.peak || 0);
@@ -185,6 +207,11 @@ export async function startBridgeSession(
         });
         await bridge.startAudioCapture(pid);
         console.log("[bridge] audio capture started");
+        void emitPipelineEvent({
+          event: "bridge.capture-started",
+          traceId: roomId,
+          fields: { pid, owner, mode: "desktop" }
+        });
       } else {
         console.log("[bridge] web-debug: skipped desktop audio capture");
       }
@@ -217,9 +244,19 @@ export async function startBridgeSession(
         }
       };
       console.log(`[bridge] session ready owner=${owner} roomId=${roomId} provider=${activeProvider}`);
+      void emitPipelineEvent({
+        event: "bridge.ready",
+        traceId: roomId,
+        fields: { owner, provider: activeProvider, status: "ready" }
+      });
       return handle;
     } catch (error) {
       console.error("[bridge] session start failed", error);
+      void emitPipelineEvent({
+        event: "bridge.failed",
+        traceId: sessionId,
+        fields: { code: error instanceof Error ? error.name : "UNKNOWN", status: "failed" }
+      });
       stopMonitorSync?.();
       removePcm?.();
       removeEvent?.();

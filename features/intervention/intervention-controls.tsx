@@ -7,31 +7,50 @@ import {
   subscribeRemoteMonitor
 } from "../audio/remote-monitor";
 import {
-  beginIntervention,
+  loadLocalAiMonitorEnabled,
+  saveLocalAiMonitorEnabled,
+  subscribeLocalAiMonitor
+} from "../audio/local-ai-monitor";
+import {
+  loadAiReferenceModeEnabled,
+  saveAiReferenceModeEnabled,
+  subscribeAiReferenceMode
+} from "../audio/ai-reference-mode";
+import {
   emergencyMute,
-  endIntervention,
   initialInterventionState,
-  resumeAi
+  resumeAi,
+  toggleIntervention
 } from "./intervention-state";
 
 export function InterventionControls({ onAiPauseChange }: { onAiPauseChange(paused: boolean): void }) {
   const [state, setState] = useState(initialInterventionState);
   const [remoteMonitor, setRemoteMonitor] = useState(true);
+  const [localAiMonitor, setLocalAiMonitor] = useState(true);
+  const [aiReferenceMode, setAiReferenceMode] = useState(false);
 
   useEffect(() => {
     setRemoteMonitor(loadRemoteMonitorEnabled());
     return subscribeRemoteMonitor(() => setRemoteMonitor(loadRemoteMonitorEnabled()));
   }, []);
 
-  function press() {
-    setState((current) => beginIntervention(current));
-    onAiPauseChange(true);
-    window.dispatchEvent(new CustomEvent("ai-intervention", { detail: { action: "begin" } }));
-  }
+  useEffect(() => {
+    setLocalAiMonitor(loadLocalAiMonitorEnabled());
+    return subscribeLocalAiMonitor(() => setLocalAiMonitor(loadLocalAiMonitorEnabled()));
+  }, []);
 
-  function release() {
-    setState((current) => endIntervention(current));
-    window.dispatchEvent(new CustomEvent("ai-intervention", { detail: { action: "end" } }));
+  useEffect(() => {
+    setAiReferenceMode(loadAiReferenceModeEnabled());
+    return subscribeAiReferenceMode(() => setAiReferenceMode(loadAiReferenceModeEnabled()));
+  }, []);
+
+  function toggleHumanSpeech() {
+    const enabling = !state.humanMicActive;
+    setState((current) => toggleIntervention(current));
+    if (enabling) onAiPauseChange(true);
+    window.dispatchEvent(new CustomEvent("ai-intervention", {
+      detail: { action: enabling ? "begin" : "end" }
+    }));
   }
 
   return (
@@ -39,7 +58,13 @@ export function InterventionControls({ onAiPauseChange }: { onAiPauseChange(paus
       <div className="cardHeading">
         <h2>监听与人工介入</h2>
         <span className={`pill ${state.humanMicActive || state.aiPaused ? "" : "running"}`}>
-          {state.humanMicActive ? "人工说话中" : state.aiPaused ? "AI 已暂停" : "AI 自动模式"}
+          {state.humanMicActive
+            ? "人工说话中"
+            : state.aiPaused
+              ? "AI 已暂停"
+              : aiReferenceMode
+                ? "AI 参考模式"
+                : "AI 自动模式"}
         </span>
       </div>
       <button
@@ -56,17 +81,42 @@ export function InterventionControls({ onAiPauseChange }: { onAiPauseChange(paus
         <span>本机听到对方说话</span>
         <span className={`switch ${remoteMonitor ? "switchOn" : ""}`} aria-hidden />
       </button>
+      <button
+        type="button"
+        className="toggleRow"
+        role="switch"
+        aria-checked={aiReferenceMode}
+        onClick={() => {
+          const enabled = !aiReferenceMode;
+          setAiReferenceMode(enabled);
+          saveAiReferenceModeEnabled(enabled);
+        }}
+      >
+        <span>AI 参考模式（只显示答案，不播报）</span>
+        <span className={`switch ${aiReferenceMode ? "switchOn" : ""}`} aria-hidden />
+      </button>
+      <button
+        type="button"
+        className="toggleRow"
+        role="switch"
+        aria-checked={localAiMonitor}
+        onClick={() => {
+          const enabled = !localAiMonitor;
+          setLocalAiMonitor(enabled);
+          saveLocalAiMonitorEnabled(enabled);
+        }}
+      >
+        <span>本机听到 AI 播报</span>
+        <span className={`switch ${localAiMonitor ? "switchOn" : ""}`} aria-hidden />
+      </button>
       <div className="obsActions">
         <button
           type="button"
           className="primary"
           disabled={state.muted}
-          onPointerDown={press}
-          onPointerUp={release}
-          onPointerCancel={release}
-          onPointerLeave={() => state.humanMicActive && release()}
+          onClick={toggleHumanSpeech}
         >
-          按住说话
+          {state.humanMicActive ? "关闭人工说话" : "启用人工说话"}
         </button>
         <button
           type="button"

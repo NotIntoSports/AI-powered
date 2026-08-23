@@ -1,246 +1,55 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import {
-  loadVirtualAudioRoute,
-  resolveStoredRouteAgainstDevices
-} from "../../features/audio/virtual-audio-route";
+import { useEffect, useState } from "react";
 import type { InterviewSession } from "../../lib/interview";
 
-type SinkAudioElement = HTMLAudioElement & {
-  setSinkId?: (deviceId: string) => Promise<void>;
-};
-
-// Stored deviceIds are origin-scoped and can go stale; re-resolve the verified
-// route by device label before steering TTS into the virtual sink.
-async function resolveVirtualAudioSinkId(): Promise<string | null> {
-  const route = loadVirtualAudioRoute();
-  if (!route?.outputDeviceId) return null;
-  try {
-    const devices = (await navigator.mediaDevices?.enumerateDevices?.()) ?? [];
-    const resolved = resolveStoredRouteAgainstDevices(
-      route,
-      devices.map((device) => ({
-        kind: device.kind as "audioinput" | "audiooutput",
-        label: device.label,
-        deviceId: device.deviceId
-      }))
-    );
-    return resolved?.outputDeviceId ?? null;
-  } catch {
-    return null;
-  }
-}
-
-type AvatarMetadata = {
-  available: boolean;
-  kind?: "image" | "video";
-  version?: string;
+type AvatarMetadata = { available: boolean; kind?: "image" | "video"; version?: string };
+type VisualStageStatus = {
+  ttsState?: "idle" | "speaking" | "ready" | "error";
+  ttsError?: string;
+  captureState?: "off" | "capturing" | "silent";
+  captureUpdatedAt?: number;
 };
 
 export default function StagePage() {
-  const lastRevision = useRef(-1);
-  const lastTestSpeechId = useRef(0);
-  const lastStopSpeechAt = useRef(0);
-  const speechToken = useRef(0);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const audioUrlRef = useRef("");
   const [session, setSession] = useState<InterviewSession | null>(null);
   const [avatarMedia, setAvatarMedia] = useState<AvatarMetadata>({ available: false });
-  const [speaking, setSpeaking] = useState(false);
-  const [currentSpeechText, setCurrentSpeechText] = useState("");
-  const [ttsState, setTtsState] = useState<"idle" | "speaking" | "ready" | "error">("idle");
-  const [ttsError, setTtsError] = useState("");
-  const [lastSpeechAt, setLastSpeechAt] = useState(0);
   const [mediaReady, setMediaReady] = useState(true);
-  const [captureState, setCaptureState] = useState<"off" | "capturing" | "silent">("off");
-  const playbackBlocked = ttsState === "error" && /not.?allowed/i.test(ttsError);
-
-  function releaseAudio() {
-    audioRef.current?.pause();
-    audioRef.current = null;
-    if (audioUrlRef.current) {
-      URL.revokeObjectURL(audioUrlRef.current);
-      audioUrlRef.current = "";
-    }
-  }
-
-  function playWebSpeech(text: string, token: number, precedingError: string) {
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = "zh-CN";
-    utterance.rate = 0.92;
-    utterance.pitch = 1;
-    utterance.onstart = () => {
-      if (speechToken.current !== token) return;
-      setTtsError("");
-      setTtsState("speaking");
-      setSpeaking(true);
-    };
-    utterance.onend = () => {
-      if (speechToken.current !== token) return;
-      setSpeaking(false);
-      setTtsState("ready");
-      setLastSpeechAt(Date.now());
-    };
-    utterance.onerror = (event) => {
-      if (speechToken.current !== token) return;
-      setSpeaking(false);
-      setTtsState("error");
-      setTtsError(`${precedingError}; web-speech:${event.error || "unknown"}`);
-    };
-    window.speechSynthesis.speak(utterance);
-  }
-
-  async function playSpeech(text: string, token: number) {
-    setCurrentSpeechText(text);
-    releaseAudio();
-    window.speechSynthesis.cancel();
-    let fallbackStarted = false;
-    const fallback = (reason: string) => {
-      if (fallbackStarted || speechToken.current !== token) return;
-      fallbackStarted = true;
-      releaseAudio();
-      playWebSpeech(text, token, reason);
-    };
-    try {
-      const response = await fetch("/api/tts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text })
-      });
-      if (!response.ok) throw new Error(`sapi-http-${response.status}`);
-      if (speechToken.current !== token) return;
-      const url = URL.createObjectURL(await response.blob());
-      audioUrlRef.current = url;
-      const audio = new Audio(url) as SinkAudioElement;
-      const sinkId = await resolveVirtualAudioSinkId();
-      if (sinkId && audio.setSinkId) {
-        try {
-          await audio.setSinkId(sinkId);
-        } catch {
-          // Keep default output if the saved virtual sink is missing.
-        }
-      }
-      if (speechToken.current !== token) {
-        URL.revokeObjectURL(url);
-        audioUrlRef.current = "";
-        return;
-      }
-      audioRef.current = audio;
-      audio.onplay = () => {
-        if (speechToken.current !== token) return;
-        setTtsError("");
-        setTtsState("speaking");
-        setSpeaking(true);
-      };
-      audio.onended = () => {
-        if (speechToken.current !== token) return;
-        setSpeaking(false);
-        setTtsState("ready");
-        setLastSpeechAt(Date.now());
-        releaseAudio();
-      };
-      audio.onerror = () => {
-        fallback("sapi-audio:error");
-      };
-      await audio.play();
-    } catch (cause) {
-      if (speechToken.current !== token) return;
-      const reason = cause instanceof DOMException
-        ? cause.name
-        : cause instanceof Error
-          ? cause.message
-          : "unknown";
-      fallback(`sapi-audio:${reason}`);
-    }
-  }
+  const [stageStatus, setStageStatus] = useState<VisualStageStatus>({});
 
   useEffect(() => {
     let active = true;
-    const timer = window.setInterval(async () => {
+    const poll = async () => {
       try {
-        const [sessionResponse, avatarResponse, testSpeechResponse, stageStatusResponse] = await Promise.all([
+        const [sessionResponse, avatarResponse, statusResponse] = await Promise.all([
           fetch("/api/session", { cache: "no-store" }),
           fetch("/api/avatar", { cache: "no-store" }),
-          fetch("/api/stage-test-speech", { cache: "no-store" }),
           fetch("/api/stage-status", { cache: "no-store" })
         ]);
-        const next = await sessionResponse.json() as InterviewSession;
-        const nextAvatar = await avatarResponse.json() as AvatarMetadata;
-        const testSpeech = await testSpeechResponse.json() as {
-          id: number;
-          text: string;
-          createdAt: number;
-        } | null;
-        const stageStatus = await stageStatusResponse.json() as {
-          stopSpeechAt?: number;
-          captureState?: "off" | "capturing" | "silent";
-          captureUpdatedAt?: number;
-        };
+        const [nextSession, nextAvatar, nextStatus] = await Promise.all([
+          sessionResponse.json() as Promise<InterviewSession>,
+          avatarResponse.json() as Promise<AvatarMetadata>,
+          statusResponse.json() as Promise<VisualStageStatus>
+        ]);
         if (!active) return;
-        setSession(next);
+        setSession(nextSession);
         setAvatarMedia(nextAvatar);
-        // 采集状态超过 8 秒未刷新视为过期（主控台可能已关闭），避免展示 stale 状态。
-        const captureFresh = Date.now() - (stageStatus.captureUpdatedAt || 0) < 8_000;
-        setCaptureState(captureFresh ? stageStatus.captureState ?? "off" : "off");
-        if ((stageStatus.stopSpeechAt || 0) > lastStopSpeechAt.current) {
-          lastStopSpeechAt.current = stageStatus.stopSpeechAt || 0;
-          speechToken.current += 1;
-          releaseAudio();
-          window.speechSynthesis.cancel();
-          setSpeaking(false);
-          setTtsState("idle");
-          setCurrentSpeechText("");
-        }
-        if (next.revision > lastRevision.current && next.speakingText) {
-          lastRevision.current = next.revision;
-          const token = speechToken.current + 1;
-          speechToken.current = token;
-          void playSpeech(next.speakingText, token);
-        }
-        if (
-          testSpeech &&
-          testSpeech.id > lastTestSpeechId.current &&
-          Date.now() - testSpeech.createdAt < 10_000
-        ) {
-          lastTestSpeechId.current = testSpeech.id;
-          const token = speechToken.current + 1;
-          speechToken.current = token;
-          void playSpeech(testSpeech.text, token);
-        }
+        setStageStatus(nextStatus);
       } catch {
-        // Keep the last rendered frame when the controller briefly restarts.
+        // Keep the last visual frame while the desktop controller restarts.
       }
-    }, 600);
+    };
+    void poll();
+    const timer = window.setInterval(poll, 600);
     return () => {
       active = false;
       window.clearInterval(timer);
-      speechToken.current += 1;
-      releaseAudio();
-      window.speechSynthesis.cancel();
     };
   }, []);
 
-  useEffect(() => {
-    const report = () => {
-      const ttsSupported = "speechSynthesis" in window && "SpeechSynthesisUtterance" in window;
-      void fetch("/api/stage-status", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ttsSupported,
-          voiceCount: ttsSupported ? window.speechSynthesis.getVoices().length : 0,
-          ttsState,
-          ttsError,
-          lastSpeechAt,
-          mediaReady
-        })
-      }).catch(() => undefined);
-    };
-    report();
-    const timer = window.setInterval(report, 3_000);
-    return () => window.clearInterval(timer);
-  }, [lastSpeechAt, mediaReady, ttsError, ttsState]);
+  const speaking = stageStatus.ttsState === "speaking";
+  const captureFresh = Date.now() - (stageStatus.captureUpdatedAt || 0) < 8_000;
+  const captureState = captureFresh ? stageStatus.captureState ?? "off" : "off";
 
   return (
     <main className="stage">
@@ -251,10 +60,7 @@ export default function StagePage() {
             <video
               key={avatarMedia.version}
               src={`/api/avatar/media?v=${avatarMedia.version}`}
-              autoPlay
-              loop
-              muted
-              playsInline
+              autoPlay loop muted playsInline
               onLoadStart={() => setMediaReady(false)}
               onLoadedData={() => setMediaReady(true)}
               onError={() => setMediaReady(false)}
@@ -276,18 +82,13 @@ export default function StagePage() {
           <div className="face">
             <span className="brow left" /><span className="brow right" />
             <span className="eye left" /><span className="eye right" />
-            <span className="nose" />
-            <span className="mouth" />
+            <span className="nose" /><span className="mouth" />
           </div>
-          <div className="neck" />
-          <div className="body" />
+          <div className="neck" /><div className="body" />
         </section>
       )}
       <section className="lowerThird">
-        <div>
-          <strong>AI虚拟助手</strong>
-          <span>{session?.roleName || "实时互动"}</span>
-        </div>
+        <div><strong>AI虚拟助手</strong><span>{session?.roleName || "实时互动"}</span></div>
         <i className={speaking ? "live" : ""}>{speaking ? "正在提问" : "正在聆听"}</i>
       </section>
       {captureState !== "capturing" && (
@@ -297,19 +98,9 @@ export default function StagePage() {
             : "未采集会议音频：在主控台点击“开始听取对方”"}
         </p>
       )}
-      {currentSpeechText && <p className="caption">{currentSpeechText}</p>}
-      {playbackBlocked && currentSpeechText && (
-        <button
-          className="stageAudioUnlock"
-          onClick={() => {
-            const token = speechToken.current + 1;
-            speechToken.current = token;
-            void playSpeech(currentSpeechText, token);
-          }}
-        >
-          点击启用声音并重播
-        </button>
-      )}
+      {session?.speakingText && <p className="caption">{session.speakingText}</p>}
+      {stageStatus.ttsState === "error" && stageStatus.ttsError && <p className="captureAlert">{stageStatus.ttsError}</p>}
+      {!mediaReady && <p className="captureAlert">助手画面加载失败</p>}
     </main>
   );
 }

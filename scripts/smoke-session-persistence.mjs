@@ -347,18 +347,6 @@ try {
   assert.equal(vadWasmResponse.status, 200);
   assert.ok((await vadWasmResponse.arrayBuffer()).byteLength > 10_000_000);
 
-  const missingConsentResponse = await fetch(`http://127.0.0.1:${appPort}/api/session`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      action: "start",
-      candidateName: "未确认候选人",
-      roleName: "前端工程师",
-      consentConfirmed: false
-    })
-  });
-  assert.equal(missingConsentResponse.status, 422);
-
   const startResponse = await fetch(`http://127.0.0.1:${appPort}/api/session`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -368,8 +356,7 @@ try {
       roleName: "前端工程师",
       jobDescription: "负责 Web 性能和组件架构",
       interviewFocus: "个人贡献",
-      maxQuestions: 3,
-      consentConfirmed: true
+      consentConfirmed: false
     })
   });
   assert.equal(startResponse.status, 200);
@@ -377,7 +364,10 @@ try {
   assert.equal(started.status, "running");
   assert.ok(started.sessionId);
   assert.equal(started.transcript.length, 1);
-  assert.equal(started.maxQuestions, 3);
+  assert.equal(started.maxQuestions, undefined);
+  assert.equal(started.consentConfirmed, false);
+  assert.equal(started.consentConfirmedAt, null);
+  assert.doesNotMatch(started.transcript[0].text, /AI虚拟助手协助/);
   assert.equal(started.jobDescription, "负责 Web 性能和组件架构");
   const overwriteRunningSessionResponse = await fetch(
     `http://127.0.0.1:${appPort}/api/session`,
@@ -546,7 +536,7 @@ try {
   assert.equal(secondAnswer.transcript[5].text, "你如何验证性能提升确实来自这些优化措施？");
   assert.equal(modelRequestCount, modelRequestsBeforeDedup + 2);
 
-  const finalAnswer = await fetch(`http://127.0.0.1:${appPort}/api/session`, {
+  const answerBeyondLegacyLimit = await fetch(`http://127.0.0.1:${appPort}/api/session`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -555,10 +545,18 @@ try {
       expectedRevision: secondAnswer.revision
     })
   }).then((response) => response.json());
+  assert.equal(answerBeyondLegacyLimit.status, "running");
+  assert.equal(answerBeyondLegacyLimit.transcript.length, 8);
+  assert.equal(answerBeyondLegacyLimit.transcript[7].kind, "question");
+  const finalAnswer = await fetch(`http://127.0.0.1:${appPort}/api/session`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "finish" })
+  }).then((response) => response.json());
   assert.equal(finalAnswer.status, "finished");
-  assert.equal(finalAnswer.transcript.length, 8);
-  assert.match(finalAnswer.transcript[7].text, /本次互动到这里/);
-  assert.equal(finalAnswer.transcript[7].kind, "closing");
+  assert.equal(finalAnswer.transcript.length, 9);
+  assert.match(finalAnswer.transcript[8].text, /本次互动到这里/);
+  assert.equal(finalAnswer.transcript[8].kind, "closing");
   const invalidSayAfterFinish = await fetch(`http://127.0.0.1:${appPort}/api/session`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -584,7 +582,7 @@ try {
     { readOnly: true }
   ));
   assert.equal(persisted.sessionId, started.sessionId);
-  assert.equal(persisted.transcript.length, 8);
+  assert.equal(persisted.transcript.length, 9);
   assert.equal(persisted.report.humanReviewRequired, true);
 
   const archived = JSON.parse(withDatabase((database) => database.prepare(
@@ -619,7 +617,7 @@ try {
   await startApp();
   const restored = await fetch(`http://127.0.0.1:${appPort}/api/session`).then((response) => response.json());
   assert.equal(restored.sessionId, started.sessionId);
-  assert.equal(restored.transcript.length, 8);
+  assert.equal(restored.transcript.length, 9);
 
   await stopApp();
   withDatabase((database) => database.prepare(
@@ -631,7 +629,7 @@ try {
   ).then((response) => response.json());
   assert.equal(recoveredFromArchive.sessionId, started.sessionId);
   assert.equal(recoveredFromArchive.status, "finished");
-  assert.equal(recoveredFromArchive.transcript.length, 8);
+  assert.equal(recoveredFromArchive.transcript.length, 9);
   const quarantined = withDatabase((database) => database.prepare(
     "SELECT payload FROM corrupt_records WHERE source = 'current_session' ORDER BY id DESC LIMIT 1"
   ).get(), { readOnly: true });

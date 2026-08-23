@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { emitPipelineEvent } from "../diagnostics/pipeline-log.ts";
 import { subtitleSink } from "../../lib/subtitles/sink";
-import { canAutoSubmitTranscription } from "../audio/transcription-turn";
+import { getAutoAnswerBlockedMessage, getAutoAnswerBlockReason } from "./auto-answer-gate.ts";
 
 /** AI 播报结束后仍丢弃该窗口内的 final 字幕，防止会议回传的 AI 声音被当作对方回答。 */
 const ECHO_TAIL_MS = 1_500;
@@ -47,30 +48,52 @@ export function useAutoAnswerSubmit({ enabled, processing = false, aiSpeaking, g
     () =>
       subtitleSink.subscribeFinal((line) => {
         const state = stateRef.current;
-        if (!state.enabled) {
-          state.onBlocked?.("AI 自动模式已暂停，这句字幕未提交");
-          return;
-        }
-        if (!isOutsideEchoWindow({ aiSpeaking: state.aiSpeaking, now: Date.now(), tailUntil: tailUntilRef.current })) return;
-        if (state.processing) {
-          state.onBlocked?.("AI 正在处理上一轮，这句字幕未自动提交");
-          return;
-        }
         const text = String(line.text || "").trim();
-        if (!isMeaningfulSubtitle(text)) return;
         const gate = state.getGate();
-        const allowed = canAutoSubmitTranscription({
+        const reason = getAutoAnswerBlockReason({
+          enabled: state.enabled,
+          processing: state.processing,
+          aiSpeaking: state.aiSpeaking,
+          outsideEchoWindow: isOutsideEchoWindow({
+            aiSpeaking: state.aiSpeaking,
+            now: Date.now(),
+            tailUntil: tailUntilRef.current
+          }),
+          meaningful: isMeaningfulSubtitle(text),
           sessionStatus: gate.sessionStatus,
           currentRevision: gate.currentRevision,
-          capturedRevision: gate.currentRevision,
           lastTranscriptRole: gate.lastTranscriptRole
         });
-        if (!allowed) {
-          state.onBlocked?.(gate.sessionStatus !== "running"
-            ? "互动尚未开始，这句字幕未进入对话记录"
-            : "AI 正在处理上一轮，这句字幕未自动提交");
-          return;
+        void emitPipelineEvent({
+          event: "subtitle.final-received",
+          traceId: line.sessionId,
+          fields: {
+            final: true,
+            textLength: text.length,
+            source: line.source || "unknown",
+            utteranceId: line.utteranceId
+          }
+        });
+        if (reason) {
+          void emitPipelineEvent({
+            event: "auto-answer.blocked",
+            traceId: line.sessionId,
+            fields: {
+              reason,
+              sessionStatus: gate.sessionStatus,
+              revision: gate.currentRevision,
+              ttsState: state.aiSpeaking ? "speaking" : "idle"
+            }
+          });
         }
+        const blockedMessage = getAutoAnswerBlockedMessage(reason);
+        if (blockedMessage) state.onBlocked?.(blockedMessage);
+        if (reason) return;
+        void emitPipelineEvent({
+          event: "auto-answer.submitted",
+          traceId: line.sessionId,
+          fields: { revision: gate.currentRevision, textLength: text.length }
+        });
         state.onAnswer(text);
       }),
     []

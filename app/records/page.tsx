@@ -6,7 +6,7 @@ import { AppChrome } from "../../features/settings/app-chrome";
 import { AppNavigation } from "../../features/settings/app-navigation";
 
 type ArchivedSessionSummary = { sessionId: string; candidateName: string; roleName: string; startedAt: string | null; finishedAt: string | null; questionCount: number; reportReady: boolean };
-const emptySession: InterviewSession = { sessionId: "", revision: 0, status: "idle", speakingText: "", candidateName: "", roleName: "", jobDescription: "", interviewFocus: "", maxQuestions: 6, consentConfirmed: false, consentConfirmedAt: null, startedAt: null, finishedAt: null, transcript: [], report: null, resumeIds: [], resumeId: "" };
+const emptySession: InterviewSession = { sessionId: "", revision: 0, status: "idle", speakingText: "", candidateName: "", roleName: "", jobDescription: "", interviewFocus: "", consentConfirmed: false, consentConfirmedAt: null, startedAt: null, finishedAt: null, transcript: [], report: null, resumeIds: [], resumeId: "" };
 
 export default function RecordsPage() {
   const [session, setSession] = useState(emptySession);

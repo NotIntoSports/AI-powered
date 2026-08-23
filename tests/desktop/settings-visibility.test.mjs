@@ -25,7 +25,7 @@ test("desktop settings do not expose RTC credentials or AI model configuration",
   assert.match(source, /AppChrome current="settings"/);
   assert.match(source, /label="语音转写"/);
   assert.match(source, /label="网络"/);
-  assert.match(source, /label="助手舞台"/);
+  assert.match(source, /label="播报引擎"/);
   assert.match(source, /已从管理端同步/);
   assert.match(source, /请先登录客户端/);
   assert.doesNotMatch(source, /当前未使用虚拟摄像头/);
@@ -42,7 +42,7 @@ test("OBS automatic connection uses a bounded 30 second cold-start window", asyn
 
 test("virtual audio one-click installs the signed driver and stages TTS to the virtual sink", async () => {
   const audioRoute = await readFile(new URL("../../features/audio/audio-route-control.tsx", import.meta.url), "utf8");
-  const stage = await readFile(new URL("../../app/stage/page.tsx", import.meta.url), "utf8");
+  const controller = await readFile(new URL("../../features/audio/workspace-tts.ts", import.meta.url), "utf8");
   assert.match(audioRoute, /CABLE Output/);
   assert.match(audioRoute, /CABLE Input/);
   assert.doesNotMatch(audioRoute, /www\.vb-cable\.com/);
@@ -59,9 +59,9 @@ test("virtual audio one-click installs the signed driver and stages TTS to the v
   assert.match(audioRoute, /verifiedAt/);
   assert.doesNotMatch(audioRoute, /安装包中的虚拟音频驱动资源缺失/);
   assert.doesNotMatch(audioRoute, /\/api\/stage-test-speech/);
-  assert.match(stage, /loadVirtualAudioRoute/);
-  assert.match(stage, /resolveStoredRouteAgainstDevices/);
-  assert.match(stage, /setSinkId/);
+  assert.match(controller, /loadVirtualAudioRoute/);
+  assert.match(controller, /resolveStoredRouteAgainstDevices/);
+  assert.match(controller, /setSinkId/);
 });
 
 test("voice clone returns an ID, binds the account, and TTS prefers that speaker", async () => {

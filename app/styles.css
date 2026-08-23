@@ -493,6 +493,8 @@ a.accountDockTrigger { color: #eaf1ff; }
 .message.candidate strong { color: #80cba6; }
 .message p { margin: 6px 0 0; line-height: 1.65; }
 .message.live { border: 1px dashed #356653; opacity: .86; }
+.message.subtitlePreview small { display: block; margin-top: 7px; color: #7f9b8c; font-size: 11px; }
+.timelineNotice { margin: 0; padding: 10px 12px; border: 1px solid #4c412c; border-radius: 10px; background: #17140e; color: #d8be83; font-size: 13px; line-height: 1.5; }
 .message.live small { color: var(--muted); display: block; margin-top: 6px; }
 .conversationStatus { color: var(--accent); max-width: 240px; }
 .controls { grid-column: 1 / -1; display: grid; gap: 12px; }

@@ -11,6 +11,7 @@ import {
   hasMigration,
   runTransaction
 } from "./database";
+import { buildOpeningMessage } from "../features/session/interview-policy";
 
 export type TranscriptItem = {
   role: "interviewer" | "candidate";
@@ -28,7 +29,8 @@ export type InterviewSession = {
   roleName: string;
   jobDescription: string;
   interviewFocus: string;
-  maxQuestions: number;
+  /** 仅用于读取历史会话；新会话不再设置或执行问题上限。 */
+  maxQuestions?: number;
   consentConfirmed: boolean;
   consentConfirmedAt: string | null;
   startedAt: string | null;
@@ -55,7 +57,7 @@ const sessionSchema = z.object({
   roleName: z.string(),
   jobDescription: z.string().default(""),
   interviewFocus: z.string().default(""),
-  maxQuestions: z.number().int().min(2).max(20).default(6),
+  maxQuestions: z.number().int().min(2).max(20).optional(),
   consentConfirmed: z.boolean().default(false),
   consentConfirmedAt: z.string().nullable().default(null),
   startedAt: z.string().nullable().default(null),
@@ -87,7 +89,6 @@ const initialSession: InterviewSession = {
   roleName: "",
   jobDescription: "",
   interviewFocus: "",
-  maxQuestions: 6,
   consentConfirmed: false,
   consentConfirmedAt: null,
   startedAt: null,
@@ -255,15 +256,14 @@ export function resetSession(input: {
   roleName: string;
   jobDescription: string;
   interviewFocus: string;
-  maxQuestions: number;
-  consentConfirmed: true;
+  consentConfirmed: boolean;
   resumeIds?: string[];
   resumeId?: string;
 }): Promise<InterviewSession> {
   return mutateSession((previous) => {
     if (previous.status === "running") throw new Error("SESSION_ALREADY_RUNNING");
     const timestamp = now();
-    const opening = `${input.candidateName || "你好"}，欢迎开始关于「${input.roleName || "本次交流"}」的互动。本次由 AI虚拟助手协助进行，对话记录会保存并由人工复核。请先用两分钟介绍一下你自己。`;
+    const opening = buildOpeningMessage(input);
     const resumeIds = normalizeResumeIds(input.resumeIds, input.resumeId);
     return {
       sessionId: `${Date.now()}-${crypto.randomUUID().slice(0, 8)}`,
@@ -274,9 +274,8 @@ export function resetSession(input: {
       roleName: input.roleName,
       jobDescription: input.jobDescription,
       interviewFocus: input.interviewFocus,
-      maxQuestions: input.maxQuestions,
-      consentConfirmed: true,
-      consentConfirmedAt: timestamp,
+      consentConfirmed: input.consentConfirmed,
+      consentConfirmedAt: input.consentConfirmed ? timestamp : null,
       startedAt: timestamp,
       finishedAt: null,
       transcript: [{ role: "interviewer", kind: "opening", text: opening, at: timestamp }],
@@ -293,10 +292,6 @@ export function countInterviewQuestions(session: Pick<InterviewSession, "transcr
     item.kind !== "manual" &&
     item.kind !== "closing"
   ).length;
-}
-
-export function hasReachedQuestionLimit(session: InterviewSession) {
-  return countInterviewQuestions(session) >= session.maxQuestions;
 }
 
 export function appendInterviewerQuestion(
@@ -328,33 +323,12 @@ export function appendAnswerAndQuestion(input: {
 }): Promise<InterviewSession> {
   return mutateSession((session) => {
     assertExpectedTurn(session, input.expectedRevision);
-    if (hasReachedQuestionLimit(session)) throw new Error("SESSION_CHANGED");
     const timestamp = now();
     session.transcript.push(
       { role: "candidate", kind: "answer", text: input.answer, at: timestamp },
       { role: "interviewer", kind: "question", text: input.question, at: timestamp }
     );
     session.speakingText = input.question;
-    session.revision += 1;
-  });
-}
-
-export function appendFinalAnswerAndFinish(input: {
-  answer: string;
-  expectedRevision: number;
-}): Promise<InterviewSession> {
-  return mutateSession((session) => {
-    assertExpectedTurn(session, input.expectedRevision);
-    if (!hasReachedQuestionLimit(session)) throw new Error("SESSION_CHANGED");
-    const timestamp = now();
-    const closing = "感谢你的时间，本次互动到这里。如有后续安排，相关人员会再与你联系。";
-    session.transcript.push(
-      { role: "candidate", kind: "answer", text: input.answer, at: timestamp },
-      { role: "interviewer", kind: "closing", text: closing, at: timestamp }
-    );
-    session.status = "finished";
-    session.finishedAt = timestamp;
-    session.speakingText = closing;
     session.revision += 1;
   });
 }

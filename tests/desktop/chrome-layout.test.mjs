@@ -74,6 +74,7 @@ test("workspace keeps heavy meeting access off the main page but embeds the auto
   assert.match(snapshot, /!next\.virtualAudioReady/);
   assert.doesNotMatch(snapshot, /delete next\.virtualAudioReady; delete next\.meetingPreviewConfirmed/);
   assert.match(intervention, /本机听到对方说话/);
+  assert.match(intervention, /本机听到 AI 播报/);
   assert.match(monitor, /parseRemoteMonitorEnabled/);
   assert.match(monitor, /ai-remote-monitor-enabled/);
 });

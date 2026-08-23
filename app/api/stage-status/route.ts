@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getStageStatus, requestStageSpeechStop, updateStageStatus } from "../../../lib/stage-status";
 
-// 合并式上报：舞台页上报 TTS 字段，主控台上报采集字段，至少携带一项。
+// 合并式上报：主工作台上报 TTS 与采集字段，视觉舞台只读取状态。
 const statusSchema = z
   .object({
     ttsSupported: z.boolean(),

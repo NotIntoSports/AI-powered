@@ -21,7 +21,6 @@ const markdown = renderInterviewMarkdown({
   roleName: "前端 *工程师*",
   jobDescription: "# 管理组件平台",
   interviewFocus: "性能",
-  maxQuestions: 3,
   consentConfirmed: true,
   consentConfirmedAt: "2026-07-28T10:00:00.000Z",
   startedAt: "2026-07-28T10:00:00.000Z",
@@ -34,10 +33,11 @@ const markdown = renderInterviewMarkdown({
   report: null
 });
 
-assert.match(markdown, /^# 面试记录/m);
+assert.match(markdown, /^# 互动记录/m);
 assert.match(markdown, /\\# 这不是标题/);
 assert.match(markdown, /\\> 这不是报告引用/);
-assert.match(markdown, /不包含录用或淘汰建议/);
+assert.match(markdown, /不包含录用、淘汰或其他自动决策建议/);
+assert.doesNotMatch(markdown, /问题上限/);
 assert.equal(interviewExportFilename({
   candidateName: "张/同学",
   roleName: "前端 工程师"

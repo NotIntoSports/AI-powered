@@ -45,6 +45,8 @@ async def publish_v1(room: rtc.Room, utterance_id: str, text: str, final: bool) 
                     "event": "subtitle_published",
                     "provider": "aliyun_nls",
                     "room": room.name,
+                    "utterance_id": utterance_id,
+                    "final": True,
                     "characters": len(text.strip()),
                 },
                 ensure_ascii=False,

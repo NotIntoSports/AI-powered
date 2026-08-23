@@ -2,11 +2,9 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import {
   appendAnswerAndQuestion,
-  appendFinalAnswerAndFinish,
   appendInterviewerQuestion,
   finishSession,
   getSession,
-  hasReachedQuestionLimit,
   replaceLastExchange,
   replaceLastInterviewerQuestion,
   resetSession,
@@ -19,6 +17,7 @@ import {
   isModelRuntimeConfigured
 } from "../../../lib/runtime-config";
 import { probeConfiguredModel } from "../../../lib/model-probe";
+import { formatPipelineLog } from "../../../lib/pipeline-diagnostics";
 
 const actionSchema = z.discriminatedUnion("action", [
   z.object({
@@ -27,8 +26,7 @@ const actionSchema = z.discriminatedUnion("action", [
     roleName: z.string().trim().max(100),
     jobDescription: z.string().trim().max(3000).default(""),
     interviewFocus: z.string().trim().max(500).default(""),
-    maxQuestions: z.number().int().min(2).max(20).default(6),
-    consentConfirmed: z.literal(true),
+    consentConfirmed: z.boolean().default(false),
     resumeIds: z.array(z.string().trim().max(64)).max(20).optional().default([]),
     resumeId: z.string().trim().max(64).optional().default("")
   }),
@@ -91,6 +89,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   const startedAt = Date.now();
+  let pipelineTraceId: string | undefined;
   const parsed = actionSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     console.warn("[session] invalid action payload");
@@ -139,7 +138,13 @@ export async function POST(request: Request) {
         );
       }
       const started = await resetSession(parsed.data);
+      pipelineTraceId = started.sessionId;
       console.log(`[session] started sessionId=${started.sessionId} elapsedMs=${Date.now() - startedAt}`);
+      console.log(formatPipelineLog({
+        event: "session.started",
+        traceId: started.sessionId,
+        fields: { revision: started.revision, durationMs: Date.now() - startedAt, status: started.status }
+      }));
       return NextResponse.json(started);
     }
     if (parsed.data.action === "say") {
@@ -229,6 +234,7 @@ export async function POST(request: Request) {
     }
 
     const session = await getSession();
+    pipelineTraceId = session.sessionId;
     if (
       session.status !== "running" ||
       session.revision !== parsed.data.expectedRevision ||
@@ -243,16 +249,6 @@ export async function POST(request: Request) {
         { status: 409 }
       );
     }
-    if (hasReachedQuestionLimit(session)) {
-      const finished = await appendFinalAnswerAndFinish({
-        answer: parsed.data.answer,
-        expectedRevision: parsed.data.expectedRevision
-      });
-      console.log(
-        `[session] answer(final) sessionId=${session.sessionId} revision=${session.revision} elapsedMs=${Date.now() - startedAt}`
-      );
-      return NextResponse.json(finished);
-    }
     const transcriptWithAnswer = [
       ...session.transcript,
       {
@@ -261,6 +257,12 @@ export async function POST(request: Request) {
         at: new Date().toISOString()
       }
     ];
+    const aiStartedAt = Date.now();
+    console.log(formatPipelineLog({
+      event: "ai.requested",
+      traceId: session.sessionId,
+      fields: { revision: session.revision, textLength: parsed.data.answer.length }
+    }));
     const question = await generateNextQuestion({
       roleName: session.roleName,
       jobDescription: session.jobDescription,
@@ -276,9 +278,21 @@ export async function POST(request: Request) {
     console.log(
       `[session] answer ok sessionId=${session.sessionId} revision=${session.revision} elapsedMs=${Date.now() - startedAt}`
     );
+    console.log(formatPipelineLog({
+      event: "ai.succeeded",
+      traceId: session.sessionId,
+      fields: { revision: updated.revision, durationMs: Date.now() - aiStartedAt, textLength: question.length }
+    }));
     return NextResponse.json(updated);
   } catch (error) {
     const message = error instanceof Error ? error.message : "UNKNOWN";
+    if (parsed.data.action === "answer") {
+      console.warn(formatPipelineLog({
+        event: "ai.failed",
+        traceId: pipelineTraceId,
+        fields: { code: message, durationMs: Date.now() - startedAt }
+      }));
+    }
     console.warn(`[session] action failed action=${parsed.data.action} code=${message} elapsedMs=${Date.now() - startedAt}`);
     const missingKey = message === "MISSING_API_KEY";
     const noAnswers = message === "NO_CANDIDATE_ANSWERS";

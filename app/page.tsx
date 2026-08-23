@@ -14,6 +14,7 @@ import {
   loadRemoteMonitorEnabled,
   subscribeRemoteMonitor
 } from "../features/audio/remote-monitor";
+import { useWorkspaceTts } from "../features/audio/workspace-tts";
 import { InterventionControls } from "../features/intervention/intervention-controls";
 import { MeetingBridgeCard } from "../features/rtc/meeting-bridge-card";
 import { useAutoAnswerSubmit } from "../features/rtc/auto-answer-submit";
@@ -24,7 +25,7 @@ import {
 } from "../features/rtc/auto-bridge-controller";
 import { decideAutoSessionStart } from "../features/rtc/auto-session-start";
 import { UserAccountMenu } from "../features/settings/user-account-menu";
-import { LiveSubtitles } from "../features/subtitles/live-subtitles";
+import { selectTimelineSubtitleLines } from "../features/subtitles/timeline";
 import { subtitleSink } from "../lib/subtitles/sink";
 import type { SubtitleLine } from "../lib/subtitles/contract";
 import { getInterviewReadiness } from "../features/readiness/interview-readiness";
@@ -63,7 +64,6 @@ const emptySession: InterviewSession = {
   roleName: "",
   jobDescription: "",
   interviewFocus: "",
-  maxQuestions: 6,
   consentConfirmed: false,
   consentConfirmedAt: null,
   startedAt: null,
@@ -90,7 +90,6 @@ export default function ConsolePage() {
   const [roleName, setRoleName] = useState("");
   const [jobDescription, setJobDescription] = useState("");
   const [interviewFocus, setInterviewFocus] = useState("");
-  const [maxQuestions, setMaxQuestions] = useState(6);
   const [consentConfirmed, setConsentConfirmed] = useState(false);
   const [resumeIds, setResumeIds] = useState<string[]>([]);
   const [manualText, setManualText] = useState("");
@@ -146,6 +145,7 @@ export default function ConsolePage() {
   const [uploadOpen, setUploadOpen] = useState(false);
   const autoStartAttemptedRef = useRef("");
   const [snapshotReadiness, setSnapshotReadiness] = useState(() => getSnapshotReadiness({}));
+  useWorkspaceTts({ session, sessionLoaded });
   const readiness = getInterviewReadiness({
     outputMode,
     modelConfigured: diagnostics.modelConfigured,
@@ -191,7 +191,6 @@ export default function ConsolePage() {
       bridgeState: autoBridgeStatus.state,
       bridgeSessionKey: autoBridgeStatus.sessionKey,
       sessionStatus: session.status,
-      consentConfirmed,
       modelConfigured: diagnostics.modelConfigured,
       stageConnected: diagnostics.stageConnected,
       pending: autoStartPending,
@@ -209,8 +208,7 @@ export default function ConsolePage() {
       roleName,
       jobDescription,
       interviewFocus,
-      maxQuestions,
-      consentConfirmed: true,
+      consentConfirmed,
       resumeIds: resumeIds.length ? resumeIds : undefined
     })
       .then(applySessionResult)
@@ -230,7 +228,6 @@ export default function ConsolePage() {
     diagnostics.stageConnected,
     interviewFocus,
     jobDescription,
-    maxQuestions,
     resumeIds,
     roleName,
     session.status,
@@ -458,7 +455,9 @@ export default function ConsolePage() {
           setPendingFinalText("");
         });
     },
-    onBlocked: (message) => setError(message)
+    onBlocked: (message) => {
+      if (sessionRef.current.status === "running") setError(message);
+    }
   });
 
   function sayManual(event: FormEvent) {
@@ -697,13 +696,17 @@ export default function ConsolePage() {
     bridgeState: autoBridgeStatus.state,
     bridgeSessionKey: autoBridgeStatus.sessionKey,
     sessionStatus: session.status,
-    consentConfirmed,
     modelConfigured: diagnostics.modelConfigured,
     stageConnected: diagnostics.stageConnected,
     pending: autoStartPending,
     attemptedSessionKey: autoStartAttemptedRef.current
   });
-  const liveCandidateLine = [...subtitleLines].reverse().find((line) => !line.final);
+  const timelineSubtitleLines = selectTimelineSubtitleLines({
+    lines: subtitleLines,
+    status: session.status,
+    finishedAt: session.finishedAt
+  });
+  const liveCandidateLine = session.status === "running" ? timelineSubtitleLines.at(-1) : undefined;
   const conversationStatus = diagnostics.ttsState === "error"
     ? `播报失败：${diagnostics.ttsError || "请检查助手舞台"}`
     : diagnostics.ttsState === "speaking"
@@ -776,25 +779,15 @@ export default function ConsolePage() {
               placeholder="例如：项目经历、性能优化"
             />
           </label>
-          <label>
-            问题上限
-            <input
-              type="number"
-              min={2}
-              max={20}
-              value={maxQuestions}
-              onChange={(e) => setMaxQuestions(Math.min(20, Math.max(2, Number(e.target.value) || 2)))}
-            />
-          </label>
           <label className="consentCheck">
             <input
               type="checkbox"
               checked={consentConfirmed}
               onChange={(event) => setConsentConfirmed(event.target.checked)}
             />
-            <span>我已向对方说明本次互动由 AI 协助、会保存记录，并提供人工复核渠道。</span>
+            <span>AI 开场时告知对方本次互动由 AI 协助、会保存记录并由人工复核。</span>
           </label>
-          {readiness.ready ? <button disabled={busy || !consentConfirmed || session.status === "running"} onClick={() => act({ action: "start", candidateName, roleName, jobDescription, interviewFocus, maxQuestions, consentConfirmed, resumeIds: resumeIds.length ? resumeIds : undefined })}>{session.status === "running" ? "当前互动进行中" : "开始新互动"}</button> : <a className="buttonLink primary" href="/settings">前往设置完成检测</a>}
+          {readiness.ready ? <button disabled={busy || session.status === "running"} onClick={() => act({ action: "start", candidateName, roleName, jobDescription, interviewFocus, consentConfirmed, resumeIds: resumeIds.length ? resumeIds : undefined })}>{session.status === "running" ? "当前互动进行中" : "开始新互动"}</button> : <a className="buttonLink primary" href="/settings">前往设置完成检测</a>}
           {diagnostics.modelConfigured && session.status !== "running" && (
             <p className="muted">
               {outputMode === "virtual"
@@ -824,7 +817,7 @@ export default function ConsolePage() {
                   item.role === "interviewer" &&
                   item.kind !== "manual" &&
                   item.kind !== "closing"
-                ).length}/{session.maxQuestions} 问
+                ).length} 问
               </span>
               {session.sessionId && <a href="/api/session/export">JSON</a>}
               {session.sessionId && <a href="/api/session/export?format=markdown">Markdown</a>}
@@ -860,7 +853,9 @@ export default function ConsolePage() {
             </div>
           </div>
           <div className="messages">
-            {session.transcript.length === 0 && <p className="muted">开始互动后，对话会显示在这里。</p>}
+            {session.transcript.length === 0 && timelineSubtitleLines.length === 0 && (
+              <p className="muted">开始互动后，对话会显示在这里。</p>
+            )}
             {session.transcript.map((item, index) => (
               <div className={`message ${item.role}`} key={`${item.at}-${index}`}>
                 <strong>{item.role === "interviewer" ? "AI虚拟助手" : "对方"}</strong>
@@ -873,13 +868,23 @@ export default function ConsolePage() {
                 <p>{pendingFinalText}</p>
                 <small>已确认，正在生成 AI 回复…</small>
               </div>
-            ) : liveCandidateLine ? (
-              <div className="message candidate live" aria-live="polite">
-                <strong>对方正在说</strong>
-                <p>{liveCandidateLine.text}</p>
-                <small>识别中，确认后写入记录</small>
+            ) : timelineSubtitleLines.map((line) => (
+              <div
+                className="message candidate live subtitlePreview"
+                aria-live="polite"
+                key={`subtitle-${line.sessionId}-${line.utteranceId}`}
+              >
+                <strong>{line.final ? "对方字幕 · 已确认" : "对方正在说"}</strong>
+                <p>{line.text}</p>
+                <small>
+                  {session.status === "running"
+                    ? "识别中，确认后写入记录"
+                    : session.status === "finished"
+                      ? "互动已结束，未进入正式记录"
+                      : "尚未进入正式记录"}
+                </small>
               </div>
-            ) : null}
+            ))}
           </div>
           </article>
 
@@ -894,7 +899,6 @@ export default function ConsolePage() {
 
         <aside className="workspaceTools" aria-label="会话工具">
           <MeetingBridgeCard />
-          <LiveSubtitles />
           <InterventionControls onAiPauseChange={(paused) => setAutomaticFollowup(!paused)} />
         </aside>
       </section>

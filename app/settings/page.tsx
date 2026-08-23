@@ -229,7 +229,7 @@ export default function SettingsPage() {
             />
             <Check label="语音转写" ok={diagnostics.transcriptionReady} detail={transcriptionDetail(diagnostics)} />
             <Check label="网络" ok={networkStatus(network) === "ok"} warn={networkStatus(network) === "warn"} detail={describeNetwork(network)} />
-            <Check label="助手舞台" ok={diagnostics.stageConnected} detail={diagnostics.stageConnected ? "页面在线" : "测虚拟声卡或播报前请打开助手舞台"} />
+            <Check label="播报引擎" ok={diagnostics.stageConnected} detail={diagnostics.stageConnected ? "主工作台播放控制器在线" : "请保持主工作台打开"} />
             {virtualMode ? (
               <>
                 <Check

@@ -51,7 +51,7 @@ export type StageStatusUpdate = {
   captureSource?: string;
 };
 
-// 合并式上报：舞台页只刷 TTS 字段，主控台只刷采集字段，互不覆盖。
+// 合并式上报：主工作台刷新 TTS 与采集字段，视觉舞台只读取状态。
 // lastSeen 仅由 TTS 字段上报刷新，避免采集上报把舞台误判为在线。
 export function updateStageStatus(status: StageStatusUpdate) {
   const previous = globalStatus.stageStatus ?? {};

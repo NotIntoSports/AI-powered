@@ -1,4 +1,5 @@
 import { Room, RoomEvent, Track } from "livekit-client";
+import { emitPipelineEvent } from "../../features/diagnostics/pipeline-log.ts";
 import { SUBTITLE_DATA_TOPIC } from "../../lib/subtitles/contract.ts";
 import { mapLiveKitDataPacket, mapLiveKitSegment } from "../../lib/subtitles/map-livekit.ts";
 import type { SubtitleSink } from "../../lib/subtitles/sink.ts";
@@ -47,7 +48,19 @@ export class LiveKitRtcAdapter implements SubtitleTransport {
     room.on(RoomEvent.DataReceived, (payload, _participant, _kind, topic) => {
       if (topic && topic !== SUBTITLE_DATA_TOPIC) return;
       const mapped = mapLiveKitDataPacket(payload, this.sessionId);
-      if (mapped) this.sink.publish(mapped);
+      if (mapped) {
+        void emitPipelineEvent({
+          event: "subtitle.received",
+          traceId: mapped.sessionId,
+          fields: {
+            final: mapped.final,
+            source: mapped.source || "livekit",
+            textLength: mapped.text.length,
+            utteranceId: mapped.utteranceId
+          }
+        });
+        this.sink.publish(mapped);
+      }
     });
     room.on(RoomEvent.TranscriptionReceived, (segments) => {
       for (const segment of segments) {
@@ -57,7 +70,19 @@ export class LiveKitRtcAdapter implements SubtitleTransport {
           final: segment.final,
           language: segment.language
         }, this.sessionId, config.language);
-        if (mapped) this.sink.publish(mapped);
+        if (mapped) {
+          void emitPipelineEvent({
+            event: "subtitle.received",
+            traceId: mapped.sessionId,
+            fields: {
+              final: mapped.final,
+              source: mapped.source || "livekit-transcription",
+              textLength: mapped.text.length,
+              utteranceId: mapped.utteranceId
+            }
+          });
+          this.sink.publish(mapped);
+        }
       }
     });
     const connectStartedAt = Date.now();

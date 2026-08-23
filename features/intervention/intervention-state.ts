@@ -25,6 +25,9 @@ export const endIntervention = (state: InterventionState): InterventionState => 
   aiPaused: true
 });
 
+export const toggleIntervention = (state: InterventionState): InterventionState =>
+  state.humanMicActive ? endIntervention(state) : beginIntervention(state);
+
 export const resumeAi = (state: InterventionState): InterventionState => ({
   ...state,
   aiPaused: false,
