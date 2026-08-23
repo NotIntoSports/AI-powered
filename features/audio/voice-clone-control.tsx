@@ -12,6 +12,7 @@ import {
   encodePcm16Wav
 } from "../../lib/pcm-wav";
 import { DEFAULT_CUSTOM_SPEAKER_ID, VOICE_CLONE_SCRIPT } from "../../lib/voice-clone-script";
+import { clonedVoicePreviewMessage } from "../../lib/cloned-voice-tts-error";
 
 type VoiceCloneStatus = {
   available: boolean;
@@ -308,7 +309,12 @@ export function VoiceCloneControl() {
         body: JSON.stringify({ text: "你好，我是今天的虚拟助手，现在用复刻音色试听。" })
       });
       if (!response.ok) {
-        setMessage("试听失败。若尚未刻录，请先录音；也可检查 Windows 中文语音。");
+        const failure = await response.json().catch(() => null) as { code?: string } | null;
+        setMessage(
+          failure?.code === "CLONED_VOICE_QUOTA_EXPIRED" || failure?.code === "CLONED_VOICE_UNAVAILABLE"
+            ? clonedVoicePreviewMessage(failure.code)
+            : "试听失败。若尚未刻录，请先录音；也可检查 Windows 中文语音。"
+        );
         return;
       }
       const blob = await response.blob();
@@ -316,7 +322,7 @@ export function VoiceCloneControl() {
       const audio = new Audio(url);
       audio.onended = () => URL.revokeObjectURL(url);
       await audio.play();
-      setMessage("正在播放试听。");
+      setMessage("正在播放复刻音色试听。");
     } catch {
       setMessage("试听失败。");
     } finally {

@@ -22,7 +22,9 @@ const errorMessages: Record<string, string> = {
   SET_SINK_ID_UNSUPPORTED: "AI 声音未送入会议麦克风：当前播放环境不支持选择 VB-CABLE 输出。",
   SET_SINK_ID_FAILED: "AI 声音未送入会议麦克风：VB-CABLE 播放端选择失败，请重新检测线路。",
   AUDIO_PLAYBACK_FAILED: "AI 声音未送入会议麦克风：音频播放失败，请检查 VB-CABLE。",
-  TTS_REQUEST_FAILED: "AI 声音未送入会议麦克风：语音合成服务请求失败。"
+  TTS_REQUEST_FAILED: "AI 声音未送入会议麦克风：语音合成服务请求失败。",
+  CLONED_VOICE_QUOTA_EXPIRED: "复刻音色服务额度已过期，请管理员续费后重试；本轮未播放默认音色。",
+  CLONED_VOICE_UNAVAILABLE: "复刻音色合成失败；本轮未播放备用音色。"
 };
 
 async function resolveVirtualAudioSinkId(): Promise<string | null> {
@@ -144,7 +146,11 @@ export function useWorkspaceTts(input: {
         fields: { httpStatus: response.status, status: response.ok ? "ok" : "failed" }
       });
       if (!response.ok) {
-        await fail(traceId, "TTS_REQUEST_FAILED");
+        const failure = await response.json().catch(() => null) as { code?: string } | null;
+        const code = failure?.code === "CLONED_VOICE_QUOTA_EXPIRED" || failure?.code === "CLONED_VOICE_UNAVAILABLE"
+          ? failure.code
+          : "TTS_REQUEST_FAILED";
+        await fail(traceId, code);
         return;
       }
       if (tokenRef.current !== token) return;
