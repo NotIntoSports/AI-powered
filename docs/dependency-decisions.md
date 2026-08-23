@@ -653,3 +653,11 @@
 - 兼容与成本：服务运行在 Linux/Python 3.12 容器，桌面 Windows、浏览器、OBS 和 Next.js 均不新增运行时依赖；CPU/内存只增加流式 PCM 与单条 WebSocket，费用按阿里云实时识别用量计费，需在阿里云控制台开通对应项目/商用额度。
 - 安全：Appkey 与 AccessKey/临时 Token 仅由 `server/deploy/.env` 注入 Agent；不进入浏览器、字幕数据或日志。日志只记录 provider、room 和状态；配置缺失时进程立即失败。
 - 限制：当前每条 LiveKit 远端音轨建立一条阿里云识别连接；依赖阿里云公网 NLS 网关，不提供离线降级。管理端中已保存的加密密钥不会自动导出到容器环境，部署时需在 175 的 `.env` 配置同一组凭据。
+
+## 2026-08-22：会议桥接自动开始、对话记录实时字幕与播报
+
+- 目标：腾讯会议音频桥接真正连通后，在用户已确认知情同意、模型和助手舞台就绪时自动开始互动；interim 字幕实时显示在对话记录，final 字幕持久化并触发 AI 追问及 TTS 播报。
+- 结论：零新增依赖，复用 `AutoBridgeController`、`subtitleSink`、`/api/session` 和舞台 `speakingText` 轮询/TTS。
+- 线路：腾讯会议扬声器使用系统默认/Realtek，以便本机正常听见对方；会议麦克风使用 `CABLE Output`；AI TTS 继续由舞台写入配对播放端 `CABLE Input`（中文系统可能显示 `CABLE In 16 Ch`）。会议进程音频由 AudioBridge 直接捕获，不通过虚拟声卡回采。
+- 安全与边界：自动开始不绕过知情同意；桥接 roomId 作为单场幂等键，避免轮询重复创建或结束后在同一会议中再次启动；interim 字幕仅在浏览器内展示，只有 final 字幕写入本地会话。
+- 未采用：新状态管理库、额外 WebSocket/SSE、修改腾讯会议设备选择。现有 React 订阅和会话 API 已覆盖需要，第三方会议设备仍由用户手动选择。

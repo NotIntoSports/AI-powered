@@ -27,6 +27,7 @@
     "test:transcription-security": "node --no-warnings --experimental-strip-types scripts/test-transcription-security.mjs",
     "test:transcription-security-route": "node scripts/smoke-transcription-security-route.mjs",
     "test:transcription-turn": "node scripts/test-transcription-turn.mjs",
+    "test:auto-answer-submit": "node scripts/test-auto-answer-submit.mjs",
     "test:audio": "node scripts/test-audio-devices.mjs",
     "test:virtual-audio-install": "node --no-warnings --experimental-strip-types scripts/smoke-virtual-audio-install.mjs",
     "test:speech": "node scripts/test-volcengine-speech.mjs && node scripts/test-aliyun-nls.mjs",

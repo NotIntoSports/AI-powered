@@ -28,6 +28,7 @@ import {
 export type AutoBridgeStatus = {
   text: string;
   state: "off" | "waiting" | "captured" | "backoff" | "needs-manual" | "starting";
+  sessionKey?: string;
 };
 
 const STATUS_EVENT = "ai-auto-bridge-status";
@@ -93,7 +94,7 @@ export function AutoBridgeController() {
           if (manualRunning) return; // 手动会话自己维护状态文案
           const handle = getBridgeSessionHandle();
           publishStatus(handle
-            ? { text: `已自动捕获 · 房间 ${handle.roomId}（${providerLabel(handle.provider)}）`, state: "captured" }
+            ? { text: `已自动捕获 · 房间 ${handle.roomId}（${providerLabel(handle.provider)}）`, state: "captured", sessionKey: handle.roomId }
             : { text: "等待中（每5秒检测）", state: "waiting" });
           return;
         }
@@ -108,7 +109,7 @@ export function AutoBridgeController() {
         publishStatus({ text: "检测到会议，正在自动建立推流…", state: "starting" });
         machine = recordAttempt(machine, Date.now(), action.pid);
         try {
-          await startBridgeSession(action.pid, "auto", "meet", {
+          const handle = await startBridgeSession(action.pid, "auto", "meet", {
             onStatus: (message) => publishStatus({ text: message, state: "captured" }),
             onLevel: () => undefined,
             onProcessExited: () => {
@@ -116,6 +117,11 @@ export function AutoBridgeController() {
             }
           });
           machine = recordCaptured(machine, action.pid);
+          publishStatus({
+            text: `已自动捕获 · 房间 ${handle.roomId}（${providerLabel(handle.provider)}）`,
+            state: "captured",
+            sessionKey: handle.roomId
+          });
         } catch (cause) {
           console.error(`[auto-bridge] start failed pid=${action.pid}: ${cause instanceof Error ? cause.message : String(cause)}`, cause);
           machine = recordFailure(machine, Date.now());

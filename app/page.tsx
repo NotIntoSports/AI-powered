@@ -17,8 +17,16 @@ import {
 import { InterventionControls } from "../features/intervention/intervention-controls";
 import { MeetingBridgeCard } from "../features/rtc/meeting-bridge-card";
 import { useAutoAnswerSubmit } from "../features/rtc/auto-answer-submit";
+import {
+  getAutoBridgeStatus,
+  subscribeAutoBridgeStatus,
+  type AutoBridgeStatus
+} from "../features/rtc/auto-bridge-controller";
+import { decideAutoSessionStart } from "../features/rtc/auto-session-start";
 import { UserAccountMenu } from "../features/settings/user-account-menu";
 import { LiveSubtitles } from "../features/subtitles/live-subtitles";
+import { subtitleSink } from "../lib/subtitles/sink";
+import type { SubtitleLine } from "../lib/subtitles/contract";
 import { getInterviewReadiness } from "../features/readiness/interview-readiness";
 import { getSnapshotReadiness, invalidateDeviceReadiness, loadReadinessSnapshot } from "../features/readiness/readiness-snapshot";
 import { loadOutputMode, subscribeOutputMode, type OutputMode } from "../features/readiness/output-mode";
@@ -122,12 +130,21 @@ export default function ConsolePage() {
   const [pendingTranscriptions, setPendingTranscriptions] = useState(0);
   const [audioSource, setAudioSource] = useState("");
   const [automaticFollowup, setAutomaticFollowup] = useState(true);
+  const [autoBridgeStatus, setAutoBridgeStatus] = useState<AutoBridgeStatus>(getAutoBridgeStatus);
+  const [autoStartPending, setAutoStartPending] = useState(false);
+  const [autoStartError, setAutoStartError] = useState("");
+  const [autoStartRetry, setAutoStartRetry] = useState(0);
+  const [sessionLoaded, setSessionLoaded] = useState(false);
+  const [subtitleLines, setSubtitleLines] = useState<SubtitleLine[]>([]);
+  const [answerPending, setAnswerPending] = useState(false);
+  const [pendingFinalText, setPendingFinalText] = useState("");
   const [echoGuardActive, setEchoGuardActive] = useState(false);
   const [candidateSpeaking, setCandidateSpeaking] = useState(false);
   const [captureSilent, setCaptureSilent] = useState(false);
   const [error, setError] = useState("");
   const [outputMode, setOutputMode] = useState<OutputMode>("real");
   const [uploadOpen, setUploadOpen] = useState(false);
+  const autoStartAttemptedRef = useRef("");
   const [snapshotReadiness, setSnapshotReadiness] = useState(() => getSnapshotReadiness({}));
   const readiness = getInterviewReadiness({
     outputMode,
@@ -138,14 +155,18 @@ export default function ConsolePage() {
   });
 
   useEffect(() => {
-    fetch("/api/session", { cache: "no-store" })
+    void fetch("/api/session", { cache: "no-store" })
       .then((response) => response.json())
       .then(setSession)
-      .catch(() => setError("无法读取当前互动会话"));
+      .catch(() => setError("无法读取当前互动会话"))
+      .finally(() => setSessionLoaded(true));
     setSnapshotReadiness(getSnapshotReadiness(loadReadinessSnapshot()));
     setOutputMode(loadOutputMode());
     return subscribeOutputMode(() => setOutputMode(loadOutputMode()));
   }, []);
+
+  useEffect(() => subscribeAutoBridgeStatus(() => setAutoBridgeStatus(getAutoBridgeStatus())), []);
+  useEffect(() => subtitleSink.subscribe(setSubtitleLines), []);
 
   useEffect(() => {
     const refresh = () => setSnapshotReadiness(getSnapshotReadiness(loadReadinessSnapshot()));
@@ -163,6 +184,58 @@ export default function ConsolePage() {
   useEffect(() => {
     automaticFollowupRef.current = automaticFollowup;
   }, [automaticFollowup]);
+
+  useEffect(() => {
+    if (!sessionLoaded) return;
+    const decision = decideAutoSessionStart({
+      bridgeState: autoBridgeStatus.state,
+      bridgeSessionKey: autoBridgeStatus.sessionKey,
+      sessionStatus: session.status,
+      consentConfirmed,
+      modelConfigured: diagnostics.modelConfigured,
+      stageConnected: diagnostics.stageConnected,
+      pending: autoStartPending,
+      attemptedSessionKey: autoStartAttemptedRef.current
+    });
+    if (!decision.shouldStart || !autoBridgeStatus.sessionKey) return;
+
+    const sessionKey = autoBridgeStatus.sessionKey;
+    autoStartAttemptedRef.current = sessionKey;
+    setAutoStartPending(true);
+    setAutoStartError("");
+    void sessionAction({
+      action: "start",
+      candidateName,
+      roleName,
+      jobDescription,
+      interviewFocus,
+      maxQuestions,
+      consentConfirmed: true,
+      resumeIds: resumeIds.length ? resumeIds : undefined
+    })
+      .then(applySessionResult)
+      .catch((cause) => {
+        const message = cause instanceof Error ? cause.message : "自动开始失败";
+        setAutoStartError(`自动开始失败：${message}`);
+      })
+      .finally(() => setAutoStartPending(false));
+  }, [
+    autoBridgeStatus.sessionKey,
+    autoBridgeStatus.state,
+    autoStartPending,
+    autoStartRetry,
+    candidateName,
+    consentConfirmed,
+    diagnostics.modelConfigured,
+    diagnostics.stageConnected,
+    interviewFocus,
+    jobDescription,
+    maxQuestions,
+    resumeIds,
+    roleName,
+    session.status,
+    sessionLoaded
+  ]);
 
   // 采集开启后长时间没有任何语音片段（未触发 VAD/未产生转写）时提示静默，避免采集失败无感知。
   useEffect(() => {
@@ -368,14 +441,24 @@ export default function ConsolePage() {
 
   // 字幕 final 行自动作为对方回答提交（取代已移除的手动转写输入框）。
   useAutoAnswerSubmit({
-    enabled: automaticFollowup && session.status === "running" && !busy,
+    enabled: automaticFollowup,
+    processing: busy || answerPending,
     aiSpeaking: diagnostics.ttsState === "speaking",
     getGate: () => ({
       sessionStatus: sessionRef.current.status,
       currentRevision: sessionRef.current.revision,
       lastTranscriptRole: sessionRef.current.transcript.at(-1)?.role
     }),
-    onAnswer: (text) => void act({ action: "answer", answer: text, expectedRevision: sessionRef.current.revision })
+    onAnswer: (text) => {
+      setAnswerPending(true);
+      setPendingFinalText(text);
+      void act({ action: "answer", answer: text, expectedRevision: sessionRef.current.revision })
+        .finally(() => {
+          setAnswerPending(false);
+          setPendingFinalText("");
+        });
+    },
+    onBlocked: (message) => setError(message)
   });
 
   function sayManual(event: FormEvent) {
@@ -610,6 +693,35 @@ export default function ConsolePage() {
     vadSpeechRevisionRef.current = 0;
   }
 
+  const autoStartDecision = decideAutoSessionStart({
+    bridgeState: autoBridgeStatus.state,
+    bridgeSessionKey: autoBridgeStatus.sessionKey,
+    sessionStatus: session.status,
+    consentConfirmed,
+    modelConfigured: diagnostics.modelConfigured,
+    stageConnected: diagnostics.stageConnected,
+    pending: autoStartPending,
+    attemptedSessionKey: autoStartAttemptedRef.current
+  });
+  const liveCandidateLine = [...subtitleLines].reverse().find((line) => !line.final);
+  const conversationStatus = diagnostics.ttsState === "error"
+    ? `播报失败：${diagnostics.ttsError || "请检查助手舞台"}`
+    : diagnostics.ttsState === "speaking"
+      ? "AI 正在播报"
+      : answerPending
+        ? "正在生成 AI 回复"
+        : liveCandidateLine
+          ? "对方正在说话"
+          : session.status === "running"
+            ? "等待对方说话"
+            : autoStartError || autoStartDecision.message;
+
+  function retryAutoStart() {
+    autoStartAttemptedRef.current = "";
+    setAutoStartError("");
+    setAutoStartRetry((value) => value + 1);
+  }
+
   return (
     <main className="console workspacePage">
       <header className="topbar">
@@ -690,6 +802,14 @@ export default function ConsolePage() {
                 : "AI 模型已配置后即可开始；虚拟声卡可选。开始时还会用 GET /models 做一次无推理连接检查，不产生模型调用费用。"}
             </p>
           )}
+          <p className={autoStartError ? "error" : "muted"} aria-live="polite">
+            自动对话：{autoStartPending ? "正在开始并准备开场播报…" : autoStartError || autoStartDecision.message}
+          </p>
+          {autoStartError && autoBridgeStatus.sessionKey ? (
+            <button className="secondary" type="button" disabled={autoStartPending} onClick={retryAutoStart}>
+              重试自动开始
+            </button>
+          ) : null}
           <button className="secondary" disabled={busy || session.status !== "running"} onClick={() => act({ action: "finish" })}>结束互动</button>
           {session.status === "finished" && <a className="textLink" href="/records">查看或生成本次互动纪要 →</a>}
         </article>
@@ -698,6 +818,7 @@ export default function ConsolePage() {
           <div className="cardHeading">
             <h2>对话记录</h2>
             <div className="transcriptMeta">
+              <span className="conversationStatus" aria-live="polite">{conversationStatus}</span>
               <span>
                 {session.transcript.filter((item) =>
                   item.role === "interviewer" &&
@@ -746,6 +867,19 @@ export default function ConsolePage() {
                 <p>{item.text}</p>
               </div>
             ))}
+            {pendingFinalText ? (
+              <div className="message candidate live" aria-live="polite">
+                <strong>对方</strong>
+                <p>{pendingFinalText}</p>
+                <small>已确认，正在生成 AI 回复…</small>
+              </div>
+            ) : liveCandidateLine ? (
+              <div className="message candidate live" aria-live="polite">
+                <strong>对方正在说</strong>
+                <p>{liveCandidateLine.text}</p>
+                <small>识别中，确认后写入记录</small>
+              </div>
+            ) : null}
           </div>
           </article>
 

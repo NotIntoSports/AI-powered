@@ -180,6 +180,11 @@ export function MeetingBridgeCard() {
         <span>虚拟声卡</span>
         <strong className={virtualAudioReady ? "ok" : ""}>{audioValue}</strong>
       </div>
+      {software === "wemeetapp.exe" ? (
+        <p className="muted">
+          腾讯会议设备：扬声器选系统默认/Realtek，麦克风选 CABLE Output；请勿把会议扬声器设为 CABLE In。
+        </p>
+      ) : null}
       {autoStatus.state === "needs-manual" || audioNeedsAttention ? (
         <a className="textLink" href="/settings#settings-rtc-bridge-section">打开设置处理 →</a>
       ) : null}

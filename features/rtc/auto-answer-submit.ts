@@ -20,27 +20,42 @@ export function isMeaningfulSubtitle(text: string): boolean {
 
 export type AutoAnswerSubmitOptions = {
   enabled: boolean;
+  processing?: boolean;
   aiSpeaking: boolean;
   getGate: () => AutoAnswerGate;
   onAnswer(text: string): void;
+  onBlocked?(message: string): void;
 };
 
+export function isOutsideEchoWindow(input: { aiSpeaking: boolean; now: number; tailUntil: number }): boolean {
+  return !input.aiSpeaking && input.now >= input.tailUntil;
+}
+
 /** 订阅实时字幕的 final 行，满足条件时自动作为对方回答提交。 */
-export function useAutoAnswerSubmit({ enabled, aiSpeaking, getGate, onAnswer }: AutoAnswerSubmitOptions) {
-  const stateRef = useRef({ enabled, aiSpeaking, getGate, onAnswer });
-  stateRef.current = { enabled, aiSpeaking, getGate, onAnswer };
+export function useAutoAnswerSubmit({ enabled, processing = false, aiSpeaking, getGate, onAnswer, onBlocked }: AutoAnswerSubmitOptions) {
+  const stateRef = useRef({ enabled, processing, aiSpeaking, getGate, onAnswer, onBlocked });
+  stateRef.current = { enabled, processing, aiSpeaking, getGate, onAnswer, onBlocked };
   const tailUntilRef = useRef(0);
+  const wasSpeakingRef = useRef(false);
 
   useEffect(() => {
-    if (aiSpeaking) tailUntilRef.current = Date.now() + ECHO_TAIL_MS;
+    if (wasSpeakingRef.current && !aiSpeaking) tailUntilRef.current = Date.now() + ECHO_TAIL_MS;
+    wasSpeakingRef.current = aiSpeaking;
   }, [aiSpeaking]);
 
   useEffect(
     () =>
       subtitleSink.subscribeFinal((line) => {
         const state = stateRef.current;
-        if (!state.enabled) return;
-        if (Date.now() < tailUntilRef.current) return;
+        if (!state.enabled) {
+          state.onBlocked?.("AI 自动模式已暂停，这句字幕未提交");
+          return;
+        }
+        if (!isOutsideEchoWindow({ aiSpeaking: state.aiSpeaking, now: Date.now(), tailUntil: tailUntilRef.current })) return;
+        if (state.processing) {
+          state.onBlocked?.("AI 正在处理上一轮，这句字幕未自动提交");
+          return;
+        }
         const text = String(line.text || "").trim();
         if (!isMeaningfulSubtitle(text)) return;
         const gate = state.getGate();
@@ -50,7 +65,12 @@ export function useAutoAnswerSubmit({ enabled, aiSpeaking, getGate, onAnswer }: 
           capturedRevision: gate.currentRevision,
           lastTranscriptRole: gate.lastTranscriptRole
         });
-        if (!allowed) return;
+        if (!allowed) {
+          state.onBlocked?.(gate.sessionStatus !== "running"
+            ? "互动尚未开始，这句字幕未进入对话记录"
+            : "AI 正在处理上一轮，这句字幕未自动提交");
+          return;
+        }
         state.onAnswer(text);
       }),
     []
