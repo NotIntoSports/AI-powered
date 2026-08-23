@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 import type { InterviewSession } from "../lib/interview";
+import { assistantRoleIds, builtInRoleProfiles, transcriptSpeakerLabel, type AssistantRole } from "../lib/assistant-role";
 import {
   advanceEchoGuard,
   armEchoGuard as createEchoGuard,
@@ -62,6 +63,8 @@ const emptySession: InterviewSession = {
   speakingText: "",
   candidateName: "",
   roleName: "",
+  assistantRole: "interviewer",
+  roleProfile: structuredClone(builtInRoleProfiles.interviewer),
   jobDescription: "",
   interviewFocus: "",
   consentConfirmed: false,
@@ -88,6 +91,7 @@ export default function ConsolePage() {
   const [session, setSession] = useState(emptySession);
   const [candidateName, setCandidateName] = useState("");
   const [roleName, setRoleName] = useState("");
+  const [assistantRole, setAssistantRole] = useState<AssistantRole | "">("");
   const [jobDescription, setJobDescription] = useState("");
   const [interviewFocus, setInterviewFocus] = useState("");
   const [consentConfirmed, setConsentConfirmed] = useState(false);
@@ -193,6 +197,7 @@ export default function ConsolePage() {
       sessionStatus: session.status,
       modelConfigured: diagnostics.modelConfigured,
       stageConnected: diagnostics.stageConnected,
+      assistantRole,
       pending: autoStartPending,
       attemptedSessionKey: autoStartAttemptedRef.current
     });
@@ -206,12 +211,13 @@ export default function ConsolePage() {
       action: "start",
       candidateName,
       roleName,
+      assistantRole,
       jobDescription,
       interviewFocus,
       consentConfirmed,
       resumeIds: resumeIds.length ? resumeIds : undefined
     })
-      .then(applySessionResult)
+      .then((next) => { applySessionResult(next); setConsentConfirmed(false); })
       .catch((cause) => {
         const message = cause instanceof Error ? cause.message : "自动开始失败";
         setAutoStartError(`自动开始失败：${message}`);
@@ -230,6 +236,7 @@ export default function ConsolePage() {
     jobDescription,
     resumeIds,
     roleName,
+    assistantRole,
     session.status,
     sessionLoaded
   ]);
@@ -698,6 +705,7 @@ export default function ConsolePage() {
     sessionStatus: session.status,
     modelConfigured: diagnostics.modelConfigured,
     stageConnected: diagnostics.stageConnected,
+    assistantRole,
     pending: autoStartPending,
     attemptedSessionKey: autoStartAttemptedRef.current
   });
@@ -758,6 +766,17 @@ export default function ConsolePage() {
             <span className={`pill ${session.status}`}>{session.status}</span>
           </div>
           <label>互动对象<input value={candidateName} onChange={(e) => setCandidateName(e.target.value)} placeholder="例如：张同学" /></label>
+          <label>
+            助手角色
+            <select
+              value={assistantRole}
+              disabled={session.status === "running"}
+              onChange={(event) => setAssistantRole(event.target.value as AssistantRole | "")}
+            >
+              <option value="">请选择助手角色</option>
+              {assistantRoleIds.map((role) => <option key={role} value={role}>{builtInRoleProfiles[role].label}</option>)}
+            </select>
+          </label>
           {resumeIds.length > 0 ? (
             <p className="muted resumeHint">本场已选 {resumeIds.length} 份参考资料（右上角可调整）。</p>
           ) : null}
@@ -787,7 +806,7 @@ export default function ConsolePage() {
             />
             <span>AI 开场时告知对方本次互动由 AI 协助、会保存记录并由人工复核。</span>
           </label>
-          {readiness.ready ? <button disabled={busy || session.status === "running"} onClick={() => act({ action: "start", candidateName, roleName, jobDescription, interviewFocus, consentConfirmed, resumeIds: resumeIds.length ? resumeIds : undefined })}>{session.status === "running" ? "当前互动进行中" : "开始新互动"}</button> : <a className="buttonLink primary" href="/settings">前往设置完成检测</a>}
+          {readiness.ready ? <button disabled={busy || session.status === "running" || !assistantRole} onClick={async () => { if (await act({ action: "start", candidateName, assistantRole, roleName, jobDescription, interviewFocus, consentConfirmed, resumeIds: resumeIds.length ? resumeIds : undefined })) setConsentConfirmed(false); }}>{session.status === "running" ? "当前互动进行中" : assistantRole ? "开始新互动" : "请选择助手角色"}</button> : <a className="buttonLink primary" href="/settings">前往设置完成检测</a>}
           {diagnostics.modelConfigured && session.status !== "running" && (
             <p className="muted">
               {outputMode === "virtual"
@@ -858,7 +877,7 @@ export default function ConsolePage() {
             )}
             {session.transcript.map((item, index) => (
               <div className={`message ${item.role}`} key={`${item.at}-${index}`}>
-                <strong>{item.role === "interviewer" ? "AI虚拟助手" : "对方"}</strong>
+                <strong>{transcriptSpeakerLabel(session.assistantRole, item.role)}</strong>
                 <p>{item.text}</p>
               </div>
             ))}

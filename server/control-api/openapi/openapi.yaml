@@ -1052,6 +1052,37 @@ paths:
           $ref: '#/components/responses/InvalidInputUnprocessable'
         '503':
           $ref: '#/components/responses/SettingsUnavailable'
+  /api/v1/admin/settings/roles:
+    get:
+      operationId: getAssistantRoleProfiles
+      security: [{cookieAuth: []}]
+      responses:
+        '200':
+          description: Global assistant role copy and business instructions.
+          content: {application/json: {schema: {$ref: '#/components/schemas/RoleProfiles'}}}
+        '401': {$ref: '#/components/responses/Unauthenticated'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+    put:
+      operationId: putAssistantRoleProfiles
+      security: [{cookieAuth: []}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/RoleProfilesInput'}}}
+      responses:
+        '200':
+          description: All four role profiles saved atomically.
+          content: {application/json: {schema: {$ref: '#/components/schemas/RoleProfiles'}}}
+        '422': {$ref: '#/components/responses/InvalidInputUnprocessable'}
+  /api/v1/client/settings/roles:
+    get:
+      operationId: getClientAssistantRoleProfiles
+      security: [{bearerAuth: []}]
+      responses:
+        '200':
+          description: Read-only assistant role profiles for desktop sessions.
+          content: {application/json: {schema: {$ref: '#/components/schemas/RoleProfiles'}}}
+        '401': {$ref: '#/components/responses/Unauthenticated'}
+        '403': {$ref: '#/components/responses/Forbidden'}
   /api/v1/client/voice-samples/{id}:
     delete:
       operationId: deleteClientVoiceSample
@@ -1192,6 +1223,37 @@ components:
           schema: {$ref: '#/components/schemas/APIError'}
           example: {code: SETTINGS_KEY_MISSING, message: settings master key is not configured, requestId: request-id}
   schemas:
+    AssistantRole:
+      type: string
+      enum: [hr, meeting_assistant, interviewer, candidate]
+    RoleProfile:
+      type: object
+      required: [role, openingTemplate, closingTemplate, instructions, configVersion, updatedAt]
+      properties:
+        role: {$ref: '#/components/schemas/AssistantRole'}
+        openingTemplate: {type: string, maxLength: 500}
+        closingTemplate: {type: string, maxLength: 500}
+        instructions: {type: string, maxLength: 4000}
+        configVersion: {type: integer, minimum: 0}
+        updatedAt: {type: string, format: date-time}
+    RoleProfiles:
+      type: object
+      required: [roles]
+      properties:
+        roles: {type: array, minItems: 4, maxItems: 4, items: {$ref: '#/components/schemas/RoleProfile'}}
+    RoleProfileInput:
+      type: object
+      required: [role, openingTemplate, closingTemplate, instructions]
+      properties:
+        role: {$ref: '#/components/schemas/AssistantRole'}
+        openingTemplate: {type: string, maxLength: 500}
+        closingTemplate: {type: string, maxLength: 500}
+        instructions: {type: string, maxLength: 4000}
+    RoleProfilesInput:
+      type: object
+      required: [roles]
+      properties:
+        roles: {type: array, minItems: 4, maxItems: 4, items: {$ref: '#/components/schemas/RoleProfileInput'}}
     APIError:
       type: object
       required: [code, message, requestId]

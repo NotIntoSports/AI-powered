@@ -26,6 +26,18 @@ type fakeSettingsAdmin struct {
 	listVoices   func() (map[string]settings.UserSpeechVoice, error)
 }
 
+func (fake *fakeSettingsAdmin) GetRoles(context.Context) (settings.RoleProfiles, error) {
+	return settings.RoleProfiles{}, nil
+}
+
+func (fake *fakeSettingsAdmin) PutRoles(_ context.Context, _ users.User, _ string, input []settings.RoleProfileInput) (settings.RoleProfiles, error) {
+	profiles := make([]settings.RoleProfile, 0, len(input))
+	for _, item := range input {
+		profiles = append(profiles, settings.RoleProfile{Role: item.Role, OpeningTemplate: item.OpeningTemplate, ClosingTemplate: item.ClosingTemplate, Instructions: item.Instructions})
+	}
+	return settings.RoleProfiles{Roles: profiles}, nil
+}
+
 func (fake *fakeSettingsAdmin) GetAI(context.Context) (settings.PublicAI, error) {
 	return fake.ai, nil
 }

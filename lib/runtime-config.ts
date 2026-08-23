@@ -3,6 +3,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { z } from "zod";
 import { isSecureEndpoint } from "./endpoint-security";
+import { parseControlApiResponse, type ControlApiResult } from "./control-api-result";
 
 const settingsSchema = z.object({
   baseUrl: z.string().url(),
@@ -81,8 +82,13 @@ async function readDesktopToken() {
 }
 
 export async function fetchDesktopControlJson<T>(path: string, init?: RequestInit): Promise<T | null> {
+  const result = await fetchDesktopControlResult<T>(path, init);
+  return result.ok ? result.data : null;
+}
+
+export async function fetchDesktopControlResult<T>(path: string, init?: RequestInit): Promise<ControlApiResult<T>> {
   const token = await readDesktopToken();
-  if (!token) return null;
+  if (!token) return { ok: false, failure: { status: 401, code: "AUTH_REQUIRED", message: "" } };
   try {
     const headers = new Headers(init?.headers);
     headers.set("Authorization", `Bearer ${token}`);
@@ -92,11 +98,9 @@ export async function fetchDesktopControlJson<T>(path: string, init?: RequestIni
       cache: "no-store",
       signal: init?.signal ?? AbortSignal.timeout(5_000)
     });
-    if (!response.ok) return null;
-    if (response.status === 204) return null;
-    return await response.json() as T;
+    return await parseControlApiResponse<T>(response);
   } catch {
-    return null;
+    return { ok: false, failure: { status: 0, code: "NETWORK_ERROR", message: "" } };
   }
 }
 

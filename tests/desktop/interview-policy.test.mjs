@@ -3,11 +3,19 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { buildOpeningMessage } from "../../features/session/interview-policy.ts";
+import { builtInRoleProfiles } from "../../lib/assistant-role.ts";
 
 test("AI disclosure changes opening copy without blocking the session", () => {
-  const base = { candidateName: "小王", roleName: "产品交流" };
+  const base = { candidateName: "小王", roleName: "产品交流", roleProfile: builtInRoleProfiles.interviewer };
   assert.doesNotMatch(buildOpeningMessage({ ...base, consentConfirmed: false }), /AI|保存|人工复核/);
-  assert.match(buildOpeningMessage({ ...base, consentConfirmed: true }), /AI虚拟助手协助.*保存.*人工复核/);
+  assert.match(buildOpeningMessage({ ...base, consentConfirmed: true }), /AI 虚拟助手协助.*保存.*人工复核/);
+});
+
+test("opening copy follows the selected role", () => {
+  const base = { candidateName: "小王", roleName: "产品交流", consentConfirmed: false };
+  assert.match(buildOpeningMessage({ ...base, roleProfile: builtInRoleProfiles.hr }), /招聘/);
+  assert.match(buildOpeningMessage({ ...base, roleProfile: builtInRoleProfiles.meeting_assistant }), /会议/);
+  assert.match(buildOpeningMessage({ ...base, roleProfile: builtInRoleProfiles.candidate }), /回答您的问题/);
 });
 
 test("session API accepts false disclosure and always continues with another question", async () => {

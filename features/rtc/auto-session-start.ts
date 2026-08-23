@@ -4,6 +4,7 @@ export type AutoSessionStartInput = {
   sessionStatus: "idle" | "running" | "finished";
   modelConfigured: boolean;
   stageConnected: boolean;
+  assistantRole?: string;
   pending: boolean;
   attemptedSessionKey?: string;
 };
@@ -20,6 +21,9 @@ export function decideAutoSessionStart(input: AutoSessionStartInput): AutoSessio
   }
   if (input.sessionStatus === "running") {
     return { shouldStart: false, message: "自动对话已开始" };
+  }
+  if (!input.assistantRole) {
+    return { shouldStart: false, message: "请选择助手角色" };
   }
   if (!input.modelConfigured) {
     return { shouldStart: false, message: "AI 模型未就绪，暂不能自动开始" };

@@ -9,6 +9,7 @@ const ready = {
   sessionStatus: "idle",
   modelConfigured: true,
   stageConnected: true,
+  assistantRole: "interviewer",
   pending: false
 };
 
@@ -26,4 +27,10 @@ test("does not auto start without model, stage or a stable bridge key", () => {
 
 test("does not restart a running session", () => {
   assert.equal(decideAutoSessionStart({ ...ready, sessionStatus: "running" }).shouldStart, false);
+});
+
+test("requires an explicitly selected assistant role", () => {
+  const decision = decideAutoSessionStart({ ...ready, assistantRole: "" });
+  assert.equal(decision.shouldStart, false);
+  assert.match(decision.message, /请选择助手角色/);
 });

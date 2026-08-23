@@ -95,6 +95,8 @@ func NewRouter(dependencies Dependencies) http.Handler {
 					r.Get("/speech", adminSettings.getSpeech)
 					r.Put("/speech", adminSettings.putSpeech)
 					r.Post("/speech/test", adminSettings.testSpeech)
+					r.Get("/roles", adminSettings.getRoles)
+					r.Put("/roles", adminSettings.putRoles)
 				})
 			}
 			if dependencies.ResumeAdmin != nil {
@@ -135,6 +137,7 @@ func NewRouter(dependencies Dependencies) http.Handler {
 				r.Get("/settings/speech", clientSettings.getClientSpeech)
 				r.Patch("/settings/speech", clientSettings.patchClientSpeech)
 				r.Post("/rtc/token", clientSettings.issueRTC)
+				r.Get("/settings/roles", clientSettings.getClientRoles)
 			}
 			if dependencies.VoiceSampleAdmin != nil {
 				clientVoiceSamples := newVoiceSampleHandler(dependencies.VoiceSampleAdmin)

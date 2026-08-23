@@ -10,7 +10,9 @@ import {
   resetSession,
   setInterviewReport
 } from "../../../lib/interview";
-import { generateInterviewReport, generateNextQuestion } from "../../../lib/llm";
+import { generateInterviewReport, generateRoleResponse } from "../../../lib/llm";
+import { assistantRoleSchema } from "../../../lib/assistant-role";
+import { getRoleProfile } from "../../../lib/role-profiles";
 import { buildKnowledgeQuery, searchResumeKnowledge } from "../../../lib/knowledge";
 import {
   getModelRuntimeConfig,
@@ -23,6 +25,7 @@ const actionSchema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("start"),
     candidateName: z.string().trim().max(50),
+    assistantRole: assistantRoleSchema,
     roleName: z.string().trim().max(100),
     jobDescription: z.string().trim().max(3000).default(""),
     interviewFocus: z.string().trim().max(500).default(""),
@@ -137,7 +140,8 @@ export async function POST(request: Request) {
           { status: 409 }
         );
       }
-      const started = await resetSession(parsed.data);
+      const roleProfile = await getRoleProfile(parsed.data.assistantRole);
+      const started = await resetSession({ ...parsed.data, roleProfile });
       pipelineTraceId = started.sessionId;
       console.log(`[session] started sessionId=${started.sessionId} elapsedMs=${Date.now() - startedAt}`);
       console.log(formatPipelineLog({
@@ -167,7 +171,9 @@ export async function POST(request: Request) {
           { status: 409 }
         );
       }
-      const question = await generateNextQuestion({
+      const question = await generateRoleResponse({
+        assistantRole: session.assistantRole,
+        roleInstructions: session.roleProfile.instructions,
         roleName: session.roleName,
         jobDescription: session.jobDescription,
         interviewFocus: session.interviewFocus,
@@ -202,7 +208,9 @@ export async function POST(request: Request) {
         ...session.transcript.slice(0, -2),
         { ...currentAnswer, text: parsed.data.answer }
       ];
-      const question = await generateNextQuestion({
+      const question = await generateRoleResponse({
+        assistantRole: session.assistantRole,
+        roleInstructions: session.roleProfile.instructions,
         roleName: session.roleName,
         jobDescription: session.jobDescription,
         interviewFocus: session.interviewFocus,
@@ -263,7 +271,9 @@ export async function POST(request: Request) {
       traceId: session.sessionId,
       fields: { revision: session.revision, textLength: parsed.data.answer.length }
     }));
-    const question = await generateNextQuestion({
+    const question = await generateRoleResponse({
+      assistantRole: session.assistantRole,
+      roleInstructions: session.roleProfile.instructions,
       roleName: session.roleName,
       jobDescription: session.jobDescription,
       interviewFocus: session.interviewFocus,

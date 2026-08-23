@@ -12,6 +12,13 @@ import {
   runTransaction
 } from "./database";
 import { buildOpeningMessage } from "../features/session/interview-policy";
+import {
+  assistantRoleSchema,
+  builtInRoleProfiles,
+  renderRoleTemplate,
+  type AssistantRole,
+  type RoleProfile
+} from "./assistant-role";
 
 export type TranscriptItem = {
   role: "interviewer" | "candidate";
@@ -27,6 +34,8 @@ export type InterviewSession = {
   speakingText: string;
   candidateName: string;
   roleName: string;
+  assistantRole: AssistantRole;
+  roleProfile: RoleProfile;
   jobDescription: string;
   interviewFocus: string;
   /** 仅用于读取历史会话；新会话不再设置或执行问题上限。 */
@@ -55,6 +64,16 @@ const sessionSchema = z.object({
   speakingText: z.string(),
   candidateName: z.string(),
   roleName: z.string(),
+  assistantRole: assistantRoleSchema.default("interviewer"),
+  roleProfile: z.object({
+    role: assistantRoleSchema,
+    label: z.string().max(30),
+    openingTemplate: z.string().max(500),
+    closingTemplate: z.string().max(500),
+    instructions: z.string().max(4000),
+    configVersion: z.number().int().nonnegative().default(0),
+    updatedAt: z.string().nullable().default(null)
+  }).optional(),
   jobDescription: z.string().default(""),
   interviewFocus: z.string().default(""),
   maxQuestions: z.number().int().min(2).max(20).optional(),
@@ -68,7 +87,8 @@ const sessionSchema = z.object({
   resumeId: z.string().max(64).default("")
 }).transform((session) => {
   const resumeIds = normalizeResumeIds(session.resumeIds, session.resumeId);
-  return { ...session, resumeIds, resumeId: resumeIds[0] || "" };
+  const roleProfile = session.roleProfile ?? structuredClone(builtInRoleProfiles[session.assistantRole]);
+  return { ...session, roleProfile, resumeIds, resumeId: resumeIds[0] || "" };
 });
 
 function normalizeResumeIds(resumeIds?: string[] | null, resumeId?: string | null) {
@@ -87,6 +107,8 @@ const initialSession: InterviewSession = {
   speakingText: "",
   candidateName: "",
   roleName: "",
+  assistantRole: "interviewer",
+  roleProfile: structuredClone(builtInRoleProfiles.interviewer),
   jobDescription: "",
   interviewFocus: "",
   consentConfirmed: false,
@@ -254,6 +276,8 @@ export async function getSession(): Promise<InterviewSession> {
 export function resetSession(input: {
   candidateName: string;
   roleName: string;
+  assistantRole: AssistantRole;
+  roleProfile: RoleProfile;
   jobDescription: string;
   interviewFocus: string;
   consentConfirmed: boolean;
@@ -272,6 +296,8 @@ export function resetSession(input: {
       speakingText: opening,
       candidateName: input.candidateName,
       roleName: input.roleName,
+      assistantRole: input.assistantRole,
+      roleProfile: structuredClone(input.roleProfile),
       jobDescription: input.jobDescription,
       interviewFocus: input.interviewFocus,
       consentConfirmed: input.consentConfirmed,
@@ -403,7 +429,10 @@ export function finishSession(): Promise<InterviewSession> {
   return mutateSession((session) => {
     if (session.status !== "running") throw new Error("SESSION_NOT_RUNNING");
     const timestamp = now();
-    const closing = "感谢你的时间，本次互动到这里。如有后续安排，相关人员会再与你联系。";
+    const closing = renderRoleTemplate(session.roleProfile.closingTemplate, {
+      target: session.candidateName || "你好",
+      topic: session.roleName || "本次交流"
+    });
     session.status = "finished";
     session.finishedAt = timestamp;
     session.transcript.push({
@@ -428,6 +457,7 @@ export type ArchivedSessionSummary = Pick<
   InterviewSession,
   "sessionId" | "candidateName" | "roleName" | "startedAt" | "finishedAt"
 > & {
+  assistantRole: AssistantRole;
   questionCount: number;
   reportReady: boolean;
 };
@@ -444,6 +474,7 @@ export async function listArchivedSessions(): Promise<ArchivedSessionSummary[]> 
         sessionId: session.sessionId,
         candidateName: session.candidateName,
         roleName: session.roleName,
+        assistantRole: session.assistantRole,
         startedAt: session.startedAt,
         finishedAt: session.finishedAt,
         questionCount: countInterviewQuestions(session),

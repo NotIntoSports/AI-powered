@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { cloneCosyVoice, COSYVOICE_MAX_CLONE_SECONDS, COSYVOICE_VOICE_PREFIX, isCosyVoiceSpeakerId } from "../../../lib/aliyun-cosyvoice";
 import { MAX_CLONE_AUDIO_BYTES, truncateWavToSeconds } from "../../../lib/pcm-wav";
-import { fetchDesktopControlJson } from "../../../lib/runtime-config";
+import { fetchDesktopControlJson, fetchDesktopControlResult } from "../../../lib/runtime-config";
+import { voiceSampleUploadFailureMessage } from "../../../lib/voice-sample-errors";
 import {
   getSpeechRuntimeConfig,
   getTtsRuntimeConfig,
@@ -149,10 +150,21 @@ export async function POST(request: Request) {
 /** 阿里云分支：上传 COS 换短时签名 URL → CosyVoiceClone 自动分配唯一音色 → 立即删除样本 → 绑定账号。 */
 async function cloneWithAliyun(speech: Awaited<ReturnType<typeof getSpeechRuntimeConfig>>, audioBytes: Buffer) {
   const wav = truncateWavToSeconds(new Uint8Array(audioBytes), COSYVOICE_MAX_CLONE_SECONDS);
-  const sample = await uploadVoiceSample(wav);
+  const uploaded = await uploadVoiceSample(wav);
+  if (!uploaded.ok) {
+    console.warn("voice sample upload failed", {
+      status: uploaded.failure.status,
+      code: uploaded.failure.code
+    });
+    return NextResponse.json(
+      { code: uploaded.failure.code, message: voiceSampleUploadFailureMessage(uploaded.failure) },
+      { status: uploaded.failure.status > 0 ? uploaded.failure.status : 502 }
+    );
+  }
+  const sample = uploaded.data;
   if (!sample) {
     return NextResponse.json(
-      { code: "VOICE_CLONE_FAILED", message: "音频上传失败，请确认管理端已配置腾讯云对象存储" },
+      { code: "INVALID_RESPONSE", message: "声音刻录服务返回了无效响应，请联系管理员" },
       { status: 502 }
     );
   }
@@ -181,7 +193,7 @@ async function cloneWithAliyun(speech: Awaited<ReturnType<typeof getSpeechRuntim
 async function uploadVoiceSample(wav: Uint8Array) {
   const form = new FormData();
   form.append("file", new Blob([wav], { type: "audio/wav" }), "voice-sample.wav");
-  return fetchDesktopControlJson<{ id: string; url: string }>("/api/v1/client/voice-samples", {
+  return fetchDesktopControlResult<{ id: string; url: string }>("/api/v1/client/voice-samples", {
     method: "POST",
     body: form,
     signal: AbortSignal.timeout(30_000)
@@ -189,10 +201,16 @@ async function uploadVoiceSample(wav: Uint8Array) {
 }
 
 async function deleteVoiceSample(id: string) {
-  await fetchDesktopControlJson(`/api/v1/client/voice-samples/${encodeURIComponent(id)}`, {
+  const result = await fetchDesktopControlResult(`/api/v1/client/voice-samples/${encodeURIComponent(id)}`, {
     method: "DELETE",
     signal: AbortSignal.timeout(5_000)
   });
+  if (!result.ok) {
+    console.warn("voice sample cleanup failed", {
+      status: result.failure.status,
+      code: result.failure.code
+    });
+  }
 }
 
 async function bindSpeakerId(speakerId: string, cloned: boolean) {

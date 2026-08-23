@@ -1,4 +1,5 @@
 import type { InterviewSession } from "./interview";
+import { roleLabel, transcriptSpeakerLabel } from "./assistant-role";
 
 export function safeFilenamePart(value: string) {
   return value.trim()
@@ -34,6 +35,7 @@ export function renderInterviewMarkdown(session: InterviewSession) {
     "",
     `- 互动对象：${valueOrUnknown(session.candidateName)}`,
     `- 对话主题：${valueOrUnknown(session.roleName)}`,
+    `- 助手角色：${escapeMarkdown(roleLabel(session.assistantRole))}`,
     `- 开始时间：${valueOrUnknown(session.startedAt || "")}`,
     `- 结束时间：${valueOrUnknown(session.finishedAt || "")}`,
     `- 会话状态：${escapeMarkdown(session.status)}`,
@@ -53,7 +55,7 @@ export function renderInterviewMarkdown(session: InterviewSession) {
   } else {
     session.transcript.forEach((item, index) => {
       lines.push(
-        `### ${index + 1}. ${item.role === "interviewer" ? "AI虚拟助手" : "对方"}`,
+        `### ${index + 1}. ${transcriptSpeakerLabel(session.assistantRole, item.role)}`,
         "",
         `时间：${escapeMarkdown(item.at)}`,
         "",

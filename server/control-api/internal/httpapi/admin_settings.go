@@ -32,6 +32,8 @@ type SettingsAdmin interface {
 	GetStorage(ctx context.Context) (settings.PublicStorage, error)
 	PutStorage(ctx context.Context, actor users.User, requestID string, input settings.StorageInput) (settings.PublicStorage, error)
 	TestStorage(ctx context.Context, actor users.User, requestID string, input *settings.StorageInput) (settings.StorageTestResult, error)
+	GetRoles(ctx context.Context) (settings.RoleProfiles, error)
+	PutRoles(ctx context.Context, actor users.User, requestID string, input []settings.RoleProfileInput) (settings.RoleProfiles, error)
 }
 
 type aiSettingsRequest struct {
@@ -121,6 +123,53 @@ func (handler *adminSettingsHandler) getAI(w http.ResponseWriter, request *http.
 		return
 	}
 	writeJSON(w, http.StatusOK, public)
+}
+
+func (handler *adminSettingsHandler) getRoles(w http.ResponseWriter, request *http.Request) {
+	if _, ok := requestActor(w, request); !ok {
+		return
+	}
+	profiles, err := handler.admin.GetRoles(request.Context())
+	if !writeSettingsError(w, request, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, profiles)
+}
+
+func (handler *adminSettingsHandler) getClientRoles(w http.ResponseWriter, request *http.Request) {
+	authenticated, ok := request.Context().Value(authenticatedSessionKey{}).(AuthenticatedSession)
+	if !ok {
+		writeSessionError(w, request)
+		return
+	}
+	if authenticated.Session.Purpose != sessions.PurposeDesktop {
+		writeAPIError(w, request, http.StatusForbidden, "FORBIDDEN", "desktop session is required")
+		return
+	}
+	profiles, err := handler.admin.GetRoles(request.Context())
+	if !writeSettingsError(w, request, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, profiles)
+}
+
+func (handler *adminSettingsHandler) putRoles(w http.ResponseWriter, request *http.Request) {
+	actor, ok := requestActor(w, request)
+	if !ok {
+		return
+	}
+	var input struct {
+		Roles []settings.RoleProfileInput `json:"roles"`
+	}
+	if err := decodeBoundedJSON(w, request, &input); err != nil {
+		writeJSONDecodeError(w, request, err)
+		return
+	}
+	profiles, err := handler.admin.PutRoles(request.Context(), actor, middleware.GetReqID(request.Context()), input.Roles)
+	if !writeSettingsError(w, request, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, profiles)
 }
 
 func (handler *adminSettingsHandler) getClientAI(w http.ResponseWriter, request *http.Request) {

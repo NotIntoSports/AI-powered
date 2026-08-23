@@ -352,6 +352,7 @@ try {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       action: "start",
+      assistantRole: "interviewer",
       candidateName: "测试候选人",
       roleName: "前端工程师",
       jobDescription: "负责 Web 性能和组件架构",
@@ -376,6 +377,7 @@ try {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         action: "start",
+        assistantRole: "interviewer",
         candidateName: "不应覆盖",
         roleName: "其他岗位",
         jobDescription: "",
@@ -555,7 +557,7 @@ try {
   }).then((response) => response.json());
   assert.equal(finalAnswer.status, "finished");
   assert.equal(finalAnswer.transcript.length, 9);
-  assert.match(finalAnswer.transcript[8].text, /本次互动到这里/);
+  assert.match(finalAnswer.transcript[8].text, /本次(?:互动|交流)到这里/);
   assert.equal(finalAnswer.transcript[8].kind, "closing");
   const invalidSayAfterFinish = await fetch(`http://127.0.0.1:${appPort}/api/session`, {
     method: "POST",
@@ -650,6 +652,7 @@ try {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       action: "start",
+      assistantRole: "interviewer",
       candidateName: "第二位候选人",
       roleName: "前端工程师",
       jobDescription: "",
@@ -937,6 +940,7 @@ try {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         action: "start",
+        assistantRole: "interviewer",
         candidateName: "模型不存在",
         roleName: "探测测试",
         jobDescription: "",
@@ -967,6 +971,7 @@ try {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         action: "start",
+        assistantRole: "interviewer",
         candidateName: "服务不可达",
         roleName: "探测测试",
         jobDescription: "",
@@ -990,6 +995,7 @@ try {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         action: "start",
+        assistantRole: "interviewer",
         candidateName: "不能开始",
         roleName: "模型未配置岗位",
         jobDescription: "",
