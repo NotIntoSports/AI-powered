@@ -343,6 +343,11 @@ func (s *Service) GetClientSpeech(ctx context.Context, userID string) (ClientSpe
 	volcErr := firstDecryptErr(apiErr, tokenErr)
 	aliyunErr := firstDecryptErr(aliyunIDErr, aliyunSecretErr, aliyunTokenErr)
 	public := PublicSpeechFromErrs(record, volcErr, aliyunErr)
+	allocation, allocationErr := store.GetUserSpeechAllocation(ctx, userID)
+	if allocationErr != nil {
+		return ClientSpeech{}, allocationErr
+	}
+	public.VoiceAllocationStatus = allocation.Status
 	if userSpeaker, speakerErr := store.GetUserSpeechSpeakerID(ctx, userID); speakerErr != nil {
 		return ClientSpeech{}, speakerErr
 	} else if userSpeaker != "" {
@@ -408,6 +413,30 @@ func (s *Service) PutClientSpeechSpeakerID(ctx context.Context, userID, speakerI
 		return PublicSpeech{}, err
 	}
 	return client.PublicSpeech, nil
+}
+
+func (s *Service) ReserveClientSpeechVoice(ctx context.Context, userID string) (VoiceAllocation, error) {
+	return NewStore(s.db, s.box).ReserveUserSpeechVoice(ctx, userID)
+}
+
+func (s *Service) CompleteClientSpeechVoice(ctx context.Context, userID, token, speakerID string) (PublicSpeech, error) {
+	store := NewStore(s.db, s.box)
+	if err := store.CompleteUserSpeechVoice(ctx, userID, token, speakerID); err != nil {
+		return PublicSpeech{}, err
+	}
+	client, err := s.GetClientSpeech(ctx, userID)
+	if err != nil {
+		return PublicSpeech{}, err
+	}
+	return client.PublicSpeech, nil
+}
+
+func (s *Service) ReleaseClientSpeechVoice(ctx context.Context, userID, token string) (VoiceAllocation, error) {
+	store := NewStore(s.db, s.box)
+	if err := store.ReleaseUserSpeechVoice(ctx, userID, token); err != nil {
+		return VoiceAllocation{}, err
+	}
+	return VoiceAllocation{Status: VoiceAllocationUnallocated}, nil
 }
 
 func (s *Service) ListUserSpeechVoices(ctx context.Context) (map[string]UserSpeechVoice, error) {

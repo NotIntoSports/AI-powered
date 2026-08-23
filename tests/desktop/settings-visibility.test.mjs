@@ -7,8 +7,8 @@ test("desktop settings do not expose RTC credentials or AI model configuration",
   assert.doesNotMatch(source, /RtcSettings/);
   assert.doesNotMatch(source, /title="实时字幕"/);
   assert.doesNotMatch(source, /ModelSettings/);
-  assert.match(source, /RtcBridgeControl/);
-  assert.match(source, /title="会议音频桥接"/);
+  assert.doesNotMatch(source, /RtcBridgeControl/);
+  assert.doesNotMatch(source, /title="会议音频桥接"/);
   assert.match(source, /number="01" title="会议画面"/);
   assert.match(source, /使用自己的真实摄像头/);
   assert.match(source, /使用 OBS 虚拟摄像头输出助手画面/);
@@ -18,8 +18,7 @@ test("desktop settings do not expose RTC credentials or AI model configuration",
   assert.match(source, /virtualMode && <SettingSection number="04" title="助手形象"/);
   assert.match(source, /virtualMode && <SettingSection number="05" title="OBS/);
   assert.match(source, /AudioRouteControl onReadyChange=\{handleVirtualAudioReady\}/);
-  assert.match(source, /MeetingHandoffControl/);
-  assert.match(source, /outputMode=\{outputMode\}/);
+  assert.doesNotMatch(source, /MeetingHandoffControl/);
   assert.match(source, /VirtualCameraPreview/);
   assert.match(source, /virtualMode \? <VirtualCameraPreview/);
   assert.match(source, /AppChrome current="settings"/);
@@ -75,5 +74,7 @@ test("voice clone returns an ID, binds the account, and TTS prefers that speaker
   assert.match(runtime, /export async function getTtsRuntimeConfig/);
   assert.match(runtime, /isClonedSpeakerId/);
   assert.match(tts, /getTtsRuntimeConfig/);
-  assert.match(control, /刻录成功，已启用音色 ID/);
+  assert.match(control, /每个账号仅可分配一次/);
+	assert.match(route, /reserveAllocation/);
+	assert.match(runtime, /reserveSpeechVoiceAllocation/);
 });

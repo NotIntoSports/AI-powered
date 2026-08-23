@@ -5,12 +5,15 @@ import { MAX_CLONE_AUDIO_BYTES, truncateWavToSeconds } from "../../../lib/pcm-wa
 import { fetchDesktopControlJson, fetchDesktopControlResult } from "../../../lib/runtime-config";
 import { voiceSampleUploadFailureMessage } from "../../../lib/voice-sample-errors";
 import {
+	completeSpeechVoiceAllocation,
   getSpeechRuntimeConfig,
+	getSpeechVoiceAllocationStatus,
   getTtsRuntimeConfig,
   getVolcengineSpeechConfig,
   isClonedSpeakerId,
-  saveSpeechSpeakerId,
-  SpeechAccountBindError
+	releaseSpeechVoiceAllocation,
+	reserveSpeechVoiceAllocation,
+	SpeechVoiceAllocationError
 } from "../../../lib/speech-runtime";
 import { DEFAULT_CUSTOM_SPEAKER_ID, VOICE_CLONE_SCRIPT } from "../../../lib/voice-clone-script";
 import {
@@ -45,16 +48,17 @@ export async function GET() {
   const speakerId = volcSpeakerId || aliyunSpeakerId;
   const aliyunCloneReady = speech.provider === "aliyun"
     && Boolean(speech.appId && speech.accessKeyId && speech.accessKeySecret);
+	const voiceAllocationStatus = await getSpeechVoiceAllocationStatus();
   return NextResponse.json({
     available: Boolean(volcengine?.available) || aliyunCloneReady,
     aliyunCloneReady,
     ttsAvailable: tts.ttsAvailable,
     asrAvailable: speech.asrAvailable,
-    speakerId,
     cloned: Boolean(speakerId),
     enabled: Boolean(speakerId && (tts.provider === "volcengine" || isCosyVoiceSpeakerId(speakerId))),
     source: tts.source,
-    provider: tts.provider
+    provider: tts.provider,
+		voiceAllocationStatus
   });
 }
 
@@ -88,7 +92,9 @@ export async function POST(request: Request) {
         { status: 422 }
       );
     }
-    return bindSpeakerId(speakerId, false);
+    const reservation = await reserveAllocation();
+		if (reservation instanceof NextResponse) return reservation;
+		return bindSpeakerId(reservation, speakerId, false);
   }
 
   const audioBytes = Buffer.from(parsed.data.audioBase64, "base64");
@@ -99,8 +105,11 @@ export async function POST(request: Request) {
     );
   }
 
+	const reservation = await reserveAllocation();
+	if (reservation instanceof NextResponse) return reservation;
+
   if (!volcengine?.available) {
-    return cloneWithAliyun(speech, audioBytes);
+    return cloneWithAliyun(speech, audioBytes, reservation);
   }
 
   const speakerHint = parsed.data.speakerId?.trim()
@@ -123,6 +132,7 @@ export async function POST(request: Request) {
     });
     const payload = parseJson(text);
     if (!response.ok || isVoiceCloneBusinessError(payload)) {
+			await releaseAllocation(reservation);
       return NextResponse.json(
         {
           code: "VOICE_CLONE_FAILED",
@@ -138,7 +148,7 @@ export async function POST(request: Request) {
         { status: 502 }
       );
     }
-    return bindSpeakerId(speakerId, true);
+		return bindSpeakerId(reservation, speakerId, true);
   } catch {
     return NextResponse.json(
       { code: "VOICE_CLONE_FAILED", message: "声音刻录失败，请检查网络和语音配置" },
@@ -148,10 +158,11 @@ export async function POST(request: Request) {
 }
 
 /** 阿里云分支：上传 COS 换短时签名 URL → CosyVoiceClone 自动分配唯一音色 → 立即删除样本 → 绑定账号。 */
-async function cloneWithAliyun(speech: Awaited<ReturnType<typeof getSpeechRuntimeConfig>>, audioBytes: Buffer) {
+async function cloneWithAliyun(speech: Awaited<ReturnType<typeof getSpeechRuntimeConfig>>, audioBytes: Buffer, reservation: string) {
   const wav = truncateWavToSeconds(new Uint8Array(audioBytes), COSYVOICE_MAX_CLONE_SECONDS);
   const uploaded = await uploadVoiceSample(wav);
   if (!uploaded.ok) {
+		await releaseAllocation(reservation);
     console.warn("voice sample upload failed", {
       status: uploaded.failure.status,
       code: uploaded.failure.code
@@ -163,6 +174,7 @@ async function cloneWithAliyun(speech: Awaited<ReturnType<typeof getSpeechRuntim
   }
   const sample = uploaded.data;
   if (!sample) {
+		await releaseAllocation(reservation);
     return NextResponse.json(
       { code: "INVALID_RESPONSE", message: "声音刻录服务返回了无效响应，请联系管理员" },
       { status: 502 }
@@ -173,8 +185,9 @@ async function cloneWithAliyun(speech: Awaited<ReturnType<typeof getSpeechRuntim
       { accessKeyId: speech.accessKeyId, accessKeySecret: speech.accessKeySecret },
       { url: sample.url, voicePrefix: COSYVOICE_VOICE_PREFIX }
     );
-    return bindSpeakerId(voiceName, true);
+    return bindSpeakerId(reservation, voiceName, true);
   } catch (error) {
+		if (!isAmbiguousAllocationFailure(error)) await releaseAllocation(reservation);
     const message = error instanceof Error ? error.message : "";
     return NextResponse.json(
       {
@@ -213,22 +226,44 @@ async function deleteVoiceSample(id: string) {
   }
 }
 
-async function bindSpeakerId(speakerId: string, cloned: boolean) {
+async function reserveAllocation(): Promise<string | NextResponse> {
+	try {
+		return await reserveSpeechVoiceAllocation();
+	} catch (error) {
+		if (error instanceof SpeechVoiceAllocationError) {
+			const already = error.code === "VOICE_ALREADY_ALLOCATED";
+			const inProgress = error.code === "VOICE_ALLOCATION_IN_PROGRESS";
+			return NextResponse.json({
+				code: error.code,
+				message: already ? "音色已分配，每个账号仅可分配一次" : inProgress ? "音色正在分配，请勿重复提交" : "无法锁定音色分配资格，请确认已登录"
+			}, { status: already || inProgress ? 409 : 502 });
+		}
+		return NextResponse.json({ code: "VOICE_ALLOCATION_FAILED", message: "无法锁定音色分配资格，请稍后重试" }, { status: 502 });
+	}
+}
+
+async function releaseAllocation(token: string) {
+	try { await releaseSpeechVoiceAllocation(token); } catch { /* 保守保留服务端状态，禁止重复分配。 */ }
+}
+
+function isAmbiguousAllocationFailure(error: unknown) {
+	return error instanceof TypeError || (error instanceof DOMException && (error.name === "TimeoutError" || error.name === "AbortError"));
+}
+
+async function bindSpeakerId(allocationToken: string, speakerId: string, cloned: boolean) {
   try {
-    await saveSpeechSpeakerId(speakerId);
+    await completeSpeechVoiceAllocation(allocationToken, speakerId);
     return NextResponse.json({
-      speakerId,
       cloned,
       bound: true,
       enabled: true
     });
   } catch (error) {
-    if (error instanceof SpeechAccountBindError) {
+    if (error instanceof SpeechVoiceAllocationError) {
       return NextResponse.json(
         {
           code: error.code,
           message: error.message,
-          speakerId,
           cloned,
           bound: false,
           enabled: false
@@ -240,7 +275,6 @@ async function bindSpeakerId(speakerId: string, cloned: boolean) {
       {
         code: "VOICE_BIND_FAILED",
         message: "账号音色同步失败，请确认已登录桌面账号",
-        speakerId,
         cloned,
         bound: false,
         enabled: false

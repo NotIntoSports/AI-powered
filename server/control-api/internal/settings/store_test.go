@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -269,6 +271,54 @@ func TestListUserSpeechVoicesReturnsBoundAccounts(t *testing.T) {
 	}
 	if _, ok := listed[actor.ID]; ok {
 		t.Fatalf("admin without personal voice should be absent: %#v", listed)
+	}
+}
+
+func TestUserSpeechVoiceAllocationIsSingleUseAndConcurrentSafe(t *testing.T) {
+	pool := openSettingsTestPool(t)
+	store := NewStore(pool, mustBox(t))
+	ctx := context.Background()
+	actor := createSettingsUser(t, pool)
+
+	const attempts = 8
+	var wait sync.WaitGroup
+	wait.Add(attempts)
+	results := make(chan VoiceAllocation, attempts)
+	errorsSeen := make(chan error, attempts)
+	for range attempts {
+		go func() {
+			defer wait.Done()
+			allocation, err := store.ReserveUserSpeechVoice(ctx, actor.ID)
+			if err != nil {
+				errorsSeen <- err
+				return
+			}
+			results <- allocation
+		}()
+	}
+	wait.Wait()
+	close(results)
+	close(errorsSeen)
+	if len(results) != 1 {
+		t.Fatalf("successful reservations=%d, want 1", len(results))
+	}
+	allocation := <-results
+	if allocation.Status != VoiceAllocationAllocating || allocation.Token == "" {
+		t.Fatalf("allocation=%#v", allocation)
+	}
+	for err := range errorsSeen {
+		if !errors.Is(err, ErrVoiceAllocationInProgress) {
+			t.Fatalf("reserve error=%v", err)
+		}
+	}
+	if err := store.CompleteUserSpeechVoice(ctx, actor.ID, allocation.Token, "cosyvoice-vh-once001"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ReserveUserSpeechVoice(ctx, actor.ID); !errors.Is(err, ErrVoiceAlreadyAllocated) {
+		t.Fatalf("second reserve error=%v", err)
+	}
+	if err := store.PutUserSpeechSpeakerID(ctx, actor.ID, "cosyvoice-vh-twice02"); !errors.Is(err, ErrVoiceAlreadyAllocated) {
+		t.Fatalf("legacy overwrite error=%v", err)
 	}
 }
 

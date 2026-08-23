@@ -58,9 +58,11 @@ test("workspace keeps heavy meeting access off the main page but embeds the auto
   assert.match(alerts, /workspaceToastClose/);
   const styles = await readFile(new URL("../../app/styles.css", import.meta.url), "utf8");
   assert.match(styles, /\.workspaceToasts\s*\{[^}]*position:\s*fixed/s);
-  assert.match(settings, /RtcBridgeControl/);
+  assert.doesNotMatch(settings, /RtcBridgeControl/);
   assert.match(settings, /AudioRouteControl onReadyChange=\{handleVirtualAudioReady\}/);
-  assert.match(settings, /MeetingHandoffControl/);
+  assert.doesNotMatch(settings, /MeetingHandoffControl/);
+	const bridgeCard = await readFile(new URL("../../features/rtc/meeting-bridge-card.tsx", import.meta.url), "utf8");
+	assert.match(bridgeCard, /RtcBridgeControl/);
   assert.match(settings, /id="settings-output-mode"/);
   assert.match(settings, /virtualMode \? <VirtualCameraPreview/);
   assert.doesNotMatch(settings, /virtualMode && <SettingSection number="06"/);

@@ -786,8 +786,8 @@ paths:
         '503':
           $ref: '#/components/responses/SettingsUnavailable'
     patch:
-      operationId: patchClientSpeechSpeaker
-      summary: Persist a cloned speaker_id from the desktop client. Does not accept secrets.
+      operationId: updateClientVoiceAllocation
+      summary: Reserve, complete, or release the authenticated user's one-time cloned voice allocation.
       security:
         - bearerAuth: []
       requestBody:
@@ -797,9 +797,10 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [speakerId]
               properties:
+                action: {type: string, enum: [reserve, complete, release]}
                 speakerId: {type: string}
+                allocationToken: {type: string}
       responses:
         '200':
           description: Updated public speech settings.
@@ -808,11 +809,16 @@ paths:
               schema: {type: string, const: no-store}
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/PublicSpeechSettings'}
+              schema:
+                oneOf:
+                  - {$ref: '#/components/schemas/PublicSpeechSettings'}
+                  - {$ref: '#/components/schemas/VoiceAllocation'}
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Voice already allocated, allocation in progress, or token mismatch.
         '422':
           $ref: '#/components/responses/InvalidInputUnprocessable'
         '503':
@@ -1371,6 +1377,7 @@ components:
         configVersion: {type: integer}
         updatedAt: {type: string, format: date-time}
         updatedByUsername: {type: string}
+        voiceAllocationStatus: {type: string, enum: [unallocated, allocating, allocated]}
     ClientAISettings:
       type: object
       required: [configured, available, provider, baseUrl, model, enabled, apiKeyConfigured]
@@ -1573,6 +1580,12 @@ components:
             accessKeyId: {type: string, format: password}
             accessKeySecret: {type: string, format: password}
             aliyunToken: {type: string, format: password}
+    VoiceAllocation:
+      type: object
+      required: [status]
+      properties:
+        status: {type: string, enum: [unallocated, allocating, allocated]}
+        token: {type: string, description: Returned only after a successful reserve action.}
     PutSpeechSettingsRequest:
       type: object
       additionalProperties: false

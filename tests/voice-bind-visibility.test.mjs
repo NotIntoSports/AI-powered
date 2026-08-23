@@ -6,24 +6,27 @@ import test from "node:test";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-test("voice clone API surfaces account bind failures", () => {
+test("voice clone API reserves one account allocation before binding", () => {
   const route = readFileSync(join(root, "app", "api", "voice-clone", "route.ts"), "utf8");
-  assert.match(route, /SpeechAccountBindError/);
+  assert.match(route, /SpeechVoiceAllocationError/);
+	assert.match(route, /reserveAllocation/);
+	assert.match(route, /VOICE_ALREADY_ALLOCATED/);
   assert.match(route, /VOICE_BIND_FAILED/);
   assert.match(route, /bound: true/);
   assert.match(route, /bound: false/);
 });
 
-test("speech runtime no longer swallows account sync failures", () => {
+test("speech runtime exposes reserve complete and release allocation operations", () => {
   const runtime = readFileSync(join(root, "lib", "speech-runtime.ts"), "utf8");
-  assert.match(runtime, /class SpeechAccountBindError/);
-  assert.match(runtime, /throw new SpeechAccountBindError/);
+  assert.match(runtime, /reserveSpeechVoiceAllocation/);
+	assert.match(runtime, /completeSpeechVoiceAllocation/);
+	assert.match(runtime, /releaseSpeechVoiceAllocation/);
   assert.doesNotMatch(runtime, /\.catch\(\(\) => null\)/);
 });
 
 test("voice clone control shows bind success and sync failure copy", () => {
   const control = readFileSync(join(root, "features", "audio", "voice-clone-control.tsx"), "utf8");
-  assert.match(control, /刻录成功，已启用音色 ID/);
+  assert.match(control, /每个账号仅可分配一次/);
   assert.match(control, /VOICE_BIND_FAILED/);
   assert.match(control, /账号同步失败/);
 });

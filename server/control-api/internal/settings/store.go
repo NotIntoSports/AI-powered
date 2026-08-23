@@ -16,12 +16,15 @@ import (
 )
 
 var (
-	ErrInvalidInput     = errors.New("invalid settings input")
-	ErrMasterKeyMissing = secretbox.ErrUnavailable
-	ErrDecryptFailed    = secretbox.ErrCiphertext
-	ErrNotConfigured    = errors.New("settings are not configured")
-	ErrStore            = errors.New("settings store unavailable")
-	ErrRTCUnavailable   = errors.New("rtc provider is not available")
+	ErrInvalidInput              = errors.New("invalid settings input")
+	ErrMasterKeyMissing          = secretbox.ErrUnavailable
+	ErrDecryptFailed             = secretbox.ErrCiphertext
+	ErrNotConfigured             = errors.New("settings are not configured")
+	ErrStore                     = errors.New("settings store unavailable")
+	ErrRTCUnavailable            = errors.New("rtc provider is not available")
+	ErrVoiceAlreadyAllocated     = errors.New("voice already allocated")
+	ErrVoiceAllocationInProgress = errors.New("voice allocation in progress")
+	ErrVoiceAllocationToken      = errors.New("voice allocation token is invalid")
 )
 
 const (

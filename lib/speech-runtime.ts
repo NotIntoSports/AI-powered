@@ -4,7 +4,8 @@ import { z } from "zod";
 import { DEFAULT_ALIYUN_VOICE, type AliyunNlsAuth } from "./aliyun-nls";
 import { isCosyVoiceSpeakerId } from "./aliyun-cosyvoice";
 import {
-  fetchDesktopControlJson,
+	fetchDesktopControlJson,
+	fetchDesktopControlResult,
   localSettingsDirectory,
   unprotectLocalSecret
 } from "./runtime-config";
@@ -413,6 +414,58 @@ export async function saveSpeechSpeakerId(speakerId: string) {
     throw new SpeechAccountBindError();
   }
   return getSpeechRuntimeConfig();
+}
+
+export type VoiceAllocationStatus = "unallocated" | "allocating" | "allocated";
+
+export async function getSpeechVoiceAllocationStatus(): Promise<VoiceAllocationStatus> {
+	const result = await fetchDesktopControlResult<{ voiceAllocationStatus?: VoiceAllocationStatus }>("/api/v1/client/settings/speech");
+	if (!result.ok) return "unallocated";
+	return result.data?.voiceAllocationStatus || "unallocated";
+}
+
+export async function reserveSpeechVoiceAllocation() {
+	const result = await fetchDesktopControlResult<{ status?: VoiceAllocationStatus; token?: string }>("/api/v1/client/settings/speech", {
+		method: "PATCH",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ action: "reserve" }),
+		signal: AbortSignal.timeout(5_000)
+	});
+	if (!result.ok) throw new SpeechVoiceAllocationError(result.failure.code, result.failure.message);
+	const token = String(result.data?.token || "");
+	if (!token) throw new SpeechVoiceAllocationError("VOICE_ALLOCATION_TOKEN_INVALID");
+	return token;
+}
+
+export async function completeSpeechVoiceAllocation(token: string, speakerId: string) {
+	const trimmed = speakerId.trim();
+	const result = await fetchDesktopControlResult<{ speakerId?: string }>("/api/v1/client/settings/speech", {
+		method: "PATCH",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ action: "complete", allocationToken: token, speakerId: trimmed }),
+		signal: AbortSignal.timeout(5_000)
+	});
+	if (!result.ok) throw new SpeechVoiceAllocationError(result.failure.code, result.failure.message);
+	const current = (await getStoredSpeech()) ?? speechSettingsSchema.parse({});
+	await writeStoredSpeech({ ...current, speakerId: trimmed, disabled: false });
+	return getSpeechRuntimeConfig();
+}
+
+export async function releaseSpeechVoiceAllocation(token: string) {
+	const result = await fetchDesktopControlResult<{ status?: VoiceAllocationStatus }>("/api/v1/client/settings/speech", {
+		method: "PATCH",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ action: "release", allocationToken: token }),
+		signal: AbortSignal.timeout(5_000)
+	});
+	if (!result.ok) throw new SpeechVoiceAllocationError(result.failure.code, result.failure.message);
+}
+
+export class SpeechVoiceAllocationError extends Error {
+	constructor(readonly code: string, message = "") {
+		super(message);
+		this.name = "SpeechVoiceAllocationError";
+	}
 }
 
 export class SpeechAccountBindError extends Error {

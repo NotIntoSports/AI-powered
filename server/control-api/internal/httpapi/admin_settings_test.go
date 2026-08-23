@@ -12,18 +12,20 @@ import (
 )
 
 type fakeSettingsAdmin struct {
-	ai           settings.PublicAI
-	clientAI     settings.ClientAI
-	clientASR    settings.ClientASR
-	clientSpeech settings.ClientSpeech
-	speech       settings.PublicSpeech
-	rtc          settings.PublicRTC
-	storage      settings.PublicStorage
-	putAI        settings.AIInput
-	putRTC       settings.RTCInput
-	putSpeech    settings.SpeechInput
-	speakerID    string
-	listVoices   func() (map[string]settings.UserSpeechVoice, error)
+	ai               settings.PublicAI
+	clientAI         settings.ClientAI
+	clientASR        settings.ClientASR
+	clientSpeech     settings.ClientSpeech
+	speech           settings.PublicSpeech
+	rtc              settings.PublicRTC
+	storage          settings.PublicStorage
+	putAI            settings.AIInput
+	putRTC           settings.RTCInput
+	putSpeech        settings.SpeechInput
+	speakerID        string
+	allocationErr    error
+	allocationAction string
+	listVoices       func() (map[string]settings.UserSpeechVoice, error)
 }
 
 func (fake *fakeSettingsAdmin) GetRoles(context.Context) (settings.RoleProfiles, error) {
@@ -197,6 +199,34 @@ func (fake *fakeSettingsAdmin) PutClientSpeechSpeakerID(_ context.Context, userI
 		return settings.PublicSpeech{}, settings.ErrInvalidInput
 	}
 	return fake.speech, nil
+}
+
+func (fake *fakeSettingsAdmin) ReserveClientSpeechVoice(_ context.Context, userID string) (settings.VoiceAllocation, error) {
+	fake.allocationAction = "reserve"
+	if fake.allocationErr != nil {
+		return settings.VoiceAllocation{}, fake.allocationErr
+	}
+	if userID == "" {
+		return settings.VoiceAllocation{}, settings.ErrInvalidInput
+	}
+	return settings.VoiceAllocation{Status: settings.VoiceAllocationAllocating, Token: "allocation-token"}, nil
+}
+
+func (fake *fakeSettingsAdmin) CompleteClientSpeechVoice(_ context.Context, userID, token, speakerID string) (settings.PublicSpeech, error) {
+	fake.allocationAction = "complete"
+	if fake.allocationErr != nil {
+		return settings.PublicSpeech{}, fake.allocationErr
+	}
+	fake.speakerID = speakerID
+	return fake.speech, nil
+}
+
+func (fake *fakeSettingsAdmin) ReleaseClientSpeechVoice(_ context.Context, userID, token string) (settings.VoiceAllocation, error) {
+	fake.allocationAction = "release"
+	if fake.allocationErr != nil {
+		return settings.VoiceAllocation{}, fake.allocationErr
+	}
+	return settings.VoiceAllocation{Status: settings.VoiceAllocationUnallocated}, nil
 }
 
 func (fake *fakeSettingsAdmin) ListUserSpeechVoices(context.Context) (map[string]settings.UserSpeechVoice, error) {
@@ -586,4 +616,24 @@ func TestClientSpeechPatchSpeakerIDRequiresDesktop(t *testing.T) {
 	if admin.speakerID != "custom_zh_interviewer" {
 		t.Fatalf("speakerID=%q", admin.speakerID)
 	}
+}
+
+func TestClientSpeechVoiceAllocationReturnsStableConflictCodes(t *testing.T) {
+	admin := &fakeSettingsAdmin{allocationErr: settings.ErrVoiceAlreadyAllocated}
+	authentication := &fakeAuthentication{authenticate: func(rawToken, purpose string) (AuthenticatedSession, error) {
+		if rawToken != "desktop-token" || purpose != sessions.PurposeDesktop {
+			return AuthenticatedSession{}, ErrUnauthenticated
+		}
+		return AuthenticatedSession{User: users.User{ID: "op", Role: users.RoleOperator, Status: users.StatusActive}, Session: sessions.Session{ID: "desktop", UserID: "op", Purpose: sessions.PurposeDesktop}, RawToken: rawToken}, nil
+	}}
+	router := NewRouter(Dependencies{Authentication: authentication, SettingsAdmin: admin})
+	response := performRequest(t, router, http.MethodPatch, "/api/v1/client/settings/speech", `{"action":"reserve"}`, map[string]string{
+		"Authorization": "Bearer desktop-token", "Content-Type": "application/json",
+	})
+	assertAPIError(t, response, http.StatusConflict, "VOICE_ALREADY_ALLOCATED")
+	admin.allocationErr = settings.ErrVoiceAllocationInProgress
+	response = performRequest(t, router, http.MethodPatch, "/api/v1/client/settings/speech", `{"action":"reserve"}`, map[string]string{
+		"Authorization": "Bearer desktop-token", "Content-Type": "application/json",
+	})
+	assertAPIError(t, response, http.StatusConflict, "VOICE_ALLOCATION_IN_PROGRESS")
 }

@@ -36,6 +36,12 @@ type SettingsAdmin interface {
 	PutRoles(ctx context.Context, actor users.User, requestID string, input []settings.RoleProfileInput) (settings.RoleProfiles, error)
 }
 
+type voiceAllocationAdmin interface {
+	ReserveClientSpeechVoice(ctx context.Context, userID string) (settings.VoiceAllocation, error)
+	CompleteClientSpeechVoice(ctx context.Context, userID, token, speakerID string) (settings.PublicSpeech, error)
+	ReleaseClientSpeechVoice(ctx context.Context, userID, token string) (settings.VoiceAllocation, error)
+}
+
 type aiSettingsRequest struct {
 	Provider          string `json:"provider"`
 	BaseURL           string `json:"baseUrl"`
@@ -388,13 +394,41 @@ func (handler *adminSettingsHandler) patchClientSpeech(w http.ResponseWriter, re
 		return
 	}
 	var input struct {
-		SpeakerID string `json:"speakerId"`
+		SpeakerID       string `json:"speakerId"`
+		Action          string `json:"action"`
+		AllocationToken string `json:"allocationToken"`
 	}
 	if err := decodeBoundedJSON(w, request, &input); err != nil {
 		writeJSONDecodeError(w, request, err)
 		return
 	}
-	public, err := handler.admin.PutClientSpeechSpeakerID(request.Context(), authenticated.User.ID, strings.TrimSpace(input.SpeakerID))
+	var result any
+	var err error
+	allocationAdmin, supportsAllocation := handler.admin.(voiceAllocationAdmin)
+	switch strings.TrimSpace(input.Action) {
+	case "reserve":
+		if !supportsAllocation {
+			err = settings.ErrStore
+		} else {
+			result, err = allocationAdmin.ReserveClientSpeechVoice(request.Context(), authenticated.User.ID)
+		}
+	case "complete":
+		if !supportsAllocation {
+			err = settings.ErrStore
+		} else {
+			result, err = allocationAdmin.CompleteClientSpeechVoice(request.Context(), authenticated.User.ID, strings.TrimSpace(input.AllocationToken), strings.TrimSpace(input.SpeakerID))
+		}
+	case "release":
+		if !supportsAllocation {
+			err = settings.ErrStore
+		} else {
+			result, err = allocationAdmin.ReleaseClientSpeechVoice(request.Context(), authenticated.User.ID, strings.TrimSpace(input.AllocationToken))
+		}
+	case "":
+		result, err = handler.admin.PutClientSpeechSpeakerID(request.Context(), authenticated.User.ID, strings.TrimSpace(input.SpeakerID))
+	default:
+		err = settings.ErrInvalidInput
+	}
 	if errors.Is(err, settings.ErrNotConfigured) {
 		writeAPIError(w, request, http.StatusServiceUnavailable, "SPEECH_UNAVAILABLE", "请先在管理后台配置豆包语音")
 		return
@@ -402,7 +436,7 @@ func (handler *adminSettingsHandler) patchClientSpeech(w http.ResponseWriter, re
 	if !writeSettingsError(w, request, err) {
 		return
 	}
-	writeJSON(w, http.StatusOK, public)
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (handler *adminSettingsHandler) testSpeech(w http.ResponseWriter, request *http.Request) {
@@ -498,6 +532,12 @@ func writeSettingsError(w http.ResponseWriter, request *http.Request, err error)
 		return true
 	}
 	switch {
+	case errors.Is(err, settings.ErrVoiceAlreadyAllocated):
+		writeAPIError(w, request, http.StatusConflict, "VOICE_ALREADY_ALLOCATED", "voice has already been allocated")
+	case errors.Is(err, settings.ErrVoiceAllocationInProgress):
+		writeAPIError(w, request, http.StatusConflict, "VOICE_ALLOCATION_IN_PROGRESS", "voice allocation is already in progress")
+	case errors.Is(err, settings.ErrVoiceAllocationToken):
+		writeAPIError(w, request, http.StatusConflict, "VOICE_ALLOCATION_TOKEN_INVALID", "voice allocation token is invalid")
 	case errors.Is(err, settings.ErrInvalidInput):
 		writeAPIError(w, request, http.StatusUnprocessableEntity, "INVALID_INPUT", "settings input is invalid")
 	case errors.Is(err, settings.ErrNotConfigured), errors.Is(err, settings.ErrRTCUnavailable):

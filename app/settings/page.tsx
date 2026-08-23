@@ -4,7 +4,6 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { AudioRouteControl } from "../../features/audio/audio-route-control";
 import { VoiceCloneControl } from "../../features/audio/voice-clone-control";
 import { describeTtsError } from "../../features/audio/tts-error";
-import { MeetingHandoffControl } from "../../features/meeting/meeting-handoff-control";
 import { ObsControl } from "../../features/obs/obs-control";
 import { VirtualCameraPreview } from "../../features/obs/virtual-camera-preview";
 import { getInterviewReadiness } from "../../features/readiness/interview-readiness";
@@ -19,7 +18,6 @@ import { AVATAR_ACCEPT, classifyAvatarSelection, type AvatarSelectionResult } fr
 import { AppChrome } from "../../features/settings/app-chrome";
 import { AppNavigation } from "../../features/settings/app-navigation";
 import { readControlSession } from "../../features/auth/control-session";
-import { RtcBridgeControl } from "../../features/rtc/rtc-bridge-control";
 import {
   describeNetwork,
   getNetworkQuality,
@@ -96,7 +94,6 @@ export default function SettingsPage() {
   }, []);
   const handleCameraVerified = useCallback((ready: boolean) => { if (!snapshotLoadedRef.current) return; setVirtualCameraVerified(ready); setReadinessVerification("virtualCameraVerified", ready); }, []);
   const handleVirtualAudioReady = useCallback((ready: boolean) => { if (!snapshotLoadedRef.current) return; setVirtualAudioReady(ready); setReadinessVerification("virtualAudioReady", ready); }, []);
-  const handleMeetingPreviewConfirmed = useCallback((ready: boolean) => { if (!snapshotLoadedRef.current) return; setMeetingPreviewConfirmed(ready); setReadinessVerification("meetingPreviewConfirmed", ready); }, []);
 
   const speechReady = (diagnostics.sapiConfigured || (diagnostics.ttsSupported && diagnostics.voiceCount > 0)) && diagnostics.ttsState !== "error" && ((speechTestRequestedAt > 0 && diagnostics.lastSpeechAt >= speechTestRequestedAt) || getSnapshotReadiness(loadReadinessSnapshot()).speechReady);
 
@@ -268,25 +265,6 @@ export default function SettingsPage() {
           {virtualMode ? <VirtualCameraPreview active={virtualCameraActive} onVerifiedChange={handleCameraVerified} /> : null}
           <AudioRouteControl onReadyChange={handleVirtualAudioReady} />
         </div>
-      </SettingSection>
-      <SettingSection number={virtualMode ? "07" : "05"} title="会议软件确认" detail="在入会预览中完成最后一跳确认。">
-        <MeetingHandoffControl
-          outputMode={outputMode}
-          prerequisitesReady={
-            virtualMode
-              ? obsConnected && virtualCameraActive && virtualCameraVerified && virtualAudioReady
-              : virtualAudioReady
-          }
-          onConfirmedChange={handleMeetingPreviewConfirmed}
-        />
-      </SettingSection>
-      <SettingSection
-        number={virtualMode ? "08" : "06"}
-        title="会议音频桥接"
-        detail="按会议进程捕获对方声音，用于实时字幕；本机是否播放由工作台监听开关控制。"
-        id="settings-rtc-bridge-section"
-      >
-        <RtcBridgeControl />
       </SettingSection>
     </section>
   </main>;

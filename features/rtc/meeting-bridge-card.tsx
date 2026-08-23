@@ -13,6 +13,7 @@ import {
 import { getAutoBridgeStatus, subscribeAutoBridgeStatus } from "./auto-bridge-controller";
 import { getVirtualAudioSetupStatus, subscribeVirtualAudioSetup } from "../audio/virtual-audio-auto-setup";
 import { getSnapshotReadiness, loadReadinessSnapshot } from "../readiness/readiness-snapshot";
+import { RtcBridgeControl } from "./rtc-bridge-control";
 
 /** 自动预选：挂载后探测受支持会议进程，用户尚未选择时替其武装。 */
 const PRESELECT_MAX_ROUNDS = 6;
@@ -25,6 +26,7 @@ export function MeetingBridgeCard() {
   const [audioSetup, setAudioSetup] = useState(getVirtualAudioSetupStatus);
   const [virtualAudioReady, setVirtualAudioReady] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [manualOpen, setManualOpen] = useState(false);
   const userSelectedRef = useRef(false);
   const selectRef = useRef<HTMLDivElement>(null);
 
@@ -113,6 +115,7 @@ export function MeetingBridgeCard() {
   const audioNeedsAttention = audioSetup.state === "failed" || audioSetup.state === "reboot-pending";
 
   return (
+    <>
     <article className="card" id="workspace-meeting-bridge">
       <div className="cardHeading">
         <h2>会议接入</h2>
@@ -186,8 +189,13 @@ export function MeetingBridgeCard() {
         </p>
       ) : null}
       {autoStatus.state === "needs-manual" || audioNeedsAttention ? (
-        <a className="textLink" href="/settings#settings-rtc-bridge-section">打开设置处理 →</a>
+        <button className="secondary" type="button" onClick={() => setManualOpen(true)}>在工作台手动处理</button>
+      ) : null}
+      {!manualOpen && autoStatus.state !== "needs-manual" ? (
+        <button className="ghost" type="button" onClick={() => setManualOpen(true)}>手动桥接</button>
       ) : null}
     </article>
+    {manualOpen || autoStatus.state === "needs-manual" ? <RtcBridgeControl /> : null}
+    </>
   );
 }

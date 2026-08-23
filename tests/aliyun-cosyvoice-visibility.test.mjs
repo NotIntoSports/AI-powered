@@ -28,7 +28,7 @@ test("voice clone route auto-assigns aliyun voice without user-facing IDs", () =
   // 豆包分支保留作为备选。
   assert.match(route, /VOLCENGINE_CLONE_URL/);
   // 复刻音色复用现有账号绑定。
-  assert.match(route, /bindSpeakerId\(voiceName, true\)/);
+  assert.match(route, /bindSpeakerId\(reservation, voiceName, true\)/);
 });
 
 test("bound cosyvoice voice is used on the aliyun TTS line", () => {

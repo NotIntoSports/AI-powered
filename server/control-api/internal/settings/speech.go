@@ -2,6 +2,8 @@ package settings
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"time"
@@ -12,98 +14,99 @@ import (
 )
 
 const (
-	defaultTTSResourceID   = "seed-icl-2.0"
-	defaultASRResourceID   = "volc.bigasr.auc_turbo"
+	defaultTTSResourceID     = "seed-icl-2.0"
+	defaultASRResourceID     = "volc.bigasr.auc_turbo"
 	SpeechProviderVolcengine = "volcengine"
 	SpeechProviderAliyun     = "aliyun"
 )
 
 type SpeechRecord struct {
-	AppID                           string
-	SpeakerID                       string
-	TTSResourceID                   string
-	ASRResourceID                   string
-	Enabled                         bool
-	EncryptedAPIKey                 []byte
-	EncryptedAccessToken            []byte
-	EncryptedSecretKey              []byte
-	KeyVersion                      int
-	ConfigVersion                   int
-	UpdatedByUserID                 string
-	UpdatedByUsername               string
-	CreatedAt                       time.Time
-	UpdatedAt                       time.Time
-	ActiveProvider                  string
-	AliyunAppKey                    string
-	AliyunVoice                     string
-	AliyunGateway                   string
-	AliyunEnabled                   bool
-	EncryptedAliyunAccessKeyID      []byte
-	EncryptedAliyunAccessKeySecret  []byte
-	EncryptedAliyunToken            []byte
+	AppID                          string
+	SpeakerID                      string
+	TTSResourceID                  string
+	ASRResourceID                  string
+	Enabled                        bool
+	EncryptedAPIKey                []byte
+	EncryptedAccessToken           []byte
+	EncryptedSecretKey             []byte
+	KeyVersion                     int
+	ConfigVersion                  int
+	UpdatedByUserID                string
+	UpdatedByUsername              string
+	CreatedAt                      time.Time
+	UpdatedAt                      time.Time
+	ActiveProvider                 string
+	AliyunAppKey                   string
+	AliyunVoice                    string
+	AliyunGateway                  string
+	AliyunEnabled                  bool
+	EncryptedAliyunAccessKeyID     []byte
+	EncryptedAliyunAccessKeySecret []byte
+	EncryptedAliyunToken           []byte
 }
 
 type SpeechInput struct {
-	AppID                    string
-	SpeakerID                string
-	TTSResourceID            string
-	ASRResourceID            string
-	APIKey                   string
-	AccessToken              string
-	SecretKey                string
-	ClearAPIKey              bool
-	ClearAccessToken         bool
-	ClearSecretKey           bool
-	Enabled                  *bool
-	ActiveProvider           string
-	AliyunAppKey             string
-	AliyunVoice              string
-	AliyunGateway            string
-	AliyunEnabled            *bool
-	AliyunAccessKeyID        string
-	AliyunAccessKeySecret    string
-	AliyunToken              string
-	ClearAliyunAccessKeyID   bool
+	AppID                      string
+	SpeakerID                  string
+	TTSResourceID              string
+	ASRResourceID              string
+	APIKey                     string
+	AccessToken                string
+	SecretKey                  string
+	ClearAPIKey                bool
+	ClearAccessToken           bool
+	ClearSecretKey             bool
+	Enabled                    *bool
+	ActiveProvider             string
+	AliyunAppKey               string
+	AliyunVoice                string
+	AliyunGateway              string
+	AliyunEnabled              *bool
+	AliyunAccessKeyID          string
+	AliyunAccessKeySecret      string
+	AliyunToken                string
+	ClearAliyunAccessKeyID     bool
 	ClearAliyunAccessKeySecret bool
-	ClearAliyunToken         bool
-	TestProvider             string
+	ClearAliyunToken           bool
+	TestProvider               string
 }
 
 type PublicSpeech struct {
-	Configured                     bool       `json:"configured"`
-	Available                      bool       `json:"available"`
-	TTSAvailable                   bool       `json:"ttsAvailable"`
-	ASRAvailable                   bool       `json:"asrAvailable"`
-	ActiveProvider                 string     `json:"activeProvider"`
-	AppID                          string     `json:"appId"`
-	SpeakerID                      string     `json:"speakerId"`
-	TTSResourceID                  string     `json:"ttsResourceId"`
-	ASRResourceID                  string     `json:"asrResourceId"`
-	APIKeyConfigured               bool       `json:"apiKeyConfigured"`
-	AccessTokenConfigured          bool       `json:"accessTokenConfigured"`
-	SecretKeyConfigured            bool       `json:"secretKeyConfigured"`
-	Enabled                        bool       `json:"enabled"`
-	VolcengineAvailable            bool       `json:"volcengineAvailable"`
-	AliyunAvailable                bool       `json:"aliyunAvailable"`
-	AliyunAppKey                   string     `json:"aliyunAppKey"`
-	AliyunVoice                    string     `json:"aliyunVoice"`
-	AliyunGateway                  string     `json:"aliyunGateway"`
-	AliyunEnabled                  bool       `json:"aliyunEnabled"`
-	AliyunAccessKeyIDConfigured    bool       `json:"aliyunAccessKeyIdConfigured"`
-	AliyunAccessKeySecretConfigured bool      `json:"aliyunAccessKeySecretConfigured"`
-	AliyunTokenConfigured          bool       `json:"aliyunTokenConfigured"`
-	ConfigVersion                  int        `json:"configVersion"`
-	UpdatedAt                      *time.Time `json:"updatedAt,omitempty"`
-	UpdatedByUsername              string     `json:"updatedByUsername,omitempty"`
+	Configured                      bool       `json:"configured"`
+	Available                       bool       `json:"available"`
+	TTSAvailable                    bool       `json:"ttsAvailable"`
+	ASRAvailable                    bool       `json:"asrAvailable"`
+	ActiveProvider                  string     `json:"activeProvider"`
+	AppID                           string     `json:"appId"`
+	SpeakerID                       string     `json:"speakerId"`
+	TTSResourceID                   string     `json:"ttsResourceId"`
+	ASRResourceID                   string     `json:"asrResourceId"`
+	APIKeyConfigured                bool       `json:"apiKeyConfigured"`
+	AccessTokenConfigured           bool       `json:"accessTokenConfigured"`
+	SecretKeyConfigured             bool       `json:"secretKeyConfigured"`
+	Enabled                         bool       `json:"enabled"`
+	VolcengineAvailable             bool       `json:"volcengineAvailable"`
+	AliyunAvailable                 bool       `json:"aliyunAvailable"`
+	AliyunAppKey                    string     `json:"aliyunAppKey"`
+	AliyunVoice                     string     `json:"aliyunVoice"`
+	AliyunGateway                   string     `json:"aliyunGateway"`
+	AliyunEnabled                   bool       `json:"aliyunEnabled"`
+	AliyunAccessKeyIDConfigured     bool       `json:"aliyunAccessKeyIdConfigured"`
+	AliyunAccessKeySecretConfigured bool       `json:"aliyunAccessKeySecretConfigured"`
+	AliyunTokenConfigured           bool       `json:"aliyunTokenConfigured"`
+	ConfigVersion                   int        `json:"configVersion"`
+	UpdatedAt                       *time.Time `json:"updatedAt,omitempty"`
+	UpdatedByUsername               string     `json:"updatedByUsername,omitempty"`
+	VoiceAllocationStatus           string     `json:"voiceAllocationStatus,omitempty"`
 }
 
 type ClientSpeech struct {
 	PublicSpeech
-	APIKey            string `json:"apiKey,omitempty"`
-	AccessToken       string `json:"accessToken,omitempty"`
-	AccessKeyID       string `json:"accessKeyId,omitempty"`
-	AccessKeySecret   string `json:"accessKeySecret,omitempty"`
-	AliyunToken       string `json:"aliyunToken,omitempty"`
+	APIKey          string `json:"apiKey,omitempty"`
+	AccessToken     string `json:"accessToken,omitempty"`
+	AccessKeyID     string `json:"accessKeyId,omitempty"`
+	AccessKeySecret string `json:"accessKeySecret,omitempty"`
+	AliyunToken     string `json:"aliyunToken,omitempty"`
 }
 
 type SpeechTestResult struct {
@@ -324,6 +327,107 @@ type UserSpeechVoice struct {
 	UpdatedAt time.Time
 }
 
+const (
+	VoiceAllocationUnallocated = "unallocated"
+	VoiceAllocationAllocating  = "allocating"
+	VoiceAllocationAllocated   = "allocated"
+)
+
+type VoiceAllocation struct {
+	Status string `json:"status"`
+	Token  string `json:"token,omitempty"`
+}
+
+func allocationToken() (string, error) {
+	value := make([]byte, 24)
+	if _, err := rand.Read(value); err != nil {
+		return "", ErrStore
+	}
+	return hex.EncodeToString(value), nil
+}
+
+func (s *Store) GetUserSpeechAllocation(ctx context.Context, userID string) (VoiceAllocation, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return VoiceAllocation{}, ErrInvalidInput
+	}
+	var status string
+	err := s.db.QueryRow(ctx, `select allocation_status from user_speech_voices where user_id = $1`, userID).Scan(&status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return VoiceAllocation{Status: VoiceAllocationUnallocated}, nil
+	}
+	if err != nil {
+		return VoiceAllocation{}, ErrStore
+	}
+	return VoiceAllocation{Status: strings.TrimSpace(status)}, nil
+}
+
+func (s *Store) ReserveUserSpeechVoice(ctx context.Context, userID string) (VoiceAllocation, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return VoiceAllocation{}, ErrInvalidInput
+	}
+	token, err := allocationToken()
+	if err != nil {
+		return VoiceAllocation{}, err
+	}
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	result, err := s.db.Exec(ctx, `
+		insert into user_speech_voices (user_id, speaker_id, updated_at, allocation_status, allocation_token, allocation_started_at)
+		values ($1, '', $2, 'allocating', $3, $2)
+		on conflict (user_id) do update set allocation_status = 'allocating', allocation_token = $3,
+			allocation_started_at = $2, updated_at = $2
+		where user_speech_voices.allocation_status = 'unallocated'
+	`, userID, now, token)
+	if err != nil {
+		return VoiceAllocation{}, ErrStore
+	}
+	if result.RowsAffected() == 1 {
+		return VoiceAllocation{Status: VoiceAllocationAllocating, Token: token}, nil
+	}
+	current, err := s.GetUserSpeechAllocation(ctx, userID)
+	if err != nil {
+		return VoiceAllocation{}, err
+	}
+	if current.Status == VoiceAllocationAllocated {
+		return VoiceAllocation{}, ErrVoiceAlreadyAllocated
+	}
+	return VoiceAllocation{}, ErrVoiceAllocationInProgress
+}
+
+func (s *Store) CompleteUserSpeechVoice(ctx context.Context, userID, token, speakerID string) error {
+	userID, token, speakerID = strings.TrimSpace(userID), strings.TrimSpace(token), strings.TrimSpace(speakerID)
+	if userID == "" || token == "" || !validSpeakerID(speakerID) {
+		return ErrInvalidInput
+	}
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	result, err := s.db.Exec(ctx, `update user_speech_voices set speaker_id=$3, allocation_status='allocated',
+		allocation_token=null, allocation_started_at=null, updated_at=$4
+		where user_id=$1 and allocation_status='allocating' and allocation_token=$2`, userID, token, speakerID, now)
+	if err != nil {
+		return ErrStore
+	}
+	if result.RowsAffected() != 1 {
+		return ErrVoiceAllocationToken
+	}
+	return nil
+}
+
+func (s *Store) ReleaseUserSpeechVoice(ctx context.Context, userID, token string) error {
+	userID, token = strings.TrimSpace(userID), strings.TrimSpace(token)
+	if userID == "" || token == "" {
+		return ErrInvalidInput
+	}
+	result, err := s.db.Exec(ctx, `delete from user_speech_voices where user_id=$1 and allocation_status='allocating' and allocation_token=$2`, userID, token)
+	if err != nil {
+		return ErrStore
+	}
+	if result.RowsAffected() != 1 {
+		return ErrVoiceAllocationToken
+	}
+	return nil
+}
+
 func (s *Store) GetUserSpeechSpeakerID(ctx context.Context, userID string) (string, error) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -383,15 +487,26 @@ func (s *Store) PutUserSpeechSpeakerID(ctx context.Context, userID, speakerID st
 		return err
 	}
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	_, err := s.db.Exec(ctx, `
-		insert into user_speech_voices (user_id, speaker_id, updated_at)
-		values ($1, $2, $3)
-		on conflict (user_id) do update set
-			speaker_id = excluded.speaker_id,
+	result, err := s.db.Exec(ctx, `
+		insert into user_speech_voices (user_id, speaker_id, updated_at, allocation_status)
+		values ($1, $2, $3, 'allocated')
+		on conflict (user_id) do update set speaker_id = excluded.speaker_id,
+			allocation_status = 'allocated', allocation_token = null, allocation_started_at = null,
 			updated_at = excluded.updated_at
+		where user_speech_voices.allocation_status = 'unallocated'
 	`, userID, normalized, now)
 	if err != nil {
 		return ErrStore
+	}
+	if result.RowsAffected() != 1 {
+		allocation, getErr := s.GetUserSpeechAllocation(ctx, userID)
+		if getErr != nil {
+			return getErr
+		}
+		if allocation.Status == VoiceAllocationAllocated {
+			return ErrVoiceAlreadyAllocated
+		}
+		return ErrVoiceAllocationInProgress
 	}
 	return nil
 }

@@ -22,6 +22,7 @@ type VoiceCloneStatus = {
   provider?: string;
   cloned?: boolean;
   enabled?: boolean;
+  voiceAllocationStatus?: "unallocated" | "allocating" | "allocated";
 };
 
 function isCosyVoiceId(speakerId: string) {
@@ -70,7 +71,8 @@ export function VoiceCloneControl() {
         speakerId,
         provider: String(data.provider || (speakerId ? (isCosyVoiceId(speakerId) ? "aliyun" : "volcengine") : "")),
         cloned: Boolean(data.cloned || speakerId),
-        enabled: Boolean(data.enabled || speakerId)
+        enabled: Boolean(data.enabled || speakerId),
+        voiceAllocationStatus: speakerId ? "allocated" : (data.voiceAllocationStatus || "unallocated")
       });
       if (speakerId) setPastedId(speakerId);
     } catch {
@@ -89,6 +91,7 @@ export function VoiceCloneControl() {
   }
 
   async function startRecording() {
+    if (status.voiceAllocationStatus !== "unallocated") return;
     if (!navigator.mediaDevices?.getUserMedia) {
       setMessage("当前浏览器不支持麦克风录音，请使用最新版 Edge 或 Chrome。");
       return;
@@ -183,6 +186,10 @@ export function VoiceCloneControl() {
   }
 
   async function cloneVoice() {
+    if (status.voiceAllocationStatus !== "unallocated") {
+      setMessage("音色已分配，每个账号仅可分配一次。");
+      return;
+    }
     if (!audioBase64) {
       setMessage("请先录一段 8–25 秒的朗读。");
       return;
@@ -206,6 +213,12 @@ export function VoiceCloneControl() {
         enabled?: boolean;
       };
       if (!response.ok) {
+        if (data.code === "VOICE_ALREADY_ALLOCATED" || data.code === "VOICE_ALLOCATION_IN_PROGRESS") {
+          setMessageKind("error");
+          setMessage(data.message || "音色已分配或正在分配，请勿重复提交。");
+          await refreshStatus();
+          return;
+        }
         if (data.code === "VOICE_BIND_FAILED") {
           const speakerId = String(data.speakerId || "");
           if (speakerId) {
@@ -244,7 +257,7 @@ export function VoiceCloneControl() {
           ? "刻录成功，已绑定本账号。"
           : isCosyVoiceId(speakerId)
             ? "刻录成功，已自动为你分配专属音色，可点试听。"
-            : `刻录成功，已启用音色 ID：${speakerId}`
+            : "刻录成功，已启用本账号专属音色。"
       );
       await refreshStatus(speakerId);
     } catch {
@@ -291,7 +304,7 @@ export function VoiceCloneControl() {
         provider: "volcengine"
       }));
       setMessageKind("success");
-      setMessage(`已启用音色 ID：${data.speakerId || speakerId}，可点试听。`);
+      setMessage("已启用本账号专属音色，可点试听。");
       await refreshStatus(String(data.speakerId || speakerId));
     } catch {
       setMessage("无法保存音色 ID。");
@@ -335,10 +348,12 @@ export function VoiceCloneControl() {
       <div className="cardHeading">
         <h2>助手声音刻录</h2>
         <span className={status.cloned || status.enabled ? "ready" : ""}>
-          {status.cloned && status.speakerId
-            ? isCosyVoiceId(status.speakerId)
+          {status.voiceAllocationStatus === "allocating"
+            ? "音色正在分配，请勿重复提交"
+            : status.voiceAllocationStatus === "allocated"
               ? "已启用你的专属音色"
-              : `已启用本账号音色 ${status.speakerId}`
+            : status.cloned && status.speakerId
+            ? "已启用你的专属音色"
             : status.provider === "aliyun"
               ? "阿里云语音已配置，待刻录（将自动分配专属音色）"
               : status.available
@@ -346,6 +361,19 @@ export function VoiceCloneControl() {
                 : "请先在管理后台配置豆包语音，或在本机配置阿里云语音"}
         </span>
       </div>
+      {status.voiceAllocationStatus === "allocated" ? (
+        <>
+          <p className="voiceCloneTips">音色已分配，每个账号仅可分配一次。你可以继续试听当前专属音色。</p>
+          <div className="voiceCloneActions">
+            <button className="secondary" type="button" disabled={testing} onClick={() => void previewTts()}>
+              {testing ? "试听中…" : "试听 TTS"}
+            </button>
+          </div>
+          <p className={`modelSettingsMessage ${messageKind === "success" ? "voiceCloneSuccess" : ""}`} aria-live="polite">{message}</p>
+        </>
+      ) : status.voiceAllocationStatus === "allocating" ? (
+        <p className="modelSettingsMessage" aria-live="polite">音色分配结果正在确认。为避免重复占用音色位置，本账号暂不能再次提交刻录。</p>
+      ) : <>
       <p className="voiceCloneTips">安静环境、用真实麦克风、语速自然，不要念成播音腔。朗读稿不可改，以保证复刻质量。</p>
       <blockquote className="voiceCloneScript">{VOICE_CLONE_SCRIPT}</blockquote>
       <p className="fileMeta">已录 {seconds.toFixed(1)} 秒 · 有效范围 {CLONE_MIN_SECONDS}–{CLONE_MAX_SECONDS} 秒</p>
@@ -372,6 +400,7 @@ export function VoiceCloneControl() {
         <button className="secondary" type="button" disabled={busy} onClick={() => void savePastedId()}>保存音色 ID</button>
       </details>
       <p className={`modelSettingsMessage ${messageKind === "success" ? "voiceCloneSuccess" : ""}`} aria-live="polite">{message}</p>
+      </>}
     </article>
   );
 }
