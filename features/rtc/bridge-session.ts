@@ -30,6 +30,7 @@ export type BridgeSessionEvents = {
   onStatus(message: string): void;
   onLevel(peak: number): void;
   onProcessExited(): void;
+  onTransportState(state: "reconnecting" | "connected" | "disconnected", reason?: string): void;
 };
 export type BridgeSessionHandle = { owner: BridgeSessionOwner; roomId: string; provider: SubtitleProvider };
 
@@ -174,7 +175,8 @@ export async function startBridgeSession(
           roomId,
           userId: token.userId || userId,
           appId: token.appId,
-          url: token.url
+          url: token.url,
+          onConnectionStateChange: (state, reason) => events.onTransportState(state, reason)
         });
       } catch (error) {
         console.error(`[bridge] transport connect failed provider=${activeProvider} after=${Date.now() - connectStartedAt}ms`, error);

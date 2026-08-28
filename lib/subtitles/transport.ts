@@ -12,6 +12,10 @@ export type SubtitleConnectConfig = {
   userId: string;
   appId?: string;
   url?: string;
+  onConnectionStateChange?: (
+    state: "reconnecting" | "connected" | "disconnected",
+    reason?: string
+  ) => void;
 };
 
 export type SubtitleTransport = {

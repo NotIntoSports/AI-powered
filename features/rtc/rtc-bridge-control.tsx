@@ -76,7 +76,14 @@ export function RtcBridgeControl() {
       const handle = await startBridgeSession(pid, "manual", "interview", {
         onStatus: setStatus,
         onLevel: (peak) => setStatus(`${providerLabel(handle.provider)} 运行中 · 对方音量 ${Math.round(peak * 100)}%`),
-        onProcessExited: () => void stop()
+        onProcessExited: () => void stop(),
+        onTransportState: (state, reason) => {
+          if (state === "reconnecting") setStatus("网络连接波动，正在重连…");
+          if (state === "disconnected") {
+            setStatus(`实时字幕连接已断开${reason ? `：${reason}` : ""}`);
+            void stopBridgeSession().finally(() => setRunning(false));
+          }
+        }
       });
       setProvider(handle.provider);
       setRunning(true);

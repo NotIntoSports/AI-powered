@@ -7,6 +7,7 @@ import {
   initialAutoBridgeMachine,
   recordAttempt,
   recordCaptured,
+  recordCapturedExit,
   recordFailure,
   type AutoBridgeMachine
 } from "./auto-bridge-decision.ts";
@@ -24,6 +25,7 @@ import {
   subscribeAutoBridgeStore,
   MEETING_SOFTWARE_LABELS
 } from "./auto-bridge-store.ts";
+import { emitPipelineEvent } from "../diagnostics/pipeline-log.ts";
 
 export type AutoBridgeStatus = {
   text: string;
@@ -58,6 +60,27 @@ export function AutoBridgeController() {
     let busy = false;
     let disposed = false;
     let pendingRetick = false;
+    let recoverySource: "process-exited" | "transport-disconnected" | null = null;
+
+    async function recoverCapturedBridge(
+      pid: number,
+      source: "process-exited" | "transport-disconnected",
+      reason: string = source
+    ) {
+      if (disposed || machine.capturedPid !== pid) return;
+      const previous = getBridgeSessionHandle();
+      machine = recordCapturedExit(machine, pid);
+      recoverySource = source;
+      publishStatus({ text: "桥接已中断，正在重新检测…", state: "starting" });
+      console.warn(`[auto-bridge] recovery source=${source} pid=${pid} roomId=${previous?.roomId || "unknown"} reason=${reason}`);
+      void emitPipelineEvent({
+        event: "bridge.recovery-started",
+        traceId: previous?.roomId,
+        fields: { source, reason, pid, status: "reconnecting" }
+      });
+      await stopBridgeSession();
+      if (!disposed) await tick();
+    }
 
     async function tick() {
       if (disposed) return;
@@ -89,7 +112,11 @@ export function AutoBridgeController() {
         machine = decision.machine;
         const action = decision.action;
         if (action === "idle") { publishStatus({ text: "已关闭", state: "off" }); return; }
-        if (action === "waiting") { publishStatus({ text: `等待中（每5秒检测 ${MEETING_SOFTWARE_LABELS[software] || software}）`, state: "waiting" }); return; }
+        if (action === "waiting") {
+          recoverySource = null;
+          publishStatus({ text: `等待中（每5秒检测 ${MEETING_SOFTWARE_LABELS[software] || software}）`, state: "waiting" });
+          return;
+        }
         if (action === "holding") {
           if (manualRunning) return; // 手动会话自己维护状态文案
           const handle = getBridgeSessionHandle();
@@ -113,7 +140,30 @@ export function AutoBridgeController() {
             onStatus: (message) => publishStatus({ text: message, state: "captured" }),
             onLevel: () => undefined,
             onProcessExited: () => {
-              if (getBridgeSessionHandle()?.owner === "auto") void stopBridgeSession();
+              void recoverCapturedBridge(action.pid, "process-exited");
+            },
+            onTransportState: (state, reason) => {
+              if (machine.capturedPid !== action.pid) return;
+              if (state === "reconnecting") {
+                publishStatus({ text: "网络连接波动，正在重连…", state: "starting" });
+                console.warn(`[auto-bridge] transport state=reconnecting pid=${action.pid} roomId=${getBridgeSessionHandle()?.roomId || "unknown"}`);
+                return;
+              }
+              if (state === "connected") {
+                const current = getBridgeSessionHandle();
+                if (current) {
+                  publishStatus({
+                    text: `已自动捕获 · 房间 ${current.roomId}（${providerLabel(current.provider)}）`,
+                    state: "captured",
+                    sessionKey: current.roomId
+                  });
+                  console.log(`[auto-bridge] transport state=connected pid=${action.pid} roomId=${current.roomId}`);
+                }
+                return;
+              }
+              if (state === "disconnected") {
+                void recoverCapturedBridge(action.pid, "transport-disconnected", reason || "unknown");
+              }
             }
           });
           machine = recordCaptured(machine, action.pid);
@@ -122,6 +172,15 @@ export function AutoBridgeController() {
             state: "captured",
             sessionKey: handle.roomId
           });
+          if (recoverySource) {
+            console.log(`[auto-bridge] recovered source=${recoverySource} pid=${action.pid} roomId=${handle.roomId}`);
+            void emitPipelineEvent({
+              event: "bridge.recovered",
+              traceId: handle.roomId,
+              fields: { source: recoverySource, pid: action.pid, provider: handle.provider, status: "ready" }
+            });
+            recoverySource = null;
+          }
         } catch (cause) {
           console.error(`[auto-bridge] start failed pid=${action.pid}: ${cause instanceof Error ? cause.message : String(cause)}`, cause);
           machine = recordFailure(machine, Date.now());

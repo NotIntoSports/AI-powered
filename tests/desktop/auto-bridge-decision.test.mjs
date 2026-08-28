@@ -6,6 +6,7 @@ import {
   decideAutoBridge,
   recordAttempt,
   recordCaptured,
+  recordCapturedExit,
   recordFailure
 } from "../../features/rtc/auto-bridge-decision.ts";
 
@@ -64,6 +65,25 @@ test("stops when captured pid disappears", () => {
   assert.equal(decision.action, "stop");
   assert.equal(decision.machine.capturedPid, null);
   assert.equal(decision.machine.attempts, 0);
+});
+
+test("captured process exit immediately clears the old pid for same-software recovery", () => {
+  const captured = { ...initialAutoBridgeMachine(), capturedPid: 11, attempts: 2, failedPid: 9 };
+  const cleared = recordCapturedExit(captured, 11);
+  assert.deepEqual(cleared, initialAutoBridgeMachine());
+  const replacement = { pid: 30, name: "feishu.exe", title: "仍在进行的飞书会议" };
+  const recovery = decideAutoBridge([replacement], {
+    ...base,
+    machine: cleared,
+    enabled: true,
+    software: "feishu.exe"
+  });
+  assert.deepEqual(recovery.action, { type: "start", pid: 30 });
+});
+
+test("late duplicate exit from an old capture cannot clear a replacement capture", () => {
+  const replacement = { ...initialAutoBridgeMachine(), capturedPid: 30 };
+  assert.deepEqual(recordCapturedExit(replacement, 11), replacement);
 });
 
 test("waits out the 10s backoff, then retries", () => {

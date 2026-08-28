@@ -41,9 +41,15 @@ export class LiveKitRtcAdapter implements SubtitleTransport {
     this.room = room;
     room.on(RoomEvent.Disconnected, (reason) => {
       console.warn(`[livekit] disconnected reason=${String(reason)} roomId=${this.sessionId}`);
+      config.onConnectionStateChange?.("disconnected", String(reason));
     });
     room.on(RoomEvent.Reconnecting, () => {
       console.warn(`[livekit] reconnecting roomId=${this.sessionId}`);
+      config.onConnectionStateChange?.("reconnecting");
+    });
+    room.on(RoomEvent.Reconnected, () => {
+      console.log(`[livekit] reconnected roomId=${this.sessionId}`);
+      config.onConnectionStateChange?.("connected");
     });
     room.on(RoomEvent.DataReceived, (payload, _participant, _kind, topic) => {
       if (topic && topic !== SUBTITLE_DATA_TOPIC) return;

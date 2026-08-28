@@ -114,6 +114,11 @@ export function recordCaptured(machine: AutoBridgeMachine, pid: number): AutoBri
   return { ...machine, capturedPid: pid };
 }
 
+/** Clear only the capture that emitted the exit; stale events must not stop its replacement. */
+export function recordCapturedExit(machine: AutoBridgeMachine, exitedPid: number): AutoBridgeMachine {
+  return machine.capturedPid === exitedPid ? initialAutoBridgeMachine() : machine;
+}
+
 /** 启动失败后登记退避起点。 */
 export function recordFailure(machine: AutoBridgeMachine, now: number): AutoBridgeMachine {
   return { ...machine, lastFailureAt: now };
