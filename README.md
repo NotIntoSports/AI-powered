@@ -20,7 +20,7 @@
 - AI、ASR、TTS、管线模式（级联 / E2E）由管理端下发；客户端登录后消费 `GET /api/v1/client/settings/pipeline` 等接口，不再依赖本机手填主模型密钥作为主路径。
 - 按住说话可暂停 AI，并由 OBS 将本机默认麦克风切入同一虚拟麦克风线路。
 
-Windows 客户端安装、接线和已知限制见 [docs/windows-client.md](docs/windows-client.md)。
+Windows 客户端安装、接线、OBS/VB-CABLE 与已知限制见下方「OBS 设置」「Windows 快速启动」章节。
 
 独立的管理 API 在 [server/control-api](server/control-api/README.md)：与本客户端分离，没有公开注册入口。管理员控制台在 [server/management-web](server/management-web/README.md)（本地 `http://127.0.0.1:3001`），用于：
 
@@ -134,7 +134,7 @@ npm run start:windows
 打包后的 Windows 客户端使用内置的专用 OBS，密码由 Electron `safeStorage` 以当前用户 DPAPI
 保护主副本，并同步到专用 OBS 配置。密码不会进入 OBS 命令行、渲染页面、IPC 或日志。
 OBS 上游必须读取明文配置，因此专用运行目录的 `obs-websocket\config.json` 中仍有明文密码；
-该目录仅归当前 Windows 用户所有。详情见 [Windows 客户端使用说明](docs/windows-client.md)。
+该目录仅归当前 Windows 用户所有。更多 OBS / 虚拟声卡接线见下方「OBS 设置」章节。
 若源码流程中的系统 OBS 已提前启动，启动器会提示确认正常重启；取消或正常关闭失败时不会强制结束 OBS。日志保存在
 `.tools/logs`。虚拟音频驱动涉及系统设备和重启，仍需按控制台指引由用户或 IT 明确安装。
 启动器会等待 `/api/health` 返回本项目的固定服务标识后才打开浏览器；端口上的其他 HTTP

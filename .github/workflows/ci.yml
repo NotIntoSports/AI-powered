@@ -14,11 +14,11 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - name: Reject agent ledgers in the published tree
+      - name: Reject local-only docs and agent ledgers
         shell: pwsh
         run: |
           $blocked = @(
-            git ls-files '.superpowers' 'docs/superpowers'
+            git ls-files '.superpowers' 'docs'
           ) | Where-Object { $_ }
           if ($blocked.Count -gt 0) {
             Write-Error ("These paths must stay out of the repo:`n" + ($blocked -join "`n"))
