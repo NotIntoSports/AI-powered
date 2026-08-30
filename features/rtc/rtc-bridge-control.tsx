@@ -35,7 +35,7 @@ export function RtcBridgeControl() {
   const [pid, setPid] = useState(0);
   const [status, setStatus] = useState("请选择正在通话的会议软件进程。");
   const [running, setRunning] = useState(false);
-  const [provider, setProvider] = useState<SubtitleProvider>("volcengine");
+  const [provider, setProvider] = useState<SubtitleProvider>("livekit");
   const [network, setNetwork] = useState(getNetworkQuality);
   const [autoEnabled, setAutoEnabled] = useState(false);
   const [autoSoftware, setAutoSoftware] = useState("");

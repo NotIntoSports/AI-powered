@@ -71,7 +71,7 @@ export default function OverviewPage() {
         </article>
         <article className="stat">
           <span className="muted">RTC</span>
-          <b>{rtc?.available ? (rtc.activeProvider === "livekit" ? "LiveKit" : "火山云") : rtc?.configured ? "未就绪" : "未配置"}</b>
+          <b>{rtc?.available ? "LiveKit" : rtc?.configured ? "未就绪" : "未配置"}</b>
         </article>
       </section>
 

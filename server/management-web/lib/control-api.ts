@@ -48,16 +48,8 @@ export type PublicAISettings = {
 export type PublicRTCSettings = {
   configured: boolean;
   available: boolean;
-  activeProvider: "volcengine" | "livekit" | string;
-  appId: string;
+  provider: string;
   language: string;
-  mode: "production" | "trial" | string;
-  tokenServiceUrl: string;
-  secretConfigured: boolean;
-  trialExpiresAt?: string;
-  trialRoomId: string;
-  trialUserId: string;
-  volcengineAvailable?: boolean;
   livekitUrl?: string;
   livekitApiKey?: string;
   livekitSecretConfigured?: boolean;
@@ -128,6 +120,38 @@ export type PublicSpeechSettings = {
   aliyunAccessKeyIdConfigured?: boolean;
   aliyunAccessKeySecretConfigured?: boolean;
   aliyunTokenConfigured?: boolean;
+  ttsVolume?: number;
+  ttsSpeechRate?: number;
+  ttsPitchRate?: number;
+  ttsSampleRate?: number;
+  asrEnableItn?: boolean;
+  asrEnablePunc?: boolean;
+  asrModelName?: string;
+  aliyunAsrCustomizationId?: string;
+  aliyunAsrVocabularyId?: string;
+  aliyunAsrEnableItn?: boolean;
+  aliyunAsrEnablePunc?: boolean;
+  aliyunAsrEnableDisfluency?: boolean;
+  aliyunAsrEnableIntermediate?: boolean;
+  aliyunAsrEnableSemanticBreak?: boolean;
+  aliyunAsrMaxSentenceSilence?: number;
+  aliyunAsrEnableVoiceDetection?: boolean;
+  aliyunAsrMaxStartSilence?: number;
+  aliyunAsrMaxEndSilence?: number;
+  agentConsumer?: boolean;
+  voiceAllocationStatus?: string;
+  configVersion: number;
+  updatedAt?: string;
+  updatedByUsername?: string;
+};
+
+export type PublicPipelineSettings = {
+  configured: boolean;
+  mode: "cascaded" | "e2e" | string;
+  e2eProvider: string;
+  cascadedAsr: string;
+  cascadedTts: string;
+  enabled: boolean;
   configVersion: number;
   updatedAt?: string;
   updatedByUsername?: string;
