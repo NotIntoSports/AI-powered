@@ -113,64 +113,6 @@ func TestPublicAINeverIncludesKeyMaterial(t *testing.T) {
 	}
 }
 
-func TestPutRTCRejectsHTTPTokenService(t *testing.T) {
-	_, err := normalizeRTCInput(RTCInput{
-		AppID: "app", Language: "zh", Mode: "production", TokenServiceURL: "http://example.com/token",
-	})
-	if err != ErrInvalidInput {
-		t.Fatalf("err=%v", err)
-	}
-}
-
-func TestPublicRTCAvailabilityFollowsActiveProvider(t *testing.T) {
-	record := RTCRecord{
-		Enabled:                   true,
-		Language:                  "zh",
-		Mode:                      "production",
-		ActiveProvider:            ProviderLiveKit,
-		LiveKitURL:                "ws://127.0.0.1:7880",
-		LiveKitAPIKey:             "devkey",
-		EncryptedLiveKitAPISecret: []byte("cipher"),
-	}
-	public := PublicRTCFrom(record, nil, nil)
-	if !public.Available || !public.LiveKitAvailable || public.VolcengineAvailable || public.ActiveProvider != ProviderLiveKit {
-		t.Fatalf("public=%#v", public)
-	}
-}
-
-func TestPublicRTCDecryptErrorIsLimitedToThatProvider(t *testing.T) {
-	record := RTCRecord{
-		Enabled:                   true,
-		Language:                  "zh",
-		Mode:                      "production",
-		ActiveProvider:            ProviderLiveKit,
-		LiveKitURL:                "ws://127.0.0.1:7880",
-		LiveKitAPIKey:             "devkey",
-		EncryptedLiveKitAPISecret: []byte("cipher"),
-	}
-	public := PublicRTCFrom(record, ErrDecryptFailed, nil)
-	if !public.Available || !public.LiveKitAvailable || public.VolcengineAvailable {
-		t.Fatalf("public=%#v", public)
-	}
-}
-
-func TestNormalizeRTCAllowsLiveKitWithoutVolcengineAppID(t *testing.T) {
-	input, err := normalizeRTCInput(RTCInput{
-		Language: "zh", Mode: "production", ActiveProvider: ProviderLiveKit,
-		LiveKitURL: "wss://livekit.example.com", LiveKitAPIKey: "devkey", LiveKitAPISecret: "secret",
-	})
-	if err != nil || input.AppID != "" || input.LiveKitURL != "wss://livekit.example.com" {
-		t.Fatalf("input=%#v err=%v", input, err)
-	}
-}
-
-func TestNormalizeRTCRejectsSelectingLiveKitWithoutURL(t *testing.T) {
-	_, err := normalizeRTCInput(RTCInput{Language: "zh", Mode: "production", ActiveProvider: ProviderLiveKit, LiveKitAPIKey: "devkey"})
-	if err != ErrInvalidInput {
-		t.Fatalf("err=%v", err)
-	}
-}
-
 func TestPublicSpeechOmitsSecretsAndRequiresSpeakerForTTS(t *testing.T) {
 	record := SpeechRecord{
 		Enabled:              true,

@@ -34,6 +34,16 @@ type SettingsAdmin interface {
 	TestStorage(ctx context.Context, actor users.User, requestID string, input *settings.StorageInput) (settings.StorageTestResult, error)
 	GetRoles(ctx context.Context) (settings.RoleProfiles, error)
 	PutRoles(ctx context.Context, actor users.User, requestID string, input []settings.RoleProfileInput) (settings.RoleProfiles, error)
+	GetPipeline(ctx context.Context) (settings.PublicPipeline, error)
+	PutPipeline(ctx context.Context, actor users.User, requestID string, input settings.PipelineInput) (settings.PublicPipeline, error)
+	GetAgentSpeech(ctx context.Context) (settings.AgentSpeechSettings, error)
+	GetAgentPipeline(ctx context.Context) (settings.AgentPipeline, error)
+	GetAgentAI(ctx context.Context) (settings.AgentAISettings, error)
+	GetClientPipeline(ctx context.Context) (settings.PublicPipeline, error)
+	DeleteUserVoice(ctx context.Context, userID string) error
+	PreviewSpeech(ctx context.Context, input *settings.SpeechInput) (settings.SpeechPreviewResult, error)
+	TestSpeechASR(ctx context.Context, input *settings.SpeechInput) (settings.SpeechASRTestResult, error)
+	ListSpeechVoices(ctx context.Context) ([]settings.SpeechVoiceEntry, error)
 }
 
 type voiceAllocationAdmin interface {
@@ -54,17 +64,8 @@ type aiSettingsRequest struct {
 }
 
 type rtcSettingsRequest struct {
-	AppID              string `json:"appId"`
 	Language           string `json:"language"`
-	Mode               string `json:"mode"`
-	TokenServiceURL    string `json:"tokenServiceUrl"`
-	Secret             string `json:"secret"`
-	ClearSecret        bool   `json:"clearSecret"`
-	TrialExpiresAt     string `json:"trialExpiresAt"`
-	TrialRoomID        string `json:"trialRoomId"`
-	TrialUserID        string `json:"trialUserId"`
 	Enabled            *bool  `json:"enabled"`
-	ActiveProvider     string `json:"activeProvider"`
 	LiveKitURL         string `json:"livekitUrl"`
 	LiveKitAPIKey      string `json:"livekitApiKey"`
 	LiveKitAPISecret   string `json:"livekitApiSecret"`
@@ -73,7 +74,6 @@ type rtcSettingsRequest struct {
 	ASRModel           string `json:"asrModel"`
 	ASRAPIKey          string `json:"asrApiKey"`
 	ClearASRAPIKey     bool   `json:"clearAsrApiKey"`
-	TestProvider       string `json:"testProvider"`
 }
 
 type storageSettingsRequest struct {
@@ -110,6 +110,31 @@ type speechSettingsRequest struct {
 	ClearAliyunAccessKeySecret bool   `json:"clearAliyunAccessKeySecret"`
 	ClearAliyunToken           bool   `json:"clearAliyunToken"`
 	TestProvider               string `json:"testProvider"`
+	TTSVolume                  *int   `json:"ttsVolume"`
+	TTSSpeechRate              *int   `json:"ttsSpeechRate"`
+	TTSPitchRate               *int   `json:"ttsPitchRate"`
+	TTSSampleRate              *int   `json:"ttsSampleRate"`
+	ASREnableITN               *bool  `json:"asrEnableItn"`
+	ASREnablePunc              *bool  `json:"asrEnablePunc"`
+	ASRModelName               string `json:"asrModelName"`
+	AliyunASRCustomizationID   string `json:"aliyunAsrCustomizationId"`
+	AliyunASRVocabularyID      string `json:"aliyunAsrVocabularyId"`
+	AliyunASREnableITN         *bool  `json:"aliyunAsrEnableItn"`
+	AliyunASREnablePunc        *bool  `json:"aliyunAsrEnablePunc"`
+	AliyunASREnableDisfluency  *bool  `json:"aliyunAsrEnableDisfluency"`
+	AliyunASREnableIntermediate *bool `json:"aliyunAsrEnableIntermediate"`
+	AliyunASREnableSemanticBreak *bool `json:"aliyunAsrEnableSemanticBreak"`
+	AliyunASRMaxSentenceSilence *int  `json:"aliyunAsrMaxSentenceSilence"`
+	AliyunASREnableVoiceDetection *bool `json:"aliyunAsrEnableVoiceDetection"`
+	AliyunASRMaxStartSilence   *int   `json:"aliyunAsrMaxStartSilence"`
+	AliyunASRMaxEndSilence     *int   `json:"aliyunAsrMaxEndSilence"`
+}
+
+type pipelineSettingsRequest struct {
+	Mode        string `json:"mode"`
+	E2EProvider string `json:"e2eProvider"`
+	CascadedTTS string `json:"cascadedTts"`
+	Enabled     *bool  `json:"enabled"`
 }
 
 type adminSettingsHandler struct {
@@ -349,6 +374,47 @@ func (handler *adminSettingsHandler) getSpeech(w http.ResponseWriter, request *h
 	writeJSON(w, http.StatusOK, public)
 }
 
+func (handler *adminSettingsHandler) getAgentSpeech(w http.ResponseWriter, request *http.Request) {
+	public, err := handler.admin.GetAgentSpeech(request.Context())
+	if !writeSettingsError(w, request, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, public)
+}
+
+func (handler *adminSettingsHandler) getAgentPipeline(w http.ResponseWriter, request *http.Request) {
+	public, err := handler.admin.GetAgentPipeline(request.Context())
+	if !writeSettingsError(w, request, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, public)
+}
+
+func (handler *adminSettingsHandler) getAgentAI(w http.ResponseWriter, request *http.Request) {
+	public, err := handler.admin.GetAgentAI(request.Context())
+	if !writeSettingsError(w, request, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, public)
+}
+
+func (handler *adminSettingsHandler) getClientPipeline(w http.ResponseWriter, request *http.Request) {
+	authenticated, ok := request.Context().Value(authenticatedSessionKey{}).(AuthenticatedSession)
+	if !ok {
+		writeSessionError(w, request)
+		return
+	}
+	if authenticated.Session.Purpose != sessions.PurposeDesktop {
+		writeAPIError(w, request, http.StatusForbidden, "FORBIDDEN", "desktop session is required")
+		return
+	}
+	public, err := handler.admin.GetClientPipeline(request.Context())
+	if !writeSettingsError(w, request, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, public)
+}
+
 func (handler *adminSettingsHandler) getClientSpeech(w http.ResponseWriter, request *http.Request) {
 	authenticated, ok := request.Context().Value(authenticatedSessionKey{}).(AuthenticatedSession)
 	if !ok {
@@ -527,6 +593,81 @@ func (handler *adminSettingsHandler) testStorage(w http.ResponseWriter, request 
 	writeJSON(w, http.StatusOK, result)
 }
 
+func (handler *adminSettingsHandler) getPipeline(w http.ResponseWriter, request *http.Request) {
+	if _, ok := requestActor(w, request); !ok {
+		return
+	}
+	public, err := handler.admin.GetPipeline(request.Context())
+	if !writeSettingsError(w, request, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, public)
+}
+
+func (handler *adminSettingsHandler) putPipeline(w http.ResponseWriter, request *http.Request) {
+	actor, ok := requestActor(w, request)
+	if !ok {
+		return
+	}
+	input := pipelineSettingsRequest{}
+	if err := decodeBoundedJSON(w, request, &input); err != nil {
+		writeJSONDecodeError(w, request, err)
+		return
+	}
+	public, err := handler.admin.PutPipeline(request.Context(), actor, middleware.GetReqID(request.Context()), settings.PipelineInput{
+		Mode: input.Mode, E2EProvider: input.E2EProvider, CascadedTTS: input.CascadedTTS, Enabled: input.Enabled,
+	})
+	if !writeSettingsError(w, request, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, public)
+}
+
+func (handler *adminSettingsHandler) previewSpeech(w http.ResponseWriter, request *http.Request) {
+	if _, ok := requestActor(w, request); !ok {
+		return
+	}
+	input := speechSettingsRequest{}
+	if err := decodeBoundedJSON(w, request, &input); err != nil {
+		writeJSONDecodeError(w, request, err)
+		return
+	}
+	converted := speechInputFromRequest(input)
+	result, err := handler.admin.PreviewSpeech(request.Context(), &converted)
+	if !writeSettingsError(w, request, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (handler *adminSettingsHandler) testSpeechASR(w http.ResponseWriter, request *http.Request) {
+	if _, ok := requestActor(w, request); !ok {
+		return
+	}
+	input := speechSettingsRequest{}
+	if err := decodeBoundedJSON(w, request, &input); err != nil {
+		writeJSONDecodeError(w, request, err)
+		return
+	}
+	converted := speechInputFromRequest(input)
+	result, err := handler.admin.TestSpeechASR(request.Context(), &converted)
+	if !writeSettingsError(w, request, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (handler *adminSettingsHandler) listSpeechVoices(w http.ResponseWriter, request *http.Request) {
+	if _, ok := requestActor(w, request); !ok {
+		return
+	}
+	voices, err := handler.admin.ListSpeechVoices(request.Context())
+	if !writeSettingsError(w, request, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"voices": voices})
+}
+
 func writeSettingsError(w http.ResponseWriter, request *http.Request, err error) bool {
 	if err == nil {
 		return true
@@ -577,22 +718,31 @@ func speechInputFromRequest(input speechSettingsRequest) settings.SpeechInput {
 		ClearAliyunAccessKeySecret: input.ClearAliyunAccessKeySecret,
 		ClearAliyunToken:           input.ClearAliyunToken,
 		TestProvider:               input.TestProvider,
+		TTSVolume:                  input.TTSVolume,
+		TTSSpeechRate:              input.TTSSpeechRate,
+		TTSPitchRate:               input.TTSPitchRate,
+		TTSSampleRate:              input.TTSSampleRate,
+		ASREnableITN:               input.ASREnableITN,
+		ASREnablePunc:              input.ASREnablePunc,
+		ASRModelName:               input.ASRModelName,
+		AliyunASRCustomizationID:   input.AliyunASRCustomizationID,
+		AliyunASRVocabularyID:      input.AliyunASRVocabularyID,
+		AliyunASREnableITN:         input.AliyunASREnableITN,
+		AliyunASREnablePunc:        input.AliyunASREnablePunc,
+		AliyunASREnableDisfluency:  input.AliyunASREnableDisfluency,
+		AliyunASREnableIntermediate: input.AliyunASREnableIntermediate,
+		AliyunASREnableSemanticBreak: input.AliyunASREnableSemanticBreak,
+		AliyunASRMaxSentenceSilence: input.AliyunASRMaxSentenceSilence,
+		AliyunASREnableVoiceDetection: input.AliyunASREnableVoiceDetection,
+		AliyunASRMaxStartSilence:   input.AliyunASRMaxStartSilence,
+		AliyunASRMaxEndSilence:     input.AliyunASRMaxEndSilence,
 	}
 }
 
 func rtcInputFromRequest(input rtcSettingsRequest) settings.RTCInput {
 	return settings.RTCInput{
-		AppID:              input.AppID,
 		Language:           input.Language,
-		Mode:               input.Mode,
-		TokenServiceURL:    input.TokenServiceURL,
-		Secret:             input.Secret,
-		ClearSecret:        input.ClearSecret,
-		TrialExpiresAt:     input.TrialExpiresAt,
-		TrialRoomID:        input.TrialRoomID,
-		TrialUserID:        input.TrialUserID,
 		Enabled:            input.Enabled,
-		ActiveProvider:     input.ActiveProvider,
 		LiveKitURL:         input.LiveKitURL,
 		LiveKitAPIKey:      input.LiveKitAPIKey,
 		LiveKitAPISecret:   input.LiveKitAPISecret,
@@ -601,6 +751,5 @@ func rtcInputFromRequest(input rtcSettingsRequest) settings.RTCInput {
 		ASRModel:           input.ASRModel,
 		ASRAPIKey:          input.ASRAPIKey,
 		ClearASRAPIKey:     input.ClearASRAPIKey,
-		TestProvider:       input.TestProvider,
 	}
 }

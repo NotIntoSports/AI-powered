@@ -5,7 +5,7 @@ export const SUBTITLE_DATA_TOPIC = "subtitle.v1";
 export const SUBTITLE_SPEAKERS = ["candidate"] as const;
 export type SubtitleSpeaker = (typeof SUBTITLE_SPEAKERS)[number];
 
-export const SUBTITLE_SOURCES = ["volcengine", "livekit", "direct-asr"] as const;
+export const SUBTITLE_SOURCES = ["livekit", "direct-asr"] as const;
 export type SubtitleSource = (typeof SUBTITLE_SOURCES)[number];
 
 export type SubtitleInput = {

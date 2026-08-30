@@ -4,7 +4,6 @@ import test from "node:test";
 import { parseSubtitleInput } from "../../lib/subtitles/contract.ts";
 import { mergeSubtitle } from "../../lib/subtitles/merge.ts";
 import { createSubtitleSink } from "../../lib/subtitles/sink.ts";
-import { mapVolcengineSubtitles } from "../../lib/subtitles/map-volcengine.ts";
 import { mapLiveKitDataPacket, mapLiveKitSegment } from "../../lib/subtitles/map-livekit.ts";
 
 function event(overrides = {}) {
@@ -60,17 +59,6 @@ test("sink publishes mapped events and exposes final-only subscription", () => {
   sink.publish({ v: 1, sessionId: "interview_1", utteranceId: "seg_1", text: "", final: true });
   assert.equal(snapshots.at(-1)?.[0], "我有三年经验");
   assert.deepEqual(finals, ["我有三年经验"]);
-});
-
-test("volcengine mapper writes v1 fields and hides definite", () => {
-  const mapped = mapVolcengineSubtitles([
-    { userId: "bridge", sequence: 9, text: "你好", definite: true }
-  ], "interview_1", "zh");
-  assert.equal(mapped.length, 1);
-  assert.equal(mapped[0].utteranceId, "9");
-  assert.equal(mapped[0].final, true);
-  assert.equal(mapped[0].source, "volcengine");
-  assert.equal("definite" in mapped[0], false);
 });
 
 test("livekit mapper accepts segments and v1 data packets", () => {

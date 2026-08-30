@@ -44,6 +44,7 @@ type Config struct {
 	MCPListenAddress  string
 	MCPAdminToken     string
 	MCPActorUsername  string
+	AgentInternalToken string
 }
 
 func Load(getenv func(string) string) (Config, error) {
@@ -108,6 +109,7 @@ func Load(getenv func(string) string) (Config, error) {
 	}
 	cfg.MCPAdminToken = strings.TrimSpace(getenv("MCP_ADMIN_TOKEN"))
 	cfg.MCPActorUsername = strings.TrimSpace(getenv("MCP_ACTOR_USERNAME"))
+	cfg.AgentInternalToken = strings.TrimSpace(getenv("AGENT_INTERNAL_TOKEN"))
 
 	return cfg, nil
 }

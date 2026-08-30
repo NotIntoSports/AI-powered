@@ -91,32 +91,17 @@ func ProbeAI(ctx context.Context, client HTTPDoer, baseURL, apiKey, model string
 }
 
 func ProbeRTC(record RTCRecord, decryptErr error) RTCTestResult {
-	provider := record.ActiveProvider
-	if provider == "" {
-		provider = ProviderVolcengine
-	}
-	var public PublicRTC
-	if provider == ProviderLiveKit {
-		public = PublicRTCFrom(record, nil, decryptErr)
-	} else {
-		public = PublicRTCFrom(record, decryptErr, nil)
-	}
+	public := PublicRTCFrom(record, decryptErr)
 	if !public.Configured {
-		return RTCTestResult{Message: "尚未配置 RTC"}
+		return RTCTestResult{Provider: ProviderLiveKit, Message: "尚未配置 LiveKit"}
 	}
 	if decryptErr != nil {
-		return RTCTestResult{Message: "RTC 密钥无法解密"}
+		return RTCTestResult{Provider: ProviderLiveKit, Message: "LiveKit 密钥无法解密"}
 	}
-	if provider == ProviderLiveKit {
-		if !public.LiveKitAvailable {
-			return RTCTestResult{Provider: provider, Message: "LiveKit 配置不完整或已停用"}
-		}
-		return RTCTestResult{Reachable: true, Provider: provider, Message: "LiveKit 配置可用"}
+	if !public.LiveKitAvailable {
+		return RTCTestResult{Provider: ProviderLiveKit, Message: "LiveKit 配置不完整或已停用"}
 	}
-	if !public.VolcengineAvailable {
-		return RTCTestResult{Provider: provider, Message: "火山 RTC 配置不完整或已停用"}
-	}
-	return RTCTestResult{Reachable: true, Provider: provider, Message: "火山 RTC 配置可用"}
+	return RTCTestResult{Reachable: true, Provider: ProviderLiveKit, Message: "LiveKit 配置可用"}
 }
 
 func ProbeLiveKit(ctx context.Context, client HTTPDoer, livekitURL string) RTCTestResult {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"strings"
-	"time"
 
 	"github.com/ai-interviewer/ai-powered/control-api/internal/audit"
 	"github.com/ai-interviewer/ai-powered/control-api/internal/database"
@@ -193,9 +192,8 @@ func (s *Service) GetRTC(ctx context.Context) (PublicRTC, error) {
 	if err != nil {
 		return PublicRTC{}, err
 	}
-	_, volcErr := store.DecryptSecret(record)
 	_, livekitErr := store.DecryptLiveKitSecret(record)
-	return PublicRTCFrom(record, volcErr, livekitErr), nil
+	return PublicRTCFrom(record, livekitErr), nil
 }
 
 func (s *Service) PutRTC(ctx context.Context, actor users.User, requestID string, input RTCInput) (PublicRTC, error) {
@@ -206,9 +204,8 @@ func (s *Service) PutRTC(ctx context.Context, actor users.User, requestID string
 		if err != nil {
 			return err
 		}
-		_, volcErr := store.DecryptSecret(record)
 		_, livekitErr := store.DecryptLiveKitSecret(record)
-		public = PublicRTCFrom(record, volcErr, livekitErr)
+		public = PublicRTCFrom(record, livekitErr)
 		return audit.NewStore(tx).Append(ctx, audit.Event{
 			ActorUserID: actor.ID,
 			Action:      audit.ActionRTCSettingsUpdated,
@@ -231,68 +228,31 @@ func (s *Service) TestRTC(ctx context.Context, actor users.User, requestID strin
 	stored := err == nil
 	var decryptErr error
 	if input != nil {
-		if strings.TrimSpace(input.TestProvider) != "" {
-			input.ActiveProvider = strings.TrimSpace(input.TestProvider)
-		}
 		normalized, normErr := normalizeRTCInput(mergeRTCInput(*input, record, stored))
 		if normErr != nil {
 			return RTCTestResult{}, normErr
 		}
-		record.AppID = normalized.AppID
 		record.Language = normalized.Language
-		record.Mode = normalized.Mode
-		record.TokenServiceURL = normalized.TokenServiceURL
-		record.TrialRoomID = normalized.TrialRoomID
-		record.TrialUserID = normalized.TrialUserID
 		record.Enabled = true
-		record.ActiveProvider = normalized.ActiveProvider
 		record.LiveKitURL = normalized.LiveKitURL
 		record.LiveKitAPIKey = normalized.LiveKitAPIKey
 		record.LiveKitASRBaseURL = normalized.ASRBaseURL
 		record.LiveKitASRModel = normalized.ASRModel
-		if strings.TrimSpace(normalized.Secret) != "" {
-			record.EncryptedSecret = []byte("pending")
-		} else if stored {
-			_, decryptErr = store.DecryptSecret(record)
-		}
 		if strings.TrimSpace(normalized.LiveKitAPISecret) != "" {
 			record.EncryptedLiveKitAPISecret = []byte("pending")
 		} else if stored {
-			if _, livekitErr := store.DecryptLiveKitSecret(record); livekitErr != nil {
-				decryptErr = livekitErr
-			}
-		}
-		if normalized.TrialExpiresAt != "" {
-			parsed, parseErr := time.Parse(time.RFC3339, normalized.TrialExpiresAt)
-			if parseErr == nil {
-				utc := parsed.UTC()
-				record.TrialExpiresAt = &utc
-			}
-		}
-		if strings.TrimSpace(normalized.TestProvider) == ProviderLiveKit || strings.TrimSpace(normalized.TestProvider) == ProviderVolcengine {
-			record.ActiveProvider = strings.TrimSpace(normalized.TestProvider)
-		}
-	} else if !stored {
-		return RTCTestResult{Message: "尚未配置 RTC"}, nil
-	} else {
-		_, decryptErr = store.DecryptSecret(record)
-		if decryptErr == nil {
 			_, decryptErr = store.DecryptLiveKitSecret(record)
 		}
-	}
-	provider := record.ActiveProvider
-	if provider == "" {
-		provider = ProviderVolcengine
+	} else if !stored {
+		return RTCTestResult{Message: "尚未配置 LiveKit"}, nil
+	} else {
+		_, decryptErr = store.DecryptLiveKitSecret(record)
 	}
 	var result RTCTestResult
-	if provider == ProviderLiveKit {
-		if record.LiveKitURL == "" || record.LiveKitAPIKey == "" || len(record.EncryptedLiveKitAPISecret) == 0 || decryptErr != nil {
-			result = ProbeRTC(record, decryptErr)
-		} else {
-			result = ProbeLiveKit(ctx, s.client, record.LiveKitURL)
-		}
-	} else {
+	if record.LiveKitURL == "" || record.LiveKitAPIKey == "" || len(record.EncryptedLiveKitAPISecret) == 0 || decryptErr != nil {
 		result = ProbeRTC(record, decryptErr)
+	} else {
+		result = ProbeLiveKit(ctx, s.client, record.LiveKitURL)
 	}
 	_ = audit.NewStore(s.db).Append(ctx, audit.Event{
 		ActorUserID: actor.ID,

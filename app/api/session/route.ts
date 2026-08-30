@@ -39,6 +39,12 @@ const actionSchema = z.discriminatedUnion("action", [
     expectedRevision: z.number().int().nonnegative()
   }),
   z.object({
+    action: z.literal("e2e_turn"),
+    answer: z.string().trim().min(1).max(4000),
+    question: z.string().trim().min(1).max(4000),
+    expectedRevision: z.number().int().nonnegative()
+  }),
+  z.object({
     action: z.literal("say"),
     text: z.string().trim().min(1).max(500)
   }),
@@ -239,6 +245,37 @@ export async function POST(request: Request) {
         transcript: session.transcript
       });
       return NextResponse.json(await setInterviewReport(report));
+    }
+
+    if (parsed.data.action === "e2e_turn") {
+      const session = await getSession();
+      pipelineTraceId = session.sessionId;
+      const updated = await appendAnswerAndQuestion({
+        answer: parsed.data.answer,
+        question: parsed.data.question,
+        expectedRevision: parsed.data.expectedRevision
+      });
+      console.log(
+        `[session] e2e_turn ok sessionId=${session.sessionId} revision=${updated.revision} elapsedMs=${Date.now() - startedAt}`
+      );
+      console.log(formatPipelineLog({
+        event: "ai.succeeded",
+        traceId: session.sessionId,
+        fields: {
+          revision: updated.revision,
+          durationMs: Date.now() - startedAt,
+          textLength: parsed.data.question.length,
+          source: "livekit-e2e"
+        }
+      }));
+      return NextResponse.json(updated);
+    }
+
+    if (parsed.data.action !== "answer") {
+      return NextResponse.json(
+        { code: "INVALID_INPUT", message: "不支持的操作" },
+        { status: 422 }
+      );
     }
 
     const session = await getSession();
