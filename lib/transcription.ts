@@ -190,24 +190,43 @@ export async function validateAudioFile(file: File) {
   if (!hasKnownSignature(bytes)) throw new Error("UNSUPPORTED_AUDIO");
 }
 
+/** Workspace display capture uploads use meeting-* filenames. */
+export function isMeetingTranscriptionFile(file: File) {
+  return (file.name || "").startsWith("meeting-");
+}
+
+/**
+ * LiveKit bridge publishes candidate ASR via livekit-agent on subtitle.v1.
+ * Skip direct cloud ASR for meeting uploads so we do not double-transcribe.
+ */
+export function shouldUseDirectCloudAsr(file: File) {
+  return !isMeetingTranscriptionFile(file);
+}
+
 export async function transcribeAudio(file: File) {
   await validateAudioFile(file);
-  const speech = await getSpeechRuntimeConfig();
-  if (speech.provider === "aliyun" && speech.asrAvailable) {
-    try {
-      const text = await transcribeWithAliyun(file);
-      if (text) return text;
-    } catch {
-      // Fall back to OpenAI-compatible or whisper.cpp.
+  if (shouldUseDirectCloudAsr(file)) {
+    const speech = await getSpeechRuntimeConfig();
+    if (speech.provider === "aliyun" && speech.asrAvailable) {
+      try {
+        const text = await transcribeWithAliyun(file);
+        if (text) return text;
+      } catch {
+        // Fall back to OpenAI-compatible or whisper.cpp.
+      }
     }
-  }
-  if (speech.provider === "volcengine" && speech.asrAvailable) {
-    try {
-      const text = await transcribeWithVolcengine(file);
-      if (text) return text;
-    } catch {
-      // Fall back to OpenAI-compatible or whisper.cpp.
+    if (speech.provider === "volcengine" && speech.asrAvailable) {
+      try {
+        const text = await transcribeWithVolcengine(file);
+        if (text) return text;
+      } catch {
+        // Fall back to OpenAI-compatible or whisper.cpp.
+      }
     }
+  } else {
+    console.log(
+      "[transcribe] meeting path: skipping direct cloud ASR (LiveKit agent subtitles); whisper/env fallback only"
+    );
   }
   if (await getManagementASRConfig() || getTranscriptionProvider() !== "whisper-cpp") {
     return transcribeWithOpenAI(file);

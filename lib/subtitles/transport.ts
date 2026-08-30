@@ -1,7 +1,7 @@
 import type { SubtitleSink } from "./sink.ts";
 import type { RtcNetworkStats } from "../webrtc-stats.ts";
 
-export type SubtitleProvider = "volcengine" | "livekit";
+export type SubtitleProvider = "livekit";
 
 export type SubtitleConnectConfig = {
   sessionId: string;
@@ -10,7 +10,6 @@ export type SubtitleConnectConfig = {
   token: string;
   roomId: string;
   userId: string;
-  appId?: string;
   url?: string;
   onConnectionStateChange?: (
     state: "reconnecting" | "connected" | "disconnected",
@@ -24,8 +23,3 @@ export type SubtitleTransport = {
   disconnect(): Promise<void>;
   getNetworkStats?(): Promise<RtcNetworkStats | null>;
 };
-
-export type SubtitleTransportFactory = (
-  provider: SubtitleProvider,
-  sink: SubtitleSink
-) => Promise<SubtitleTransport>;

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/ai-interviewer/ai-powered/control-api/internal/identity"
 	"github.com/ai-interviewer/ai-powered/control-api/internal/password"
@@ -171,6 +172,25 @@ func (handler *adminUsersHandler) revokeSessions(w http.ResponseWriter, request 
 	}
 	err := handler.admin.RevokeUserSessions(request.Context(), actor, targetID, preserveSessionID)
 	if !writeAdminError(w, request, err) {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (handler *adminUsersHandler) deleteVoice(w http.ResponseWriter, request *http.Request) {
+	if _, ok := requestActor(w, request); !ok {
+		return
+	}
+	targetID := strings.TrimSpace(chi.URLParam(request, "id"))
+	if targetID == "" {
+		writeAPIError(w, request, http.StatusBadRequest, "INVALID_INPUT", "user id is required")
+		return
+	}
+	if handler.settings == nil {
+		writeAPIError(w, request, http.StatusInternalServerError, "INTERNAL_ERROR", "settings service unavailable")
+		return
+	}
+	if err := handler.settings.DeleteUserVoice(request.Context(), targetID); !writeSettingsError(w, request, err) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

@@ -1,5 +1,7 @@
 import { Room, RoomEvent, Track } from "livekit-client";
 import { emitPipelineEvent } from "../../features/diagnostics/pipeline-log.ts";
+import { mapAgentResponseDataPacket, AGENT_RESPONSE_DATA_TOPIC } from "../../lib/agent-response/contract.ts";
+import { agentResponseSink } from "../../lib/agent-response/sink.ts";
 import { SUBTITLE_DATA_TOPIC } from "../../lib/subtitles/contract.ts";
 import { mapLiveKitDataPacket, mapLiveKitSegment } from "../../lib/subtitles/map-livekit.ts";
 import type { SubtitleSink } from "../../lib/subtitles/sink.ts";
@@ -52,6 +54,24 @@ export class LiveKitRtcAdapter implements SubtitleTransport {
       config.onConnectionStateChange?.("connected");
     });
     room.on(RoomEvent.DataReceived, (payload, _participant, _kind, topic) => {
+      if (topic === AGENT_RESPONSE_DATA_TOPIC) {
+        const mapped = mapAgentResponseDataPacket(payload, this.sessionId);
+        if (mapped) {
+          void emitPipelineEvent({
+            event: "agent-response.received",
+            traceId: mapped.sessionId,
+            fields: {
+              final: mapped.final,
+              source: mapped.source || "livekit-e2e",
+              candidateLength: mapped.candidateText.length,
+              replyLength: mapped.replyText.length,
+              utteranceId: mapped.utteranceId
+            }
+          });
+          agentResponseSink.publish(mapped);
+        }
+        return;
+      }
       if (topic && topic !== SUBTITLE_DATA_TOPIC) return;
       const mapped = mapLiveKitDataPacket(payload, this.sessionId);
       if (mapped) {

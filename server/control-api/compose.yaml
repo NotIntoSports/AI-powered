@@ -35,6 +35,7 @@ services:
       KNOWLEDGE_PROVIDER: ${KNOWLEDGE_PROVIDER:-local-pgvector}
       EMBEDDING_BASE_URL: http://embedding:80
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-m3}
+      AGENT_INTERNAL_TOKEN: ${AGENT_INTERNAL_TOKEN:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -133,10 +134,14 @@ services:
       LIVEKIT_URL: ws://livekit:7880
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-secret}
-      STT_BASE_URL: ${LIVEKIT_ASR_BASE_URL:-}
-      STT_API_KEY: ${LIVEKIT_ASR_API_KEY:-}
-      STT_MODEL: ${LIVEKIT_ASR_MODEL:-whisper-1}
+      CONTROL_API_ORIGIN: http://control-api:8080
+      AGENT_INTERNAL_TOKEN: ${AGENT_INTERNAL_TOKEN:-}
       STT_LANGUAGE: ${LIVEKIT_ASR_LANGUAGE:-zh}
+      ALIYUN_NLS_APPKEY: ${ALIYUN_NLS_APPKEY:-}
+      ALIYUN_NLS_ACCESS_KEY_ID: ${ALIYUN_NLS_ACCESS_KEY_ID:-}
+      ALIYUN_NLS_ACCESS_KEY_SECRET: ${ALIYUN_NLS_ACCESS_KEY_SECRET:-}
+      ALIYUN_NLS_TOKEN: ${ALIYUN_NLS_TOKEN:-}
+      ALIYUN_NLS_GATEWAY: ${ALIYUN_NLS_GATEWAY:-https://nls-gateway-cn-shanghai.aliyuncs.com}
     depends_on:
       - livekit
     restart: unless-stopped
