@@ -16,18 +16,27 @@
 - Windows 客户端内置官方 OBS 32.2.1，并由 Electron 主进程通过 OBS WebSocket 一键创建场景、浏览器源并启停虚拟摄像头。
 - 控制台提供服务、模型、舞台、系统语音和画面素材五项自动自检。
 - 可从任意会议窗口或整个屏幕采集系统音频，分段转写为对方回答。
-- Windows 客户端通过统一字幕接口显示实时字幕；管理端可在火山云 RTC 与自建 LiveKit 之间切换线路，默认仍是火山 RTC。
+- Windows 客户端通过统一字幕接口显示实时字幕；**实时会议字幕 / RTC 仅走自建 LiveKit**（火山 RTC 已下线）。
+- AI、ASR、TTS、管线模式（级联 / E2E）由管理端下发；客户端登录后消费 `GET /api/v1/client/settings/pipeline` 等接口，不再依赖本机手填主模型密钥作为主路径。
 - 按住说话可暂停 AI，并由 OBS 将本机默认麦克风切入同一虚拟麦克风线路。
 
 Windows 客户端安装、接线和已知限制见 [docs/windows-client.md](docs/windows-client.md)。
 
-独立的管理 API 在 [server/control-api](server/control-api/README.md)：它与本客户端分离，没有公开注册入口。管理员网页控制台在 [server/management-web](server/management-web/README.md)（`http://127.0.0.1:3001`），用于查看账户在线/当前线路，以及把 AI、RTC 配置写入数据库。自建 LiveKit 默认不启动；需要时在 `server/control-api` 执行 `docker compose --profile livekit up -d`，再用 `npm run test:livekit-smoke` / `npm run test:livekit-load` 做 1 路和 10 路纯音频检查。默认 `activeProvider` 仍是火山 RTC。
+独立的管理 API 在 [server/control-api](server/control-api/README.md)：与本客户端分离，没有公开注册入口。管理员控制台在 [server/management-web](server/management-web/README.md)（本地 `http://127.0.0.1:3001`），用于：
+
+- 多条 OpenAI 兼容 **AI 线路**（增删改查、设默认、发现/启用模型）；
+- **模型目录**同步与分类（`llm|asr|tts|e2e|unknown`）；
+- **RTC / LiveKit** 连接与互动管线绑定（`cascaded` / `e2e`）；
+- **语音**（阿里云 NLS/CosyVoice 与豆包线路、系统音色试听）；
+- 账户、资料、对象存储、角色话术。
+
+自建 LiveKit + Agent 默认不随基础 compose 启动；需要字幕时在 `server/deploy`（或开发用 `server/control-api`）执行 `docker compose --profile livekit up -d`，再用 `npm run test:livekit-smoke` / `npm run test:livekit-load` 做 1 路和 10 路纯音频检查。
 
 ## 运行
 
 ```powershell
 Copy-Item .env.example .env.local
-# 编辑 .env.local，填写 API Key、Base URL 和模型名
+# 桌面会话连管理端后，模型/语音/管线以管理端为准；本机 .env.local 仅作未登录回退
 npm install
 npm run dev
 ```

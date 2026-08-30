@@ -42,16 +42,34 @@ the compose network only. It does not publish a host port. `control-api` starts
 even if the model weights are still downloading; follow-up questions degrade to
 empty knowledge until the index is ready.
 
-Optional LiveKit line (default `activeProvider` stays `volcengine`):
+### Current product surface (settings)
+
+- **AI providers**: multiple OpenAI-compatible lines under
+  `/api/v1/admin/settings/ai/providers` (CRUD, activate, per-line discover/models).
+- **Model catalog**: `/api/v1/admin/settings/catalog` sync + classify
+  (`llm|asr|tts|e2e|unknown`); used by the RTC binding UI.
+- **RTC**: LiveKit only (火山 RTC columns dropped in migration
+  `00013_drop_volcengine_rtc`). Token issue is LiveKit JWT.
+- **Interactive pipeline**: admin `/settings/pipeline` + RTC page binding;
+  clients/agents read `/api/v1/client/settings/pipeline` and
+  `/api/v1/agent/settings/*` (agent calls need `AGENT_INTERNAL_TOKEN`).
+- **Speech**: Alibaba NLS/CosyVoice and 豆包; preview via
+  `POST /api/v1/admin/settings/speech/preview`.
+- Migrations of note: `00014_ai_providers_multi`, `00015_model_catalog`
+  (after `00013_drop_volcengine_rtc`).
+
+Optional LiveKit SFU + subtitle/E2E agent (compose profile `livekit`):
 
 ```powershell
-docker compose --profile livekit up -d livekit
+docker compose --profile livekit up -d livekit livekit-agent
 npm run test:livekit-smoke
 npm run test:livekit-load
 ```
 
-`livekit-agent` is in the same profile and only emits `subtitle.v1` JSON when
-`LIVEKIT_ASR_API_KEY` is set. Do not run local Whisper/FunASR on the 4C8G host.
+`livekit-agent` loads speech/pipeline/AI from this API when
+`CONTROL_API_ORIGIN` + `AGENT_INTERNAL_TOKEN` are set. Cascaded mode needs
+Alibaba NLS env (or equivalent from agent settings). Do not run local
+Whisper/FunASR on the 4C8G host.
 
 The API process is `control-api`. `control-api-admin` is a one-shot bootstrap
 profile and is not started by `docker compose up -d`.
@@ -95,6 +113,7 @@ go test ./integration -run TestSmoke -v
 | `EMBEDDING_MODEL` | no | `BAAI/bge-m3` | Embedding model id stored with chunks. Changing it requires a full reindex. |
 | `INITIAL_ADMIN_USERNAME` | no | `admin` | Seeded only when no administrator exists. |
 | `INITIAL_ADMIN_PASSWORD` | no | `adminqaz` | Seeded only when no administrator exists. Changing this env later does not reset an existing password. |
+| `AGENT_INTERNAL_TOKEN` | no | empty | Shared secret for LiveKit agent → `/api/v1/agent/settings/*`. Required in production when the agent runs. |
 
 The HTTP server applies embedded goose migrations on start. Empty databases are
 created and upgraded automatically; keep a backup before upgrading a populated

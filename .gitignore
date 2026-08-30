@@ -19,8 +19,11 @@ data/
 public/vendor/vad/
 out/
 dist/
+dist-verify/
 dist-new/
 dist-desktop/
+_tmp_*.png
+crop_*.png
 *.tsbuildinfo
 __pycache__/
 *.py[cod]
@@ -30,5 +33,8 @@ native/**/publish/
 .desktop-runtime/
 .worktrees/
 .idea/
+# Agent / Superpowers session ledgers and design drafts — keep local, never publish.
+.superpowers/
+docs/superpowers/
 resources/prerequisites/*
 !resources/prerequisites/.gitkeep

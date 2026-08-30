@@ -1,6 +1,15 @@
 # Go Control API AI Handoff
 
-Last updated: 2026-08-15 (Asia/Shanghai)
+> **Historical snapshot (2026-08-15).** Do not treat paths, worktrees, or “next
+> tasks” below as current. Agent ledgers under `.superpowers/` and
+> `docs/superpowers/` are local-only (gitignored). For today’s behavior see:
+>
+> - [server/control-api/README.md](../server/control-api/README.md)
+> - [server/management-web/README.md](../server/management-web/README.md)
+> - [docs/windows-client.md](windows-client.md)
+> - [docs/dependency-decisions.md](dependency-decisions.md) (top entries = current)
+
+Last updated as a living handoff: 2026-08-15 (Asia/Shanghai). Archived below.
 
 ## Resume location
 
