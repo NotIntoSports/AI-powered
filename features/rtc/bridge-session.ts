@@ -1,4 +1,3 @@
-import VERTC from "@volcengine/rtc";
 import { createSubtitleTransport } from "../../desktop/rtc/create-transport.ts";
 import { loadRemoteMonitorEnabled, subscribeRemoteMonitor } from "../audio/remote-monitor.ts";
 import { emitPipelineEvent } from "../diagnostics/pipeline-log.ts";
@@ -17,7 +16,6 @@ export type DesktopBridge = {
 type RtcTokenResponse = {
   provider?: SubtitleProvider;
   token?: string;
-  appId?: string;
   url?: string;
   roomId?: string;
   userId?: string;
@@ -38,11 +36,10 @@ export function getDesktopBridge(): DesktopBridge | null {
   return (window as { aiInterviewerDesktop?: DesktopBridge }).aiInterviewerDesktop || null;
 }
 
-export function providerLabel(provider: SubtitleProvider) {
-  return provider === "livekit" ? "自建 LiveKit" : "火山云 RTC";
+export function providerLabel(_provider: SubtitleProvider) {
+  return "LiveKit";
 }
 
-// createPcmTrack 原样搬自 rtc-bridge-control.tsx（48kHz PCM16 → MediaStreamTrack，含监听增益）
 function createPcmTrack(monitorEnabled: boolean) {
   const context = new AudioContext({ sampleRate: 48_000 });
   const destination = context.createMediaStreamDestination();
@@ -106,7 +103,7 @@ export async function startBridgeSession(
     const bridge = getDesktopBridge();
     if (!bridge && !debugWeb) throw new Error("请在 Windows 客户端中使用音频桥接功能。");
     console.log(`[bridge] start owner=${owner} pid=${pid} mode=${bridge ? "desktop" : "web-debug"}`);
-    events.onStatus("正在建立音频轨道和字幕线路…");
+    events.onStatus("正在建立音频轨道和 LiveKit 字幕线路…");
     const sessionId = makeBridgeRoomId(roomIdPrefix);
     const userId = `bridge_${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`;
     const tokenResponse = await fetch("/api/rtc/token", {
@@ -115,9 +112,10 @@ export async function startBridgeSession(
       body: JSON.stringify({ roomId: sessionId, userId })
     });
     const token = await tokenResponse.json() as RtcTokenResponse;
-    console.log(`[bridge] token status=${tokenResponse.status} provider=${token.provider || "volcengine"} urlPresent=${Boolean(token.url)} appIdPresent=${Boolean(token.appId)} tokenPresent=${Boolean(token.token)} roomId=${token.roomId || sessionId} code=${tokenResponse.ok ? "-" : token.message || "unknown"}`);
-    if (!tokenResponse.ok) throw new Error(token.message || "RTC Token 获取失败");
-    const activeProvider: SubtitleProvider = token.provider === "livekit" ? "livekit" : "volcengine";
+    console.log(`[bridge] token status=${tokenResponse.status} provider=${token.provider || "livekit"} urlPresent=${Boolean(token.url)} tokenPresent=${Boolean(token.token)} roomId=${token.roomId || sessionId}`);
+    if (!tokenResponse.ok) throw new Error(token.message || "LiveKit Token 获取失败");
+    if (!token.token || !token.url) throw new Error("LiveKit Token 获取失败");
+    const activeProvider: SubtitleProvider = "livekit";
     const language = token.language || "zh";
     const roomId = token.roomId || sessionId;
     void emitPipelineEvent({
@@ -126,7 +124,6 @@ export async function startBridgeSession(
       fields: { httpStatus: tokenResponse.status, provider: activeProvider, status: tokenResponse.ok ? "ok" : "failed" }
     });
     const pcm = createPcmTrack(loadRemoteMonitorEnabled());
-    // web-debug 旁路：无桌面捕获时用本地音轨走完 token → transport → connect 链路
     let debugTrack: MediaStreamTrack | null = null;
     let debugAudioContext: AudioContext | null = null;
     if (!bridge) {
@@ -152,37 +149,29 @@ export async function startBridgeSession(
     let stopMonitorSync: (() => void) | undefined;
     let removePcm: (() => void) | undefined;
     let removeEvent: (() => void) | undefined;
-    let engine: ReturnType<typeof VERTC.createEngine> | undefined;
     let transport: SubtitleTransport | undefined;
     try {
       stopMonitorSync = subscribeRemoteMonitor(() => pcm.setMonitorEnabled(loadRemoteMonitorEnabled()));
       subtitleSink.reset();
-      if (activeProvider === "volcengine") {
-        if (!token.appId || !token.token) throw new Error("RTC Token 获取失败");
-        engine = VERTC.createEngine(token.appId);
-        transport = await createSubtitleTransport("volcengine", subtitleSink, engine as never);
-      } else {
-        transport = await createSubtitleTransport("livekit", subtitleSink);
-      }
-      console.log(`[bridge] transport created provider=${activeProvider}`);
+      transport = await createSubtitleTransport(subtitleSink);
+      console.log("[bridge] transport created provider=livekit");
       const connectStartedAt = Date.now();
       try {
         await transport.connect({
           sessionId,
           language,
           track: publishTrack,
-          token: token.token || "",
+          token: token.token,
           roomId,
           userId: token.userId || userId,
-          appId: token.appId,
           url: token.url,
           onConnectionStateChange: (state, reason) => events.onTransportState(state, reason)
         });
       } catch (error) {
-        console.error(`[bridge] transport connect failed provider=${activeProvider} after=${Date.now() - connectStartedAt}ms`, error);
+        console.error(`[bridge] transport connect failed after=${Date.now() - connectStartedAt}ms`, error);
         throw error;
       }
-      console.log(`[bridge] transport connected provider=${activeProvider} after=${Date.now() - connectStartedAt}ms`);
+      console.log(`[bridge] transport connected after=${Date.now() - connectStartedAt}ms`);
       void emitPipelineEvent({
         event: "bridge.transport-connected",
         traceId: roomId,
@@ -237,7 +226,6 @@ export async function startBridgeSession(
           setRtcNetwork({ connected: false });
           await bridge?.stopAudioCapture().catch(() => undefined);
           await transport?.disconnect().catch(() => undefined);
-          if (engine) VERTC.destroyEngine(engine);
           pcm.track.stop();
           await pcm.context.close().catch(() => undefined);
           debugTrack?.stop();
@@ -245,7 +233,7 @@ export async function startBridgeSession(
           subtitleSink.reset(sessionId);
         }
       };
-      console.log(`[bridge] session ready owner=${owner} roomId=${roomId} provider=${activeProvider}`);
+      console.log(`[bridge] session ready owner=${owner} roomId=${roomId} provider=livekit`);
       void emitPipelineEvent({
         event: "bridge.ready",
         traceId: roomId,
@@ -263,7 +251,6 @@ export async function startBridgeSession(
       removePcm?.();
       removeEvent?.();
       await transport?.disconnect().catch(() => undefined);
-      if (engine) VERTC.destroyEngine(engine);
       pcm.track.stop();
       await pcm.context.close().catch(() => undefined);
       throw error;

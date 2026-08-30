@@ -43,6 +43,24 @@ type SpeechRecord struct {
 	EncryptedAliyunAccessKeyID     []byte
 	EncryptedAliyunAccessKeySecret []byte
 	EncryptedAliyunToken           []byte
+	AliyunASRCustomizationID         string
+	AliyunASRVocabularyID            string
+	AliyunASREnableITN               bool
+	AliyunASREnablePunc              bool
+	AliyunASREnableDisfluency        bool
+	AliyunASREnableIntermediate      bool
+	AliyunASREnableSemanticBreak     bool
+	AliyunASRMaxSentenceSilence      int
+	AliyunASREnableVoiceDetection    bool
+	AliyunASRMaxStartSilence         *int
+	AliyunASRMaxEndSilence           *int
+	TTSVolume                        *int
+	TTSSpeechRate                    *int
+	TTSPitchRate                     *int
+	TTSSampleRate                    *int
+	ASREnableITN                     bool
+	ASREnablePunc                    bool
+	ASRModelName                     string
 }
 
 type SpeechInput struct {
@@ -69,6 +87,24 @@ type SpeechInput struct {
 	ClearAliyunAccessKeySecret bool
 	ClearAliyunToken           bool
 	TestProvider               string
+	TTSVolume                  *int
+	TTSSpeechRate              *int
+	TTSPitchRate               *int
+	TTSSampleRate              *int
+	ASREnableITN               *bool
+	ASREnablePunc              *bool
+	ASRModelName               string
+	AliyunASRCustomizationID   string
+	AliyunASRVocabularyID      string
+	AliyunASREnableITN         *bool
+	AliyunASREnablePunc        *bool
+	AliyunASREnableDisfluency  *bool
+	AliyunASREnableIntermediate *bool
+	AliyunASREnableSemanticBreak *bool
+	AliyunASRMaxSentenceSilence *int
+	AliyunASREnableVoiceDetection *bool
+	AliyunASRMaxStartSilence   *int
+	AliyunASRMaxEndSilence     *int
 }
 
 type PublicSpeech struct {
@@ -94,6 +130,25 @@ type PublicSpeech struct {
 	AliyunAccessKeyIDConfigured     bool       `json:"aliyunAccessKeyIdConfigured"`
 	AliyunAccessKeySecretConfigured bool       `json:"aliyunAccessKeySecretConfigured"`
 	AliyunTokenConfigured           bool       `json:"aliyunTokenConfigured"`
+	TTSVolume                       *int       `json:"ttsVolume,omitempty"`
+	TTSSpeechRate                   *int       `json:"ttsSpeechRate,omitempty"`
+	TTSPitchRate                    *int       `json:"ttsPitchRate,omitempty"`
+	TTSSampleRate                   *int       `json:"ttsSampleRate,omitempty"`
+	ASREnableITN                    bool       `json:"asrEnableItn"`
+	ASREnablePunc                   bool       `json:"asrEnablePunc"`
+	ASRModelName                    string     `json:"asrModelName,omitempty"`
+	AliyunASRCustomizationID        string     `json:"aliyunAsrCustomizationId,omitempty"`
+	AliyunASRVocabularyID           string     `json:"aliyunAsrVocabularyId,omitempty"`
+	AliyunASREnableITN              bool       `json:"aliyunAsrEnableItn"`
+	AliyunASREnablePunc             bool       `json:"aliyunAsrEnablePunc"`
+	AliyunASREnableDisfluency       bool       `json:"aliyunAsrEnableDisfluency"`
+	AliyunASREnableIntermediate     bool       `json:"aliyunAsrEnableIntermediate"`
+	AliyunASREnableSemanticBreak    bool       `json:"aliyunAsrEnableSemanticBreak"`
+	AliyunASRMaxSentenceSilence     int        `json:"aliyunAsrMaxSentenceSilence"`
+	AliyunASREnableVoiceDetection   bool       `json:"aliyunAsrEnableVoiceDetection"`
+	AliyunASRMaxStartSilence        *int       `json:"aliyunAsrMaxStartSilence,omitempty"`
+	AliyunASRMaxEndSilence          *int       `json:"aliyunAsrMaxEndSilence,omitempty"`
+	AgentConsumer                   bool       `json:"agentConsumer"`
 	ConfigVersion                   int        `json:"configVersion"`
 	UpdatedAt                       *time.Time `json:"updatedAt,omitempty"`
 	UpdatedByUsername               string     `json:"updatedByUsername,omitempty"`
@@ -127,7 +182,16 @@ func (s *Store) GetSpeech(ctx context.Context) (SpeechRecord, error) {
 			coalesce(c.aliyun_app_key, ''), coalesce(c.aliyun_voice, 'xiaoyun'),
 			coalesce(c.aliyun_gateway, ''), c.aliyun_enabled,
 			c.encrypted_aliyun_access_key_id, c.encrypted_aliyun_access_key_secret,
-			c.encrypted_aliyun_token
+			c.encrypted_aliyun_token,
+			c.tts_volume, c.tts_speech_rate, c.tts_pitch_rate, c.tts_sample_rate,
+			coalesce(c.asr_enable_itn, true), coalesce(c.asr_enable_punc, true),
+			coalesce(c.asr_model_name, ''),
+			coalesce(c.aliyun_asr_customization_id, ''), coalesce(c.aliyun_asr_vocabulary_id, ''),
+			coalesce(c.aliyun_asr_enable_itn, true), coalesce(c.aliyun_asr_enable_punc, true),
+			coalesce(c.aliyun_asr_enable_disfluency, false), coalesce(c.aliyun_asr_enable_intermediate, true),
+			coalesce(c.aliyun_asr_enable_semantic_break, false), coalesce(c.aliyun_asr_max_sentence_silence, 800),
+			coalesce(c.aliyun_asr_enable_voice_detection, false),
+			c.aliyun_asr_max_start_silence, c.aliyun_asr_max_end_silence
 		from speech_configs as c
 		left join users as u on u.id = c.updated_by_user_id
 		where c.id = $1
@@ -154,6 +218,24 @@ func (s *Store) GetSpeech(ctx context.Context) (SpeechRecord, error) {
 		&record.EncryptedAliyunAccessKeyID,
 		&record.EncryptedAliyunAccessKeySecret,
 		&record.EncryptedAliyunToken,
+		&record.TTSVolume,
+		&record.TTSSpeechRate,
+		&record.TTSPitchRate,
+		&record.TTSSampleRate,
+		&record.ASREnableITN,
+		&record.ASREnablePunc,
+		&record.ASRModelName,
+		&record.AliyunASRCustomizationID,
+		&record.AliyunASRVocabularyID,
+		&record.AliyunASREnableITN,
+		&record.AliyunASREnablePunc,
+		&record.AliyunASREnableDisfluency,
+		&record.AliyunASREnableIntermediate,
+		&record.AliyunASREnableSemanticBreak,
+		&record.AliyunASRMaxSentenceSilence,
+		&record.AliyunASREnableVoiceDetection,
+		&record.AliyunASRMaxStartSilence,
+		&record.AliyunASRMaxEndSilence,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return SpeechRecord{}, ErrNotConfigured
@@ -226,6 +308,7 @@ func (s *Store) PutSpeech(ctx context.Context, actor users.User, input SpeechInp
 	if normalized.AliyunGateway == "" && currentErr == nil {
 		normalized.AliyunGateway = current.AliyunGateway
 	}
+	normalized = mergeSpeechParams(normalized, current, currentErr == nil)
 
 	enabled := true
 	if normalized.Enabled != nil {
@@ -263,8 +346,15 @@ func (s *Store) PutSpeech(ctx context.Context, actor users.User, input SpeechInp
 			encrypted_api_key, encrypted_access_token, encrypted_secret_key,
 			key_version, config_version, updated_by_user_id, created_at, updated_at,
 			active_provider, aliyun_app_key, aliyun_voice, aliyun_gateway, aliyun_enabled,
-			encrypted_aliyun_access_key_id, encrypted_aliyun_access_key_secret, encrypted_aliyun_token
-		) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$13,$14,$15,$16,$17,$18,$19,$20,$21)
+			encrypted_aliyun_access_key_id, encrypted_aliyun_access_key_secret, encrypted_aliyun_token,
+			tts_volume, tts_speech_rate, tts_pitch_rate, tts_sample_rate,
+			asr_enable_itn, asr_enable_punc, asr_model_name,
+			aliyun_asr_customization_id, aliyun_asr_vocabulary_id,
+			aliyun_asr_enable_itn, aliyun_asr_enable_punc, aliyun_asr_enable_disfluency,
+			aliyun_asr_enable_intermediate, aliyun_asr_enable_semantic_break,
+			aliyun_asr_max_sentence_silence, aliyun_asr_enable_voice_detection,
+			aliyun_asr_max_start_silence, aliyun_asr_max_end_silence
+		) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40)
 		on conflict (id) do update set
 			app_id = excluded.app_id,
 			speaker_id = excluded.speaker_id,
@@ -285,12 +375,43 @@ func (s *Store) PutSpeech(ctx context.Context, actor users.User, input SpeechInp
 			aliyun_enabled = excluded.aliyun_enabled,
 			encrypted_aliyun_access_key_id = excluded.encrypted_aliyun_access_key_id,
 			encrypted_aliyun_access_key_secret = excluded.encrypted_aliyun_access_key_secret,
-			encrypted_aliyun_token = excluded.encrypted_aliyun_token
+			encrypted_aliyun_token = excluded.encrypted_aliyun_token,
+			tts_volume = excluded.tts_volume,
+			tts_speech_rate = excluded.tts_speech_rate,
+			tts_pitch_rate = excluded.tts_pitch_rate,
+			tts_sample_rate = excluded.tts_sample_rate,
+			asr_enable_itn = excluded.asr_enable_itn,
+			asr_enable_punc = excluded.asr_enable_punc,
+			asr_model_name = excluded.asr_model_name,
+			aliyun_asr_customization_id = excluded.aliyun_asr_customization_id,
+			aliyun_asr_vocabulary_id = excluded.aliyun_asr_vocabulary_id,
+			aliyun_asr_enable_itn = excluded.aliyun_asr_enable_itn,
+			aliyun_asr_enable_punc = excluded.aliyun_asr_enable_punc,
+			aliyun_asr_enable_disfluency = excluded.aliyun_asr_enable_disfluency,
+			aliyun_asr_enable_intermediate = excluded.aliyun_asr_enable_intermediate,
+			aliyun_asr_enable_semantic_break = excluded.aliyun_asr_enable_semantic_break,
+			aliyun_asr_max_sentence_silence = excluded.aliyun_asr_max_sentence_silence,
+			aliyun_asr_enable_voice_detection = excluded.aliyun_asr_enable_voice_detection,
+			aliyun_asr_max_start_silence = excluded.aliyun_asr_max_start_silence,
+			aliyun_asr_max_end_silence = excluded.aliyun_asr_max_end_silence
 	`, singletonID, normalized.AppID, normalized.SpeakerID, normalized.TTSResourceID,
 		normalized.ASRResourceID, enabled, apiKey, accessToken, secretKey,
 		keyVersion, configVersion, actor.ID, now, activeProvider, normalized.AliyunAppKey,
 		normalized.AliyunVoice, normalized.AliyunGateway, aliyunEnabled,
-		aliyunID, aliyunSecret, aliyunToken)
+		aliyunID, aliyunSecret, aliyunToken,
+		normalized.TTSVolume, normalized.TTSSpeechRate, normalized.TTSPitchRate, normalized.TTSSampleRate,
+		boolValue(normalized.ASREnableITN, true),
+		boolValue(normalized.ASREnablePunc, true),
+		normalized.ASRModelName,
+		normalized.AliyunASRCustomizationID, normalized.AliyunASRVocabularyID,
+		boolValue(normalized.AliyunASREnableITN, true),
+		boolValue(normalized.AliyunASREnablePunc, true),
+		boolValue(normalized.AliyunASREnableDisfluency, false),
+		boolValue(normalized.AliyunASREnableIntermediate, true),
+		boolValue(normalized.AliyunASREnableSemanticBreak, false),
+		intValue(normalized.AliyunASRMaxSentenceSilence, 800),
+		boolValue(normalized.AliyunASREnableVoiceDetection, false),
+		normalized.AliyunASRMaxStartSilence, normalized.AliyunASRMaxEndSilence)
 	if err != nil {
 		return SpeechRecord{}, ErrStore
 	}
@@ -581,6 +702,25 @@ func PublicSpeechFromErrs(record SpeechRecord, volcErr, aliyunErr error) PublicS
 		AliyunAccessKeyIDConfigured:     aliyunIDConfigured,
 		AliyunAccessKeySecretConfigured: aliyunSecretConfigured,
 		AliyunTokenConfigured:           aliyunTokenConfigured,
+		TTSVolume:                       record.TTSVolume,
+		TTSSpeechRate:                   record.TTSSpeechRate,
+		TTSPitchRate:                    record.TTSPitchRate,
+		TTSSampleRate:                   record.TTSSampleRate,
+		ASREnableITN:                    record.ASREnableITN,
+		ASREnablePunc:                   record.ASREnablePunc,
+		ASRModelName:                    record.ASRModelName,
+		AliyunASRCustomizationID:        record.AliyunASRCustomizationID,
+		AliyunASRVocabularyID:           record.AliyunASRVocabularyID,
+		AliyunASREnableITN:              record.AliyunASREnableITN,
+		AliyunASREnablePunc:             record.AliyunASREnablePunc,
+		AliyunASREnableDisfluency:       record.AliyunASREnableDisfluency,
+		AliyunASREnableIntermediate:     record.AliyunASREnableIntermediate,
+		AliyunASREnableSemanticBreak:    record.AliyunASREnableSemanticBreak,
+		AliyunASRMaxSentenceSilence:     record.AliyunASRMaxSentenceSilence,
+		AliyunASREnableVoiceDetection:   record.AliyunASREnableVoiceDetection,
+		AliyunASRMaxStartSilence:        record.AliyunASRMaxStartSilence,
+		AliyunASRMaxEndSilence:          record.AliyunASRMaxEndSilence,
+		AgentConsumer:                   true,
 		ConfigVersion:                   record.ConfigVersion,
 		UpdatedAt:                       &updated,
 		UpdatedByUsername:               record.UpdatedByUsername,
@@ -624,6 +764,24 @@ func normalizeSpeechInput(input SpeechInput) (SpeechInput, error) {
 		ClearAliyunAccessKeySecret: input.ClearAliyunAccessKeySecret,
 		ClearAliyunToken:           input.ClearAliyunToken,
 		TestProvider:               strings.TrimSpace(input.TestProvider),
+		TTSVolume:                  input.TTSVolume,
+		TTSSpeechRate:              input.TTSSpeechRate,
+		TTSPitchRate:               input.TTSPitchRate,
+		TTSSampleRate:              input.TTSSampleRate,
+		ASREnableITN:               input.ASREnableITN,
+		ASREnablePunc:              input.ASREnablePunc,
+		ASRModelName:               strings.TrimSpace(input.ASRModelName),
+		AliyunASRCustomizationID:   strings.TrimSpace(input.AliyunASRCustomizationID),
+		AliyunASRVocabularyID:      strings.TrimSpace(input.AliyunASRVocabularyID),
+		AliyunASREnableITN:         input.AliyunASREnableITN,
+		AliyunASREnablePunc:        input.AliyunASREnablePunc,
+		AliyunASREnableDisfluency:  input.AliyunASREnableDisfluency,
+		AliyunASREnableIntermediate: input.AliyunASREnableIntermediate,
+		AliyunASREnableSemanticBreak: input.AliyunASREnableSemanticBreak,
+		AliyunASRMaxSentenceSilence: input.AliyunASRMaxSentenceSilence,
+		AliyunASREnableVoiceDetection: input.AliyunASREnableVoiceDetection,
+		AliyunASRMaxStartSilence:   input.AliyunASRMaxStartSilence,
+		AliyunASRMaxEndSilence:     input.AliyunASRMaxEndSilence,
 	}
 	if utf8.RuneCountInString(normalized.AppID) > 200 || utf8.RuneCountInString(normalized.AliyunAppKey) > 200 {
 		return SpeechInput{}, ErrInvalidInput
@@ -704,4 +862,100 @@ func validAliyunVoice(value string) bool {
 
 func validAliyunGateway(value string) bool {
 	return strings.HasPrefix(value, "https://") && strings.Contains(value, "nls-gateway") && !strings.ContainsAny(value, " \t")
+}
+
+func (s *Store) DeleteUserSpeechVoice(ctx context.Context, userID string) error {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return ErrInvalidInput
+	}
+	_, err := s.db.Exec(ctx, `delete from user_speech_voices where user_id = $1`, userID)
+	if err != nil {
+		return ErrStore
+	}
+	return nil
+}
+
+func mergeSpeechParams(input SpeechInput, current SpeechRecord, hasCurrent bool) SpeechInput {
+	if !hasCurrent {
+		return input
+	}
+	if input.TTSVolume == nil {
+		input.TTSVolume = current.TTSVolume
+	}
+	if input.TTSSpeechRate == nil {
+		input.TTSSpeechRate = current.TTSSpeechRate
+	}
+	if input.TTSPitchRate == nil {
+		input.TTSPitchRate = current.TTSPitchRate
+	}
+	if input.TTSSampleRate == nil {
+		input.TTSSampleRate = current.TTSSampleRate
+	}
+	if input.ASREnableITN == nil {
+		value := current.ASREnableITN
+		input.ASREnableITN = &value
+	}
+	if input.ASREnablePunc == nil {
+		value := current.ASREnablePunc
+		input.ASREnablePunc = &value
+	}
+	if input.ASRModelName == "" {
+		input.ASRModelName = current.ASRModelName
+	}
+	if input.AliyunASRCustomizationID == "" {
+		input.AliyunASRCustomizationID = current.AliyunASRCustomizationID
+	}
+	if input.AliyunASRVocabularyID == "" {
+		input.AliyunASRVocabularyID = current.AliyunASRVocabularyID
+	}
+	if input.AliyunASREnableITN == nil {
+		value := current.AliyunASREnableITN
+		input.AliyunASREnableITN = &value
+	}
+	if input.AliyunASREnablePunc == nil {
+		value := current.AliyunASREnablePunc
+		input.AliyunASREnablePunc = &value
+	}
+	if input.AliyunASREnableDisfluency == nil {
+		value := current.AliyunASREnableDisfluency
+		input.AliyunASREnableDisfluency = &value
+	}
+	if input.AliyunASREnableIntermediate == nil {
+		value := current.AliyunASREnableIntermediate
+		input.AliyunASREnableIntermediate = &value
+	}
+	if input.AliyunASREnableSemanticBreak == nil {
+		value := current.AliyunASREnableSemanticBreak
+		input.AliyunASREnableSemanticBreak = &value
+	}
+	if input.AliyunASRMaxSentenceSilence == nil {
+		value := current.AliyunASRMaxSentenceSilence
+		input.AliyunASRMaxSentenceSilence = &value
+	}
+	if input.AliyunASREnableVoiceDetection == nil {
+		value := current.AliyunASREnableVoiceDetection
+		input.AliyunASREnableVoiceDetection = &value
+	}
+	if input.AliyunASRMaxStartSilence == nil {
+		input.AliyunASRMaxStartSilence = current.AliyunASRMaxStartSilence
+	}
+	if input.AliyunASRMaxEndSilence == nil {
+		input.AliyunASRMaxEndSilence = current.AliyunASRMaxEndSilence
+	}
+	return input
+}
+
+func boolValue(value *bool, fallback bool) bool {
+	if value == nil {
+		return fallback
+	}
+	return *value
+}
+
+func intValue(value *int, fallback int) int {
+	if value == nil {
+		return fallback
+	}
+	return *value
 }

@@ -91,8 +91,9 @@ func main() {
 			KnowledgeAdmin:    knowledgeAdmin,
 			VoiceSampleAdmin:  voicesamples.NewService(pool, box, nil),
 			SessionTTL:        cfg.SessionTTL,
-			CookieSecure:      cfg.CookieSecure,
+			CookieSecure:       cfg.CookieSecure,
 			TrustedProxyCIDRs: cfg.TrustedProxyCIDRs,
+			AgentInternalToken: cfg.AgentInternalToken,
 		}),
 	}
 	serverErrors := make(chan error, 1)
