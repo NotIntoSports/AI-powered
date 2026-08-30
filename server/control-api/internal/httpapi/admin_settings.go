@@ -63,6 +63,8 @@ type SettingsAdmin interface {
 	ActivateProviderModel(ctx context.Context, actor users.User, requestID, providerID, modelID string) (settings.PublicAIProvider, error)
 	ListCatalog(ctx context.Context, capability, query string) ([]settings.CatalogEntry, error)
 	SyncCatalog(ctx context.Context) (settings.CatalogSyncResult, error)
+	SyncOfficialTokenPlanCatalog(ctx context.Context) (settings.OfficialCatalogSyncResult, error)
+	VerifyTokenPlanModel(ctx context.Context, providerID, modelID string) (settings.ModelVerificationResult, error)
 	ReclassifyCatalog(ctx context.Context) (int, error)
 	PatchCatalogModel(ctx context.Context, providerID, modelID string, input settings.CatalogPatchInput) (settings.DiscoveredModel, error)
 	GetClientPipeline(ctx context.Context) (settings.ClientPipeline, error)
@@ -119,47 +121,47 @@ type storageSettingsRequest struct {
 }
 
 type speechSettingsRequest struct {
-	AppID                      string `json:"appId"`
-	SpeakerID                  string `json:"speakerId"`
-	TTSResourceID              string `json:"ttsResourceId"`
-	ASRResourceID              string `json:"asrResourceId"`
-	APIKey                     string `json:"apiKey"`
-	AccessToken                string `json:"accessToken"`
-	SecretKey                  string `json:"secretKey"`
-	ClearAPIKey                bool   `json:"clearApiKey"`
-	ClearAccessToken           bool   `json:"clearAccessToken"`
-	ClearSecretKey             bool   `json:"clearSecretKey"`
-	Enabled                    *bool  `json:"enabled"`
-	ActiveProvider             string `json:"activeProvider"`
-	AliyunAppKey               string `json:"aliyunAppKey"`
-	AliyunVoice                string `json:"aliyunVoice"`
-	AliyunGateway              string `json:"aliyunGateway"`
-	AliyunEnabled              *bool  `json:"aliyunEnabled"`
-	AliyunAccessKeyID          string `json:"aliyunAccessKeyId"`
-	AliyunAccessKeySecret      string `json:"aliyunAccessKeySecret"`
-	AliyunToken                string `json:"aliyunToken"`
-	ClearAliyunAccessKeyID     bool   `json:"clearAliyunAccessKeyId"`
-	ClearAliyunAccessKeySecret bool   `json:"clearAliyunAccessKeySecret"`
-	ClearAliyunToken           bool   `json:"clearAliyunToken"`
-	TestProvider               string `json:"testProvider"`
-	TTSVolume                  *int   `json:"ttsVolume"`
-	TTSSpeechRate              *int   `json:"ttsSpeechRate"`
-	TTSPitchRate               *int   `json:"ttsPitchRate"`
-	TTSSampleRate              *int   `json:"ttsSampleRate"`
-	ASREnableITN               *bool  `json:"asrEnableItn"`
-	ASREnablePunc              *bool  `json:"asrEnablePunc"`
-	ASRModelName               string `json:"asrModelName"`
-	AliyunASRCustomizationID   string `json:"aliyunAsrCustomizationId"`
-	AliyunASRVocabularyID      string `json:"aliyunAsrVocabularyId"`
-	AliyunASREnableITN         *bool  `json:"aliyunAsrEnableItn"`
-	AliyunASREnablePunc        *bool  `json:"aliyunAsrEnablePunc"`
-	AliyunASREnableDisfluency  *bool  `json:"aliyunAsrEnableDisfluency"`
-	AliyunASREnableIntermediate *bool `json:"aliyunAsrEnableIntermediate"`
-	AliyunASREnableSemanticBreak *bool `json:"aliyunAsrEnableSemanticBreak"`
-	AliyunASRMaxSentenceSilence *int  `json:"aliyunAsrMaxSentenceSilence"`
-	AliyunASREnableVoiceDetection *bool `json:"aliyunAsrEnableVoiceDetection"`
-	AliyunASRMaxStartSilence   *int   `json:"aliyunAsrMaxStartSilence"`
-	AliyunASRMaxEndSilence     *int   `json:"aliyunAsrMaxEndSilence"`
+	AppID                         string `json:"appId"`
+	SpeakerID                     string `json:"speakerId"`
+	TTSResourceID                 string `json:"ttsResourceId"`
+	ASRResourceID                 string `json:"asrResourceId"`
+	APIKey                        string `json:"apiKey"`
+	AccessToken                   string `json:"accessToken"`
+	SecretKey                     string `json:"secretKey"`
+	ClearAPIKey                   bool   `json:"clearApiKey"`
+	ClearAccessToken              bool   `json:"clearAccessToken"`
+	ClearSecretKey                bool   `json:"clearSecretKey"`
+	Enabled                       *bool  `json:"enabled"`
+	ActiveProvider                string `json:"activeProvider"`
+	AliyunAppKey                  string `json:"aliyunAppKey"`
+	AliyunVoice                   string `json:"aliyunVoice"`
+	AliyunGateway                 string `json:"aliyunGateway"`
+	AliyunEnabled                 *bool  `json:"aliyunEnabled"`
+	AliyunAccessKeyID             string `json:"aliyunAccessKeyId"`
+	AliyunAccessKeySecret         string `json:"aliyunAccessKeySecret"`
+	AliyunToken                   string `json:"aliyunToken"`
+	ClearAliyunAccessKeyID        bool   `json:"clearAliyunAccessKeyId"`
+	ClearAliyunAccessKeySecret    bool   `json:"clearAliyunAccessKeySecret"`
+	ClearAliyunToken              bool   `json:"clearAliyunToken"`
+	TestProvider                  string `json:"testProvider"`
+	TTSVolume                     *int   `json:"ttsVolume"`
+	TTSSpeechRate                 *int   `json:"ttsSpeechRate"`
+	TTSPitchRate                  *int   `json:"ttsPitchRate"`
+	TTSSampleRate                 *int   `json:"ttsSampleRate"`
+	ASREnableITN                  *bool  `json:"asrEnableItn"`
+	ASREnablePunc                 *bool  `json:"asrEnablePunc"`
+	ASRModelName                  string `json:"asrModelName"`
+	AliyunASRCustomizationID      string `json:"aliyunAsrCustomizationId"`
+	AliyunASRVocabularyID         string `json:"aliyunAsrVocabularyId"`
+	AliyunASREnableITN            *bool  `json:"aliyunAsrEnableItn"`
+	AliyunASREnablePunc           *bool  `json:"aliyunAsrEnablePunc"`
+	AliyunASREnableDisfluency     *bool  `json:"aliyunAsrEnableDisfluency"`
+	AliyunASREnableIntermediate   *bool  `json:"aliyunAsrEnableIntermediate"`
+	AliyunASREnableSemanticBreak  *bool  `json:"aliyunAsrEnableSemanticBreak"`
+	AliyunASRMaxSentenceSilence   *int   `json:"aliyunAsrMaxSentenceSilence"`
+	AliyunASREnableVoiceDetection *bool  `json:"aliyunAsrEnableVoiceDetection"`
+	AliyunASRMaxStartSilence      *int   `json:"aliyunAsrMaxStartSilence"`
+	AliyunASRMaxEndSilence        *int   `json:"aliyunAsrMaxEndSilence"`
 }
 
 type pipelineSettingsRequest struct {
@@ -819,6 +821,12 @@ func writeSettingsError(w http.ResponseWriter, request *http.Request, err error)
 		writeAPIError(w, request, http.StatusServiceUnavailable, "SETTINGS_KEY_MISSING", "settings master key is not configured")
 	case errors.Is(err, settings.ErrDecryptFailed):
 		writeAPIError(w, request, http.StatusServiceUnavailable, "SETTINGS_UNAVAILABLE", "stored settings cannot be decrypted")
+	case errors.Is(err, settings.ErrModelNotVerified):
+		writeAPIError(w, request, http.StatusConflict, "MODEL_NOT_VERIFIED", "model must pass interactive verification before activation")
+	case errors.Is(err, settings.ErrOfficialCatalogUnavailable):
+		writeAPIError(w, request, http.StatusBadGateway, "OFFICIAL_CATALOG_UNAVAILABLE", "official catalog unavailable; previous successful catalog was preserved")
+	case errors.Is(err, settings.ErrStore):
+		writeAPIError(w, request, http.StatusServiceUnavailable, "SETTINGS_STORE_UNAVAILABLE", "settings database unavailable")
 	default:
 		writeAPIError(w, request, http.StatusInternalServerError, "INTERNAL_ERROR", "settings service unavailable")
 	}
@@ -827,47 +835,47 @@ func writeSettingsError(w http.ResponseWriter, request *http.Request, err error)
 
 func speechInputFromRequest(input speechSettingsRequest) settings.SpeechInput {
 	return settings.SpeechInput{
-		AppID:                      input.AppID,
-		SpeakerID:                  input.SpeakerID,
-		TTSResourceID:              input.TTSResourceID,
-		ASRResourceID:              input.ASRResourceID,
-		APIKey:                     input.APIKey,
-		AccessToken:                input.AccessToken,
-		SecretKey:                  input.SecretKey,
-		ClearAPIKey:                input.ClearAPIKey,
-		ClearAccessToken:           input.ClearAccessToken,
-		ClearSecretKey:             input.ClearSecretKey,
-		Enabled:                    input.Enabled,
-		ActiveProvider:             input.ActiveProvider,
-		AliyunAppKey:               input.AliyunAppKey,
-		AliyunVoice:                input.AliyunVoice,
-		AliyunGateway:              input.AliyunGateway,
-		AliyunEnabled:              input.AliyunEnabled,
-		AliyunAccessKeyID:          input.AliyunAccessKeyID,
-		AliyunAccessKeySecret:      input.AliyunAccessKeySecret,
-		AliyunToken:                input.AliyunToken,
-		ClearAliyunAccessKeyID:     input.ClearAliyunAccessKeyID,
-		ClearAliyunAccessKeySecret: input.ClearAliyunAccessKeySecret,
-		ClearAliyunToken:           input.ClearAliyunToken,
-		TestProvider:               input.TestProvider,
-		TTSVolume:                  input.TTSVolume,
-		TTSSpeechRate:              input.TTSSpeechRate,
-		TTSPitchRate:               input.TTSPitchRate,
-		TTSSampleRate:              input.TTSSampleRate,
-		ASREnableITN:               input.ASREnableITN,
-		ASREnablePunc:              input.ASREnablePunc,
-		ASRModelName:               input.ASRModelName,
-		AliyunASRCustomizationID:   input.AliyunASRCustomizationID,
-		AliyunASRVocabularyID:      input.AliyunASRVocabularyID,
-		AliyunASREnableITN:         input.AliyunASREnableITN,
-		AliyunASREnablePunc:        input.AliyunASREnablePunc,
-		AliyunASREnableDisfluency:  input.AliyunASREnableDisfluency,
-		AliyunASREnableIntermediate: input.AliyunASREnableIntermediate,
-		AliyunASREnableSemanticBreak: input.AliyunASREnableSemanticBreak,
-		AliyunASRMaxSentenceSilence: input.AliyunASRMaxSentenceSilence,
+		AppID:                         input.AppID,
+		SpeakerID:                     input.SpeakerID,
+		TTSResourceID:                 input.TTSResourceID,
+		ASRResourceID:                 input.ASRResourceID,
+		APIKey:                        input.APIKey,
+		AccessToken:                   input.AccessToken,
+		SecretKey:                     input.SecretKey,
+		ClearAPIKey:                   input.ClearAPIKey,
+		ClearAccessToken:              input.ClearAccessToken,
+		ClearSecretKey:                input.ClearSecretKey,
+		Enabled:                       input.Enabled,
+		ActiveProvider:                input.ActiveProvider,
+		AliyunAppKey:                  input.AliyunAppKey,
+		AliyunVoice:                   input.AliyunVoice,
+		AliyunGateway:                 input.AliyunGateway,
+		AliyunEnabled:                 input.AliyunEnabled,
+		AliyunAccessKeyID:             input.AliyunAccessKeyID,
+		AliyunAccessKeySecret:         input.AliyunAccessKeySecret,
+		AliyunToken:                   input.AliyunToken,
+		ClearAliyunAccessKeyID:        input.ClearAliyunAccessKeyID,
+		ClearAliyunAccessKeySecret:    input.ClearAliyunAccessKeySecret,
+		ClearAliyunToken:              input.ClearAliyunToken,
+		TestProvider:                  input.TestProvider,
+		TTSVolume:                     input.TTSVolume,
+		TTSSpeechRate:                 input.TTSSpeechRate,
+		TTSPitchRate:                  input.TTSPitchRate,
+		TTSSampleRate:                 input.TTSSampleRate,
+		ASREnableITN:                  input.ASREnableITN,
+		ASREnablePunc:                 input.ASREnablePunc,
+		ASRModelName:                  input.ASRModelName,
+		AliyunASRCustomizationID:      input.AliyunASRCustomizationID,
+		AliyunASRVocabularyID:         input.AliyunASRVocabularyID,
+		AliyunASREnableITN:            input.AliyunASREnableITN,
+		AliyunASREnablePunc:           input.AliyunASREnablePunc,
+		AliyunASREnableDisfluency:     input.AliyunASREnableDisfluency,
+		AliyunASREnableIntermediate:   input.AliyunASREnableIntermediate,
+		AliyunASREnableSemanticBreak:  input.AliyunASREnableSemanticBreak,
+		AliyunASRMaxSentenceSilence:   input.AliyunASRMaxSentenceSilence,
 		AliyunASREnableVoiceDetection: input.AliyunASREnableVoiceDetection,
-		AliyunASRMaxStartSilence:   input.AliyunASRMaxStartSilence,
-		AliyunASRMaxEndSilence:     input.AliyunASRMaxEndSilence,
+		AliyunASRMaxStartSilence:      input.AliyunASRMaxStartSilence,
+		AliyunASRMaxEndSilence:        input.AliyunASRMaxEndSilence,
 	}
 }
 

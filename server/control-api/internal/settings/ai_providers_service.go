@@ -72,6 +72,15 @@ func (s *Service) CreateAIProvider(ctx context.Context, actor users.User, reques
 }
 
 func (s *Service) UpdateAIProvider(ctx context.Context, actor users.User, requestID, id string, input AIProviderInput) (PublicAIProvider, error) {
+	if IsTokenPlanPersonalBaseURL(input.BaseURL) && strings.TrimSpace(input.Model) != "" {
+		verified, err := NewStore(s.db, s.box).TokenPlanModelVerified(ctx, id, strings.TrimSpace(input.Model))
+		if err != nil {
+			return PublicAIProvider{}, err
+		}
+		if !verified {
+			return PublicAIProvider{}, ErrModelNotVerified
+		}
+	}
 	var public PublicAIProvider
 	err := pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
 		store := NewStore(tx, s.box)
@@ -113,6 +122,20 @@ func (s *Service) DeleteAIProvider(ctx context.Context, actor users.User, reques
 }
 
 func (s *Service) ActivateAIProvider(ctx context.Context, actor users.User, requestID, id string) (PublicAIProvider, error) {
+	preStore := NewStore(s.db, s.box)
+	current, currentErr := preStore.GetAIByID(ctx, id)
+	if currentErr != nil {
+		return PublicAIProvider{}, currentErr
+	}
+	if IsTokenPlanPersonalBaseURL(current.BaseURL) {
+		verified, verifyErr := preStore.TokenPlanModelVerified(ctx, id, current.Model)
+		if verifyErr != nil {
+			return PublicAIProvider{}, verifyErr
+		}
+		if !verified {
+			return PublicAIProvider{}, ErrModelNotVerified
+		}
+	}
 	var public PublicAIProvider
 	err := pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
 		store := NewStore(tx, s.box)
@@ -208,7 +231,13 @@ func (s *Service) DiscoverProviderModels(ctx context.Context, id string, draft *
 		}
 		apiKey = decrypted
 	}
-	return s.DiscoverModels(ctx, baseURL, apiKey)
+	if _, err := s.DiscoverModelsForProvider(ctx, id, baseURL, apiKey); err != nil {
+		return nil, err
+	}
+	if IsTokenPlanPersonalBaseURL(baseURL) {
+		return store.ListTokenPlanProviderModels(ctx, id, baseURL)
+	}
+	return store.ListDiscoveredModels(ctx, baseURL)
 }
 
 func (s *Service) AddProviderModel(ctx context.Context, providerID, modelID, ownedBy string) (DiscoveredModel, error) {
@@ -235,6 +264,15 @@ func (s *Service) ActivateProviderModel(ctx context.Context, actor users.User, r
 	if err != nil {
 		return PublicAIProvider{}, err
 	}
+	if IsTokenPlanPersonalBaseURL(record.BaseURL) {
+		verified, verifyErr := store.TokenPlanModelVerified(ctx, providerID, strings.TrimSpace(modelID))
+		if verifyErr != nil {
+			return PublicAIProvider{}, verifyErr
+		}
+		if !verified {
+			return PublicAIProvider{}, ErrModelNotVerified
+		}
+	}
 	enabled := true
 	input := AIProviderInput{
 		Name:              record.Name,
@@ -253,6 +291,9 @@ func (s *Service) ListProviderModels(ctx context.Context, providerID string) ([]
 	record, err := store.GetAIByID(ctx, providerID)
 	if err != nil {
 		return nil, err
+	}
+	if IsTokenPlanPersonalBaseURL(record.BaseURL) {
+		return store.ListTokenPlanProviderModels(ctx, providerID, record.BaseURL)
 	}
 	return store.ListDiscoveredModels(ctx, record.BaseURL)
 }

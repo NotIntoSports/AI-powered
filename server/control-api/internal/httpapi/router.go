@@ -110,6 +110,7 @@ func NewRouter(dependencies Dependencies) http.Handler {
 								r.Patch("/", adminSettings.patchAIProviderModel)
 								r.Delete("/", adminSettings.deleteAIProviderModel)
 								r.Post("/activate", adminSettings.activateAIProviderModel)
+								r.Post("/verify", adminSettings.verifyAIProviderModel)
 							})
 						})
 					})
@@ -119,6 +120,7 @@ func NewRouter(dependencies Dependencies) http.Handler {
 					r.Route("/catalog", func(r chi.Router) {
 						r.Get("/", adminSettings.listCatalog)
 						r.Post("/sync", adminSettings.syncCatalog)
+						r.Post("/token-plan-personal/sync", adminSettings.syncOfficialTokenPlanCatalog)
 						r.Post("/reclassify", adminSettings.reclassifyCatalog)
 						r.Patch("/{providerId}/{modelId}", adminSettings.patchCatalogModel)
 					})

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ConsoleShell, OnlineMark, formatTime } from "../console-shell";
+import { ConsoleShell, formatTime } from "../console-shell";
 import { useAdminSession } from "../use-admin-session";
 import { displayError, parseAPIError, requestJSON, type SessionLine } from "../../lib/control-api";
 
@@ -26,43 +26,51 @@ export default function SessionsPage() {
     return () => window.clearInterval(timer);
   }, [me]);
 
+  const online = lines.filter((line) => line.online);
+  const browserLines = online.filter((line) => line.purpose === "browser");
+  const desktopLines = online.filter((line) => line.purpose === "desktop");
+
+  function LineTable({ items, emptyText }: { items: SessionLine[]; emptyText: string }) {
+    return (
+      <table>
+        <thead>
+          <tr>
+            <th>用户</th>
+            <th>设备</th>
+            <th>建立时间</th>
+            <th>最近使用</th>
+            <th>过期</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.length === 0 ? (
+            <tr><td colSpan={5} className="muted">{emptyText}</td></tr>
+          ) : items.map((line) => (
+            <tr key={line.id}>
+              <td>{line.username}</td>
+              <td>{line.deviceId || "—"}</td>
+              <td>{formatTime(line.createdAt)}</td>
+              <td>{formatTime(line.lastUsedAt || line.createdAt)}</td>
+              <td>{formatTime(line.expiresAt)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    );
+  }
+
   return (
     <ConsoleShell me={me}>
       {error ? <p className="error">{error}</p> : null}
       <section className="card">
         <h2>当前线路</h2>
         <p className="muted">
-          这里列出尚未撤销、尚未过期的会话。Windows 客户端登录后会出现 desktop 线路；管理后台登录是 browser 线路。
-          最近 15 分钟没有 API 活动会显示为离线，但会话在过期前仍然有效。
+          只显示最近 15 分钟有 API 活动的在线会话，并将管理后台与 Windows 客户端分开列出。
         </p>
-        <table>
-          <thead>
-            <tr>
-              <th>用户</th>
-              <th>线路</th>
-              <th>设备</th>
-              <th>状态</th>
-              <th>建立时间</th>
-              <th>最近使用</th>
-              <th>过期</th>
-            </tr>
-          </thead>
-          <tbody>
-            {lines.length === 0 ? (
-              <tr><td colSpan={7} className="muted">当前没有活动线路</td></tr>
-            ) : lines.map((line) => (
-              <tr key={line.id}>
-                <td>{line.username}</td>
-                <td>{line.purpose === "desktop" ? "Windows 客户端" : "管理后台"}</td>
-                <td>{line.deviceId || "—"}</td>
-                <td><OnlineMark online={line.online} /></td>
-                <td>{formatTime(line.createdAt)}</td>
-                <td>{formatTime(line.lastUsedAt || line.createdAt)}</td>
-                <td>{formatTime(line.expiresAt)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <h3>管理后台在线</h3>
+        <LineTable items={browserLines} emptyText="当前没有在线的管理后台" />
+        <h3>Windows 客户端在线</h3>
+        <LineTable items={desktopLines} emptyText="当前没有在线的 Windows 客户端" />
       </section>
     </ConsoleShell>
   );

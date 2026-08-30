@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { ConsoleShell, formatTime } from "../../console-shell";
+import { ConsoleShell } from "../../console-shell";
 import { useAdminSession } from "../../use-admin-session";
 import {
   displayError,
@@ -10,6 +10,8 @@ import {
   type AITestResult,
   type CatalogSyncResult,
   type DiscoveredModel,
+  type ModelVerificationResult,
+  type OfficialCatalogSyncResult,
   type PublicAIProvider
 } from "../../../lib/control-api";
 import { ConfigStatus, SecretField } from "../config-status";
@@ -83,6 +85,25 @@ export default function AISettingsPage() {
   const [busyId, setBusyId] = useState("");
   const [discoveringId, setDiscoveringId] = useState("");
   const [syncing, setSyncing] = useState(false);
+  const [officialSyncing, setOfficialSyncing] = useState(false);
+
+  async function syncOfficialCatalog() {
+    setOfficialSyncing(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await requestJSON("/api/v1/admin/settings/catalog/token-plan-personal/sync", { method: "POST" });
+      if (!result.response.ok) {
+        setError(displayError(parseAPIError(result.body, "官方名单同步失败，已保留上一版目录")));
+        return;
+      }
+      const body = result.body as OfficialCatalogSyncResult;
+      setNotice(`已同步 Token Plan 个人版官方名单：${body.models} 个模型${body.sourceUpdatedAt ? ` · 官方更新 ${body.sourceUpdatedAt}` : ""}。`);
+      await load();
+    } finally {
+      setOfficialSyncing(false);
+    }
+  }
 
   async function syncCatalog() {
     setSyncing(true);
@@ -314,6 +335,25 @@ export default function AISettingsPage() {
     }
   }
 
+  async function verifyModel(providerId: string, modelId: string) {
+    setBusyId(providerId);
+    setError("");
+    setNotice("");
+    try {
+      const result = await requestJSON(`/api/v1/admin/settings/ai/providers/${encodeURIComponent(providerId)}/models/${encodeURIComponent(modelId)}/verify`, { method: "POST" });
+      if (!result.response.ok) {
+        setError(displayError(parseAPIError(result.body, "模型验证失败")));
+        return;
+      }
+      const body = result.body as ModelVerificationResult;
+      if (body.status === "success") setNotice(`${modelId}：${body.message}`);
+      else setError(`${modelId}：${body.message}`);
+      await loadProviderModels(providerId);
+    } finally {
+      setBusyId("");
+    }
+  }
+
   async function addManualModel(providerId: string) {
     const modelId = (manualModelId[providerId] || "").trim();
     if (!modelId) return;
@@ -362,7 +402,7 @@ export default function AISettingsPage() {
           />
         </div>
         <p className="muted">
-          可保存多条 OpenAI 兼容线路（如 TOKENPLAN、DeepSeek）。客户端使用「默认」线路。「同步并识别」会拉取全部密钥的模型并自动标注 ASR/LLM/TTS/端对端。
+          Token Plan 个人版以阿里云公开官方页面为候选目录；“发现可用模型”仅标记 Key 返回的辅助状态，不会删除官方候选。模型调用验证只会由本人点击触发。
         </p>
         <div className="status-grid">
           {providers.length === 0 ? (
@@ -386,6 +426,9 @@ export default function AISettingsPage() {
           )}
         </div>
         <div className="row">
+          <button className="secondary" type="button" disabled={officialSyncing || Boolean(busyId)} onClick={() => void syncOfficialCatalog()}>
+            {officialSyncing ? "同步中…" : "立即同步官方名单"}
+          </button>
           <button className="secondary" type="button" disabled={syncing || Boolean(busyId)} onClick={() => void syncCatalog()}>
             {syncing ? "同步中…" : "同步并识别全部模型"}
           </button>
@@ -422,6 +465,8 @@ export default function AISettingsPage() {
         const models = modelsByProvider[provider.id] ?? [];
         const busy = busyId === provider.id;
         const discovering = discoveringId === provider.id;
+        const currentCatalogModel = models.find((model) => model.modelId === provider.model);
+        const currentRemovedFromOfficial = provider.baseUrl === DEFAULT_BASE_URL && Boolean(provider.model) && currentCatalogModel && !currentCatalogModel.officialSupported;
         return (
           <details key={provider.id} className="card config-details" open={!provider.available || provider.isDefault}>
             <summary>
@@ -436,6 +481,7 @@ export default function AISettingsPage() {
               />
             </summary>
             <div className="stack">
+              {currentRemovedFromOfficial ? <p className="error">当前模型已不在个人版官方名单中；配置已保留，不会静默切换。</p> : null}
               <label>
                 名称
                 <input value={draft.name} onChange={(event) => updateDraft(provider.id, { name: event.target.value })} />
@@ -498,7 +544,7 @@ export default function AISettingsPage() {
 
               <details className="config-details nested-details" open={models.length > 0}>
                 <summary>
-                  <span>已发现模型（{models.length} 个）</span>
+                  <span>模型目录（{models.length} 个）</span>
                 </summary>
                 <div className="stack">
                   <div className="row">
@@ -519,8 +565,8 @@ export default function AISettingsPage() {
                       <thead>
                         <tr>
                           <th>模型 ID</th>
-                          <th>拥有者</th>
-                          <th>发现时间</th>
+                          <th>能力 / 协议</th>
+                          <th>来源状态</th>
                           <th>状态</th>
                           <th>操作</th>
                         </tr>
@@ -529,8 +575,11 @@ export default function AISettingsPage() {
                         {models.map((model) => (
                           <tr key={model.id} style={{ background: provider.model === model.modelId ? "#1a2233" : undefined }}>
                             <td>{model.modelId}</td>
-                            <td className="muted">{model.ownedBy || "—"}</td>
-                            <td className="muted">{formatTime(model.discoveredAt)}</td>
+                            <td className="muted">{model.capability || "unknown"} · {model.protocol || "未标注"}</td>
+                            <td className="muted">
+                              {model.officialSupported ? "官方支持" : "非官方手动项"} · {model.keyDiscovered ? "Key 已发现" : "Key 未发现"}<br />
+                              {model.verificationStatus === "success" ? "本人实测成功" : model.verificationStatus === "failed" ? "本人实测失败" : model.verificationStatus === "unsupported" ? "本应用未接入该专用协议" : "尚未实测"}
+                            </td>
                             <td>
                               <span className={model.enabled ? "online" : "offline"}>
                                 {model.enabled ? "已启用" : "已禁用"}
@@ -541,8 +590,11 @@ export default function AISettingsPage() {
                                 <button className="secondary" type="button" onClick={() => void toggleModel(provider.id, model)}>
                                   {model.enabled ? "禁用" : "启用"}
                                 </button>
+                                {model.officialSupported ? (
+                                  <button className="secondary" type="button" disabled={busy} onClick={() => void verifyModel(provider.id, model.modelId)}>本人验证</button>
+                                ) : null}
                                 {provider.model !== model.modelId ? (
-                                  <button className="secondary" type="button" disabled={busy} onClick={() => void activateModel(provider.id, model.modelId)}>
+                                  <button className="secondary" type="button" disabled={busy || (model.officialSupported && model.verificationStatus !== "success")} onClick={() => void activateModel(provider.id, model.modelId)}>
                                     设为当前
                                   </button>
                                 ) : (

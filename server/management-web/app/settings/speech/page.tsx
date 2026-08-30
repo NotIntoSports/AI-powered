@@ -494,7 +494,7 @@ export default function SpeechSettingsPage() {
           />
         </div>
         <p className="muted">
-          LiveKit Agent 从本页读取阿里云 NLS 凭据与 ASR 参数；Windows 客户端仍使用下方「当前线路」选择豆包或阿里云。
+          LiveKit Agent 从本页读取阿里云 NLS 凭据与 ASR 参数；这里仅展示 Agent 消费状态，不会自动切换客户端线路。Windows 客户端只使用下方「当前线路」选择豆包或阿里云。
         </p>
         <div className="status-grid">
           <div className={`status-chip ${config?.agentConsumer ? "ready" : ""}`}>

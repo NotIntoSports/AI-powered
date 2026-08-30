@@ -37,7 +37,7 @@ export default function OverviewPage() {
         ? usersResult.body.map(publicUserFromUnknown).filter((user): user is PublicUser => Boolean(user))
         : []
     );
-    setLines(Array.isArray(linesResult.body) ? (linesResult.body as SessionLine[]) : []);
+    setLines(Array.isArray(linesResult.body) ? (linesResult.body as SessionLine[]).filter((line) => line.online) : []);
     if (aiResult.response.ok) setAI(aiResult.body as PublicAISettings);
     if (rtcResult.response.ok) setRTC(rtcResult.body as PublicRTCSettings);
     setError("");
@@ -115,7 +115,7 @@ export default function OverviewPage() {
 
       <section className="card">
         <h2>当前线路</h2>
-        <p className="muted">未撤销且未过期的浏览器/客户端会话。最近 15 分钟有活动视为在线。</p>
+        <p className="muted">仅显示最近 15 分钟有活动的管理后台和 Windows 客户端会话。</p>
         <table>
           <thead>
             <tr>

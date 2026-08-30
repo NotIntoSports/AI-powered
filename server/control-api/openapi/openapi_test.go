@@ -88,7 +88,7 @@ func TestAdminMutationsDocumentInvalidInputAndTooLarge(t *testing.T) {
 
 func TestKnowledgeSearchContractHidesVectors(t *testing.T) {
 	spec := readSpec(t)
-	section := sectionBetween(t, spec, "  /api/v1/client/knowledge/search:", "components:")
+	section := sectionBetween(t, spec, "  /api/v1/client/knowledge/search:", "  /api/v1/admin/settings/catalog/token-plan-personal/sync:")
 	if !strings.Contains(section, "operationId: searchClientKnowledge") {
 		t.Fatal("missing searchClientKnowledge")
 	}

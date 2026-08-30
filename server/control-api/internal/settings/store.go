@@ -16,15 +16,17 @@ import (
 )
 
 var (
-	ErrInvalidInput              = errors.New("invalid settings input")
-	ErrMasterKeyMissing          = secretbox.ErrUnavailable
-	ErrDecryptFailed             = secretbox.ErrCiphertext
-	ErrNotConfigured             = errors.New("settings are not configured")
-	ErrStore                     = errors.New("settings store unavailable")
-	ErrRTCUnavailable            = errors.New("rtc provider is not available")
-	ErrVoiceAlreadyAllocated     = errors.New("voice already allocated")
-	ErrVoiceAllocationInProgress = errors.New("voice allocation in progress")
-	ErrVoiceAllocationToken      = errors.New("voice allocation token is invalid")
+	ErrInvalidInput               = errors.New("invalid settings input")
+	ErrMasterKeyMissing           = secretbox.ErrUnavailable
+	ErrDecryptFailed              = secretbox.ErrCiphertext
+	ErrNotConfigured              = errors.New("settings are not configured")
+	ErrStore                      = errors.New("settings store unavailable")
+	ErrRTCUnavailable             = errors.New("rtc provider is not available")
+	ErrVoiceAlreadyAllocated      = errors.New("voice already allocated")
+	ErrVoiceAllocationInProgress  = errors.New("voice allocation in progress")
+	ErrVoiceAllocationToken       = errors.New("voice allocation token is invalid")
+	ErrModelNotVerified           = errors.New("model has not passed interactive verification")
+	ErrOfficialCatalogUnavailable = errors.New("official model catalog unavailable")
 )
 
 const (
@@ -696,18 +698,25 @@ func AuditMetadata(configVersion int, available bool) map[string]any {
 }
 
 type DiscoveredModel struct {
-	ID           string     `json:"id"`
-	ProviderID   string     `json:"providerId,omitempty"`
-	ModelID      string     `json:"modelId"`
-	BaseURL      string     `json:"baseUrl"`
-	Enabled      bool       `json:"enabled"`
-	OwnedBy      string     `json:"ownedBy,omitempty"`
-	Capability   string     `json:"capability,omitempty"`
-	DisplayName  string     `json:"displayName,omitempty"`
-	ClassifiedBy string     `json:"classifiedBy,omitempty"`
-	ClassifiedAt *time.Time `json:"classifiedAt,omitempty"`
-	DiscoveredAt time.Time  `json:"discoveredAt"`
-	UpdatedAt    time.Time  `json:"updatedAt"`
+	ID                  string     `json:"id"`
+	ProviderID          string     `json:"providerId,omitempty"`
+	ModelID             string     `json:"modelId"`
+	BaseURL             string     `json:"baseUrl"`
+	Enabled             bool       `json:"enabled"`
+	OwnedBy             string     `json:"ownedBy,omitempty"`
+	Capability          string     `json:"capability,omitempty"`
+	DisplayName         string     `json:"displayName,omitempty"`
+	ClassifiedBy        string     `json:"classifiedBy,omitempty"`
+	ClassifiedAt        *time.Time `json:"classifiedAt,omitempty"`
+	DiscoveredAt        time.Time  `json:"discoveredAt"`
+	UpdatedAt           time.Time  `json:"updatedAt"`
+	OfficialSupported   bool       `json:"officialSupported"`
+	KeyDiscovered       bool       `json:"keyDiscovered"`
+	VerificationStatus  string     `json:"verificationStatus"`
+	VerificationMessage string     `json:"verificationMessage,omitempty"`
+	VerifiedAt          *time.Time `json:"verifiedAt,omitempty"`
+	Protocol            string     `json:"protocol,omitempty"`
+	OfficialSyncedAt    *time.Time `json:"officialSyncedAt,omitempty"`
 }
 
 const (

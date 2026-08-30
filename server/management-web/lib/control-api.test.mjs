@@ -111,3 +111,20 @@ test("resume admin page can view, reindex, and delete uploaded files", () => {
   assert.match(page, /还没有资料/);
   assert.doesNotMatch(page, /简历/);
 });
+
+test("sessions page separates online browser and desktop lines", () => {
+  const page = readFileSync(join(root, "..", "app", "sessions", "page.tsx"), "utf8");
+  assert.match(page, /管理后台在线/);
+  assert.match(page, /Windows 客户端在线/);
+  assert.match(page, /line\.online/);
+  assert.match(page, /line\.purpose === "browser"/);
+  assert.match(page, /line\.purpose === "desktop"/);
+  assert.doesNotMatch(page, /最近 15 分钟没有 API 活动会显示为离线/);
+});
+
+test("RTC pipeline save does not synchronize the client speech line", () => {
+  const page = readFileSync(join(root, "..", "app", "settings", "rtc", "page.tsx"), "utf8");
+  assert.doesNotMatch(page, /syncSpeechLine/);
+  assert.doesNotMatch(page, /requestJSON\("\/api\/v1\/admin\/settings\/speech"/);
+  assert.doesNotMatch(page, /管线已保存，但同步语音线路失败/);
+});

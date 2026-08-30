@@ -233,3 +233,25 @@ func (handler *adminSettingsHandler) activateAIProviderModel(w http.ResponseWrit
 	}
 	writeJSON(w, http.StatusOK, public)
 }
+
+func (handler *adminSettingsHandler) verifyAIProviderModel(w http.ResponseWriter, request *http.Request) {
+	if _, ok := requestActor(w, request); !ok {
+		return
+	}
+	result, err := handler.admin.VerifyTokenPlanModel(request.Context(), chi.URLParam(request, "id"), chi.URLParam(request, "modelId"))
+	if !writeSettingsError(w, request, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (handler *adminSettingsHandler) syncOfficialTokenPlanCatalog(w http.ResponseWriter, request *http.Request) {
+	if _, ok := requestActor(w, request); !ok {
+		return
+	}
+	result, err := handler.admin.SyncOfficialTokenPlanCatalog(request.Context())
+	if !writeSettingsError(w, request, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}

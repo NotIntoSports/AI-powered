@@ -40,6 +40,8 @@ func TestAdminUsersListIncludesOnlinePresence(t *testing.T) {
 			},
 			lines: []presence.Line{{
 				ID: "sess-1", UserID: testUser.ID, Username: testUser.Username, Purpose: "browser", CreatedAt: now, ExpiresAt: now.Add(time.Hour), Online: true,
+			}, {
+				ID: "sess-offline", UserID: testUser.ID, Username: testUser.Username, Purpose: "desktop", CreatedAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour), Online: false,
 			}},
 		},
 	})

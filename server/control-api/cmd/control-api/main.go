@@ -71,6 +71,22 @@ func main() {
 	}
 
 	resumeAdmin := resumes.NewService(pool, box, nil)
+	settingsAdmin := settings.NewService(pool, box, nil)
+	go func() {
+		sync := func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if _, syncErr := settingsAdmin.SyncOfficialTokenPlanCatalog(ctx); syncErr != nil {
+				log.Printf("token plan official catalog sync failed: %v", syncErr)
+			}
+		}
+		sync()
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			sync()
+		}
+	}()
 	var knowledgeAdmin httpapi.KnowledgeAdmin
 	switch providerName {
 	case knowledge.ProviderLocalPGVector:
@@ -91,16 +107,16 @@ func main() {
 		WriteTimeout:      2 * time.Minute,
 		IdleTimeout:       60 * time.Second,
 		Handler: httpapi.NewRouter(httpapi.Dependencies{
-			Authentication:    authentication,
-			UserAdmin:         identity.NewService(pool),
-			SettingsAdmin:     settings.NewService(pool, box, nil),
-			PresenceAdmin:     presence.NewStore(pool),
-			ResumeAdmin:       resumeAdmin,
-			KnowledgeAdmin:    knowledgeAdmin,
-			VoiceSampleAdmin:  voicesamples.NewService(pool, box, nil),
-			SessionTTL:        cfg.SessionTTL,
+			Authentication:     authentication,
+			UserAdmin:          identity.NewService(pool),
+			SettingsAdmin:      settingsAdmin,
+			PresenceAdmin:      presence.NewStore(pool),
+			ResumeAdmin:        resumeAdmin,
+			KnowledgeAdmin:     knowledgeAdmin,
+			VoiceSampleAdmin:   voicesamples.NewService(pool, box, nil),
+			SessionTTL:         cfg.SessionTTL,
 			CookieSecure:       cfg.CookieSecure,
-			TrustedProxyCIDRs: cfg.TrustedProxyCIDRs,
+			TrustedProxyCIDRs:  cfg.TrustedProxyCIDRs,
 			AgentInternalToken: cfg.AgentInternalToken,
 		}),
 	}

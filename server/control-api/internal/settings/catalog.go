@@ -28,26 +28,26 @@ type CatalogEntry struct {
 }
 
 type CatalogSyncResult struct {
-	Providers int `json:"providers"`
-	Models    int `json:"models"`
+	Providers  int `json:"providers"`
+	Models     int `json:"models"`
 	Classified int `json:"classified"`
 }
 
 type CatalogPatchInput struct {
-	Capability *string `json:"capability"`
-	Enabled    *bool   `json:"enabled"`
+	Capability  *string `json:"capability"`
+	Enabled     *bool   `json:"enabled"`
 	DisplayName *string `json:"displayName"`
 }
 
 type ClientPipeline struct {
-	Mode string `json:"mode"`
-	ASR  *ClientPipelineEndpoint `json:"asr,omitempty"`
-	LLM  *ClientPipelineEndpoint `json:"llm,omitempty"`
-	TTS  *ClientPipelineEndpoint `json:"tts,omitempty"`
-	E2E  *ClientPipelineEndpoint `json:"e2e,omitempty"`
-	Voice string `json:"voice,omitempty"`
-	E2EAvailable bool `json:"e2eAvailable"`
-	Message string `json:"message,omitempty"`
+	Mode         string                  `json:"mode"`
+	ASR          *ClientPipelineEndpoint `json:"asr,omitempty"`
+	LLM          *ClientPipelineEndpoint `json:"llm,omitempty"`
+	TTS          *ClientPipelineEndpoint `json:"tts,omitempty"`
+	E2E          *ClientPipelineEndpoint `json:"e2e,omitempty"`
+	Voice        string                  `json:"voice,omitempty"`
+	E2EAvailable bool                    `json:"e2eAvailable"`
+	Message      string                  `json:"message,omitempty"`
 }
 
 type ClientPipelineEndpoint struct {
@@ -423,6 +423,15 @@ func (s *Service) DiscoverModelsForProvider(ctx context.Context, providerID, bas
 	if err := store.UpsertDiscoveredModels(ctx, baseURL, models); err != nil {
 		return nil, err
 	}
+	if IsTokenPlanPersonalBaseURL(baseURL) {
+		ids := make([]string, 0, len(models))
+		for _, model := range models {
+			ids = append(ids, model.ModelID)
+		}
+		if err := store.MarkTokenPlanKeyDiscovery(ctx, providerID, ids); err != nil {
+			return nil, err
+		}
+	}
 	return store.ListDiscoveredModels(ctx, baseURL)
 }
 
@@ -480,8 +489,8 @@ func (s *Service) classifyModelsWithLLM(ctx context.Context, models []Discovered
 		index[m.ProviderID+"|"+m.ModelID] = m
 	}
 	payload := map[string]any{
-		"model": ai.Model,
-		"temperature": 0,
+		"model":           ai.Model,
+		"temperature":     0,
 		"response_format": map[string]string{"type": "json_object"},
 		"messages": []map[string]string{
 			{
@@ -527,8 +536,8 @@ func (s *Service) classifyModelsWithLLM(ctx context.Context, models []Discovered
 	}
 	var result struct {
 		Items []struct {
-			ID           string `json:"id"`
-			Capability   string `json:"capability"`
+			ID         string `json:"id"`
+			Capability string `json:"capability"`
 		} `json:"items"`
 	}
 	content := strings.TrimSpace(parsed.Choices[0].Message.Content)

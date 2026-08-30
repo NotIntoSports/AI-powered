@@ -92,6 +92,23 @@ export type CatalogSyncResult = {
   classified: number;
 };
 
+export type OfficialCatalogSyncResult = {
+  models: number;
+  sourceUrl: string;
+  sourceUpdatedAt?: string;
+  contentHash: string;
+  lastSuccessAt?: string;
+  warning?: string;
+};
+
+export type ModelVerificationResult = {
+  modelId: string;
+  capability: string;
+  protocol: string;
+  status: "success" | "failed" | "unsupported" | string;
+  message: string;
+};
+
 export type ClientPipeline = {
   mode: "cascaded" | "e2e" | string;
   asr?: { providerId: string; providerName: string; modelId: string; baseUrl?: string; apiKey?: string; source?: string };
@@ -230,6 +247,14 @@ export type DiscoveredModel = {
   ownedBy?: string;
   discoveredAt: string;
   updatedAt: string;
+  capability?: string;
+  officialSupported: boolean;
+  keyDiscovered: boolean;
+  verificationStatus: string;
+  verificationMessage?: string;
+  verifiedAt?: string;
+  protocol?: string;
+  officialSyncedAt?: string;
 };
 
 export type APIError = {

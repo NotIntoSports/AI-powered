@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -10,6 +11,20 @@ import (
 	"github.com/ai-interviewer/ai-powered/control-api/internal/settings"
 	"github.com/ai-interviewer/ai-powered/control-api/internal/users"
 )
+
+func TestWriteSettingsErrorDistinguishesStoreFailure(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings/speech", nil)
+	if writeSettingsError(recorder, request, settings.ErrStore) {
+		t.Fatal("expected settings store error to be written")
+	}
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusServiceUnavailable)
+	}
+	if body := recorder.Body.String(); !strings.Contains(body, `"code":"SETTINGS_STORE_UNAVAILABLE"`) || !strings.Contains(body, "settings database unavailable") {
+		t.Fatalf("unexpected response body: %s", body)
+	}
+}
 
 type fakeSettingsAdmin struct {
 	ai               settings.PublicAI
@@ -331,6 +346,14 @@ func (fake *fakeSettingsAdmin) SetProviderModelEnabled(context.Context, string, 
 
 func (fake *fakeSettingsAdmin) ActivateProviderModel(_ context.Context, _ users.User, _ string, providerID, modelID string) (settings.PublicAIProvider, error) {
 	return settings.PublicAIProvider{ID: providerID, Model: modelID, IsDefault: true, Configured: true}, nil
+}
+
+func (fake *fakeSettingsAdmin) VerifyTokenPlanModel(_ context.Context, _, modelID string) (settings.ModelVerificationResult, error) {
+	return settings.ModelVerificationResult{ModelID: modelID, Status: "success"}, nil
+}
+
+func (fake *fakeSettingsAdmin) SyncOfficialTokenPlanCatalog(context.Context) (settings.OfficialCatalogSyncResult, error) {
+	return settings.OfficialCatalogSyncResult{}, nil
 }
 
 func (fake *fakeSettingsAdmin) ListCatalog(context.Context, string, string) ([]settings.CatalogEntry, error) {

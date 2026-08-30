@@ -15,11 +15,6 @@ import {
 import { ConfigStatus, SecretField } from "../config-status";
 import { SearchableCombobox } from "../../../components/searchable-combobox";
 import { COSYVOICE_VOICES } from "../../../lib/cosyvoice-voice-catalog";
-import {
-  inferSpeechProviderFromPipeline,
-  speechProviderLabel,
-  type CatalogHint
-} from "../../../lib/speech-provider-infer";
 
 type SectionId = "pipeline" | "livekit";
 type SectionFeedback = { ok?: string; error?: string };
@@ -33,20 +28,6 @@ function parseCatalogValue(value: string) {
   const idx = value.indexOf("::");
   if (idx <= 0) return { providerId: "", modelId: "" };
   return { providerId: value.slice(0, idx), modelId: value.slice(idx + 2) };
-}
-
-function hintFromRef(value: string, catalog: CatalogEntry[]): CatalogHint {
-  const parsed = parseCatalogValue(value);
-  const entry = catalog.find(
-    (item) => item.providerId === parsed.providerId && item.modelId === parsed.modelId
-  );
-  return {
-    providerId: parsed.providerId,
-    modelId: parsed.modelId,
-    providerName: entry?.providerName,
-    baseUrl: entry?.baseUrl,
-    label: entry?.label
-  };
 }
 
 export default function RTCSettingsPage() {
@@ -246,37 +227,8 @@ export default function RTCSettingsPage() {
     }
   }
 
-  async function syncSpeechLine(): Promise<string> {
-    const inferred = inferSpeechProviderFromPipeline({
-      mode: pipelineMode,
-      tts: hintFromRef(ttsRef, catalog),
-      e2e: hintFromRef(e2eRef, catalog)
-    });
-    if (!inferred) return "";
-    const body: Record<string, unknown> = { activeProvider: inferred };
-    if (pipelineMode === "cascaded" && ttsVoiceId.trim() && (ttsIsCosyVoice || ttsVoiceId === "xiaoyun")) {
-      body.aliyunVoice = ttsVoiceId.trim();
-    }
-    const result = await requestJSON("/api/v1/admin/settings/speech", {
-      method: "PUT",
-      body: JSON.stringify(body)
-    });
-    if (!result.response.ok) {
-      return `管线已保存，但同步语音线路失败：${displayError(parseAPIError(result.body, "同步失败"))}`;
-    }
-    return `已将语音线路切换为${speechProviderLabel(inferred)}。`;
-  }
-
   async function savePipeline() {
-    const ok = await putRtc("pipeline", "互动管线已保存。");
-    if (!ok) return;
-    const syncMsg = await syncSpeechLine();
-    if (!syncMsg) return;
-    if (syncMsg.startsWith("管线已保存")) {
-      setSectionFeedback("pipeline", { error: syncMsg });
-      return;
-    }
-    setSectionFeedback("pipeline", { ok: `互动管线已保存。${syncMsg}` });
+    await putRtc("pipeline", "互动管线已保存。");
   }
 
   async function saveLivekit() {

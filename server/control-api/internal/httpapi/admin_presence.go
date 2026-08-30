@@ -70,6 +70,9 @@ func (handler *adminPresenceHandler) listLines(w http.ResponseWriter, request *h
 	}
 	public := make([]publicLine, 0, len(lines))
 	for _, line := range lines {
+		if !line.Online {
+			continue
+		}
 		public = append(public, publicLine{
 			ID:         line.ID,
 			UserID:     line.UserID,
