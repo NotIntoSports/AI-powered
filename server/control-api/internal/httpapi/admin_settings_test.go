@@ -241,6 +241,20 @@ func (fake *fakeSettingsAdmin) GetAgentPipeline(context.Context) (settings.Agent
 	return settings.AgentPipeline{Mode: settings.PipelineModeCascaded}, nil
 }
 
+func (fake *fakeSettingsAdmin) GetAgentAI(context.Context) (settings.AgentAISettings, error) {
+	return settings.AgentAISettings{
+		BaseURL: "https://api.example.com/v1",
+		Model:   "gpt-4o-audio-preview",
+		APIKey:  "sk-test",
+		Enabled: true,
+		Language: "zh",
+	}, nil
+}
+
+func (fake *fakeSettingsAdmin) GetClientPipeline(context.Context) (settings.PublicPipeline, error) {
+	return settings.EmptyPublicPipeline(), nil
+}
+
 func (fake *fakeSettingsAdmin) DeleteUserVoice(context.Context, string) error { return nil }
 
 func (fake *fakeSettingsAdmin) PreviewSpeech(context.Context, *settings.SpeechInput) (settings.SpeechPreviewResult, error) {

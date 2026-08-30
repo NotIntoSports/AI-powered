@@ -89,7 +89,7 @@ export default function PipelineSettingsPage() {
             />
           </div>
           <p className="muted">
-            级联模式：LiveKit Agent 负责 ASR（livekit-agent），TTS 由下方线路合成。端到端模式预留第三方一体化方案。
+            级联模式：LiveKit Agent 负责 ASR（livekit-agent），TTS 由下方线路合成。端到端模式由 Agent 调用「AI 设置」中的 Token Plan / OpenAI 兼容多模态模型，直接生成回复并通过 agent.response.v1 下发。
           </p>
           <label>
             模式
@@ -102,6 +102,7 @@ export default function PipelineSettingsPage() {
             <label>
               E2E 提供方
               <input value={e2eProvider} onChange={(event) => setE2eProvider(event.target.value)} placeholder="tokenplan" />
+              <span className="muted">模型 Base URL / API Key / Model 请在「AI 设置」页配置；Agent 通过内部接口读取。</span>
             </label>
           ) : (
             <>

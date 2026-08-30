@@ -38,6 +38,8 @@ type SettingsAdmin interface {
 	PutPipeline(ctx context.Context, actor users.User, requestID string, input settings.PipelineInput) (settings.PublicPipeline, error)
 	GetAgentSpeech(ctx context.Context) (settings.AgentSpeechSettings, error)
 	GetAgentPipeline(ctx context.Context) (settings.AgentPipeline, error)
+	GetAgentAI(ctx context.Context) (settings.AgentAISettings, error)
+	GetClientPipeline(ctx context.Context) (settings.PublicPipeline, error)
 	DeleteUserVoice(ctx context.Context, userID string) error
 	PreviewSpeech(ctx context.Context, input *settings.SpeechInput) (settings.SpeechPreviewResult, error)
 	TestSpeechASR(ctx context.Context, input *settings.SpeechInput) (settings.SpeechASRTestResult, error)
@@ -382,6 +384,31 @@ func (handler *adminSettingsHandler) getAgentSpeech(w http.ResponseWriter, reque
 
 func (handler *adminSettingsHandler) getAgentPipeline(w http.ResponseWriter, request *http.Request) {
 	public, err := handler.admin.GetAgentPipeline(request.Context())
+	if !writeSettingsError(w, request, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, public)
+}
+
+func (handler *adminSettingsHandler) getAgentAI(w http.ResponseWriter, request *http.Request) {
+	public, err := handler.admin.GetAgentAI(request.Context())
+	if !writeSettingsError(w, request, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, public)
+}
+
+func (handler *adminSettingsHandler) getClientPipeline(w http.ResponseWriter, request *http.Request) {
+	authenticated, ok := request.Context().Value(authenticatedSessionKey{}).(AuthenticatedSession)
+	if !ok {
+		writeSessionError(w, request)
+		return
+	}
+	if authenticated.Session.Purpose != sessions.PurposeDesktop {
+		writeAPIError(w, request, http.StatusForbidden, "FORBIDDEN", "desktop session is required")
+		return
+	}
+	public, err := handler.admin.GetClientPipeline(request.Context())
 	if !writeSettingsError(w, request, err) {
 		return
 	}

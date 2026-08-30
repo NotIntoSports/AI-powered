@@ -148,6 +148,7 @@ func NewRouter(dependencies Dependencies) http.Handler {
 				r.Patch("/settings/speech", clientSettings.patchClientSpeech)
 				r.Post("/rtc/token", clientSettings.issueRTC)
 				r.Get("/settings/roles", clientSettings.getClientRoles)
+				r.Get("/settings/pipeline", clientSettings.getClientPipeline)
 			}
 			if dependencies.VoiceSampleAdmin != nil {
 				clientVoiceSamples := newVoiceSampleHandler(dependencies.VoiceSampleAdmin)
@@ -164,6 +165,7 @@ func NewRouter(dependencies Dependencies) http.Handler {
 			r.Use(requireAgentToken(dependencies.AgentInternalToken))
 			r.Get("/settings/speech", agentSettings.getAgentSpeech)
 			r.Get("/settings/pipeline", agentSettings.getAgentPipeline)
+			r.Get("/settings/ai", agentSettings.getAgentAI)
 		})
 	}
 

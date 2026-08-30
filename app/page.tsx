@@ -19,6 +19,7 @@ import { useWorkspaceTts } from "../features/audio/workspace-tts";
 import { InterventionControls } from "../features/intervention/intervention-controls";
 import { MeetingBridgeCard } from "../features/rtc/meeting-bridge-card";
 import { useAutoAnswerSubmit } from "../features/rtc/auto-answer-submit";
+import { useAgentE2eTurn } from "../features/rtc/agent-e2e-turn";
 import {
   getAutoBridgeStatus,
   subscribeAutoBridgeStatus,
@@ -133,6 +134,7 @@ export default function ConsolePage() {
   const [pendingTranscriptions, setPendingTranscriptions] = useState(0);
   const [audioSource, setAudioSource] = useState("");
   const [automaticFollowup, setAutomaticFollowup] = useState(true);
+  const [pipelineMode, setPipelineMode] = useState<"cascaded" | "e2e">("cascaded");
   const [autoBridgeStatus, setAutoBridgeStatus] = useState<AutoBridgeStatus>(getAutoBridgeStatus);
   const [autoStartPending, setAutoStartPending] = useState(false);
   const [autoStartError, setAutoStartError] = useState("");
@@ -164,6 +166,12 @@ export default function ConsolePage() {
       .then(setSession)
       .catch(() => setError("无法读取当前互动会话"))
       .finally(() => setSessionLoaded(true));
+    void fetch("/api/settings/pipeline", { cache: "no-store" })
+      .then((response) => response.json())
+      .then((data) => {
+        if (data?.mode === "e2e") setPipelineMode("e2e");
+      })
+      .catch(() => undefined);
     setSnapshotReadiness(getSnapshotReadiness(loadReadinessSnapshot()));
     setOutputMode(loadOutputMode());
     return subscribeOutputMode(() => setOutputMode(loadOutputMode()));
@@ -445,7 +453,7 @@ export default function ConsolePage() {
 
   // 字幕 final 行自动作为对方回答提交（取代已移除的手动转写输入框）。
   useAutoAnswerSubmit({
-    enabled: automaticFollowup,
+    enabled: automaticFollowup && pipelineMode !== "e2e",
     processing: busy || answerPending,
     aiSpeaking: diagnostics.ttsState === "speaking",
     getGate: () => ({
@@ -461,6 +469,29 @@ export default function ConsolePage() {
           setAnswerPending(false);
           setPendingFinalText("");
         });
+    },
+    onBlocked: (message) => {
+      if (sessionRef.current.status === "running") setError(message);
+    }
+  });
+
+  useAgentE2eTurn({
+    enabled: automaticFollowup && pipelineMode === "e2e",
+    processing: busy || answerPending,
+    aiSpeaking: diagnostics.ttsState === "speaking",
+    getExpectedRevision: () => sessionRef.current.revision,
+    onTurn: ({ answer, question, expectedRevision }) => {
+      setAnswerPending(true);
+      setPendingFinalText(answer);
+      void act({
+        action: "e2e_turn",
+        answer,
+        question,
+        expectedRevision
+      }).finally(() => {
+        setAnswerPending(false);
+        setPendingFinalText("");
+      });
     },
     onBlocked: (message) => {
       if (sessionRef.current.status === "running") setError(message);

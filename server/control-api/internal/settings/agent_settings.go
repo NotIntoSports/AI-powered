@@ -9,6 +9,32 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+type AgentAISettings struct {
+	Provider          string `json:"provider"`
+	BaseURL           string `json:"baseUrl"`
+	Model             string `json:"model"`
+	APIKey            string `json:"apiKey,omitempty"`
+	QuestionTimeoutMs int    `json:"questionTimeoutMs"`
+	Enabled           bool   `json:"enabled"`
+	Language          string `json:"language"`
+}
+
+func AgentAIFrom(record AIRecord, rtcLanguage, apiKey string) AgentAISettings {
+	language := rtcLanguage
+	if language == "" {
+		language = "zh"
+	}
+	return AgentAISettings{
+		Provider:          record.Provider,
+		BaseURL:           record.BaseURL,
+		Model:             record.Model,
+		APIKey:            apiKey,
+		QuestionTimeoutMs: record.QuestionTimeoutMs,
+		Enabled:           record.Enabled,
+		Language:          language,
+	}
+}
+
 type AgentSpeechSettings struct {
 	Language                         string `json:"language"`
 	AliyunAppKey                     string `json:"aliyunAppKey"`
@@ -118,6 +144,31 @@ func (s *Service) GetAgentSpeech(ctx context.Context) (AgentSpeechSettings, erro
 		language = rtc.Language
 	}
 	return AgentSpeechFrom(record, language, accessKeyID, accessKeySecret, token), nil
+}
+
+func (s *Service) GetAgentAI(ctx context.Context) (AgentAISettings, error) {
+	store := NewStore(s.db, s.box)
+	record, err := store.GetAI(ctx)
+	if errors.Is(err, ErrNotConfigured) {
+		return AgentAISettings{}, ErrNotConfigured
+	}
+	if err != nil {
+		return AgentAISettings{}, err
+	}
+	apiKey, decryptErr := store.DecryptAPIKey(record)
+	if decryptErr != nil {
+		return AgentAISettings{}, decryptErr
+	}
+	language := "zh"
+	rtc, rtcErr := store.GetRTC(ctx)
+	if rtcErr == nil && rtc.Language != "" {
+		language = rtc.Language
+	}
+	return AgentAIFrom(record, language, apiKey), nil
+}
+
+func (s *Service) GetClientPipeline(ctx context.Context) (PublicPipeline, error) {
+	return s.GetPipeline(ctx)
 }
 
 func (s *Service) GetAgentPipeline(ctx context.Context) (AgentPipeline, error) {
