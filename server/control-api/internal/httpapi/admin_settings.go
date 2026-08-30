@@ -39,6 +39,9 @@ type SettingsAdmin interface {
 	GetAgentSpeech(ctx context.Context) (settings.AgentSpeechSettings, error)
 	GetAgentPipeline(ctx context.Context) (settings.AgentPipeline, error)
 	DeleteUserVoice(ctx context.Context, userID string) error
+	PreviewSpeech(ctx context.Context, input *settings.SpeechInput) (settings.SpeechPreviewResult, error)
+	TestSpeechASR(ctx context.Context, input *settings.SpeechInput) (settings.SpeechASRTestResult, error)
+	ListSpeechVoices(ctx context.Context) ([]settings.SpeechVoiceEntry, error)
 }
 
 type voiceAllocationAdmin interface {
@@ -105,6 +108,31 @@ type speechSettingsRequest struct {
 	ClearAliyunAccessKeySecret bool   `json:"clearAliyunAccessKeySecret"`
 	ClearAliyunToken           bool   `json:"clearAliyunToken"`
 	TestProvider               string `json:"testProvider"`
+	TTSVolume                  *int   `json:"ttsVolume"`
+	TTSSpeechRate              *int   `json:"ttsSpeechRate"`
+	TTSPitchRate               *int   `json:"ttsPitchRate"`
+	TTSSampleRate              *int   `json:"ttsSampleRate"`
+	ASREnableITN               *bool  `json:"asrEnableItn"`
+	ASREnablePunc              *bool  `json:"asrEnablePunc"`
+	ASRModelName               string `json:"asrModelName"`
+	AliyunASRCustomizationID   string `json:"aliyunAsrCustomizationId"`
+	AliyunASRVocabularyID      string `json:"aliyunAsrVocabularyId"`
+	AliyunASREnableITN         *bool  `json:"aliyunAsrEnableItn"`
+	AliyunASREnablePunc        *bool  `json:"aliyunAsrEnablePunc"`
+	AliyunASREnableDisfluency  *bool  `json:"aliyunAsrEnableDisfluency"`
+	AliyunASREnableIntermediate *bool `json:"aliyunAsrEnableIntermediate"`
+	AliyunASREnableSemanticBreak *bool `json:"aliyunAsrEnableSemanticBreak"`
+	AliyunASRMaxSentenceSilence *int  `json:"aliyunAsrMaxSentenceSilence"`
+	AliyunASREnableVoiceDetection *bool `json:"aliyunAsrEnableVoiceDetection"`
+	AliyunASRMaxStartSilence   *int   `json:"aliyunAsrMaxStartSilence"`
+	AliyunASRMaxEndSilence     *int   `json:"aliyunAsrMaxEndSilence"`
+}
+
+type pipelineSettingsRequest struct {
+	Mode        string `json:"mode"`
+	E2EProvider string `json:"e2eProvider"`
+	CascadedTTS string `json:"cascadedTts"`
+	Enabled     *bool  `json:"enabled"`
 }
 
 type adminSettingsHandler struct {
@@ -538,6 +566,81 @@ func (handler *adminSettingsHandler) testStorage(w http.ResponseWriter, request 
 	writeJSON(w, http.StatusOK, result)
 }
 
+func (handler *adminSettingsHandler) getPipeline(w http.ResponseWriter, request *http.Request) {
+	if _, ok := requestActor(w, request); !ok {
+		return
+	}
+	public, err := handler.admin.GetPipeline(request.Context())
+	if !writeSettingsError(w, request, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, public)
+}
+
+func (handler *adminSettingsHandler) putPipeline(w http.ResponseWriter, request *http.Request) {
+	actor, ok := requestActor(w, request)
+	if !ok {
+		return
+	}
+	input := pipelineSettingsRequest{}
+	if err := decodeBoundedJSON(w, request, &input); err != nil {
+		writeJSONDecodeError(w, request, err)
+		return
+	}
+	public, err := handler.admin.PutPipeline(request.Context(), actor, middleware.GetReqID(request.Context()), settings.PipelineInput{
+		Mode: input.Mode, E2EProvider: input.E2EProvider, CascadedTTS: input.CascadedTTS, Enabled: input.Enabled,
+	})
+	if !writeSettingsError(w, request, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, public)
+}
+
+func (handler *adminSettingsHandler) previewSpeech(w http.ResponseWriter, request *http.Request) {
+	if _, ok := requestActor(w, request); !ok {
+		return
+	}
+	input := speechSettingsRequest{}
+	if err := decodeBoundedJSON(w, request, &input); err != nil {
+		writeJSONDecodeError(w, request, err)
+		return
+	}
+	converted := speechInputFromRequest(input)
+	result, err := handler.admin.PreviewSpeech(request.Context(), &converted)
+	if !writeSettingsError(w, request, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (handler *adminSettingsHandler) testSpeechASR(w http.ResponseWriter, request *http.Request) {
+	if _, ok := requestActor(w, request); !ok {
+		return
+	}
+	input := speechSettingsRequest{}
+	if err := decodeBoundedJSON(w, request, &input); err != nil {
+		writeJSONDecodeError(w, request, err)
+		return
+	}
+	converted := speechInputFromRequest(input)
+	result, err := handler.admin.TestSpeechASR(request.Context(), &converted)
+	if !writeSettingsError(w, request, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (handler *adminSettingsHandler) listSpeechVoices(w http.ResponseWriter, request *http.Request) {
+	if _, ok := requestActor(w, request); !ok {
+		return
+	}
+	voices, err := handler.admin.ListSpeechVoices(request.Context())
+	if !writeSettingsError(w, request, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"voices": voices})
+}
+
 func writeSettingsError(w http.ResponseWriter, request *http.Request, err error) bool {
 	if err == nil {
 		return true
@@ -588,6 +691,24 @@ func speechInputFromRequest(input speechSettingsRequest) settings.SpeechInput {
 		ClearAliyunAccessKeySecret: input.ClearAliyunAccessKeySecret,
 		ClearAliyunToken:           input.ClearAliyunToken,
 		TestProvider:               input.TestProvider,
+		TTSVolume:                  input.TTSVolume,
+		TTSSpeechRate:              input.TTSSpeechRate,
+		TTSPitchRate:               input.TTSPitchRate,
+		TTSSampleRate:              input.TTSSampleRate,
+		ASREnableITN:               input.ASREnableITN,
+		ASREnablePunc:              input.ASREnablePunc,
+		ASRModelName:               input.ASRModelName,
+		AliyunASRCustomizationID:   input.AliyunASRCustomizationID,
+		AliyunASRVocabularyID:      input.AliyunASRVocabularyID,
+		AliyunASREnableITN:         input.AliyunASREnableITN,
+		AliyunASREnablePunc:        input.AliyunASREnablePunc,
+		AliyunASREnableDisfluency:  input.AliyunASREnableDisfluency,
+		AliyunASREnableIntermediate: input.AliyunASREnableIntermediate,
+		AliyunASREnableSemanticBreak: input.AliyunASREnableSemanticBreak,
+		AliyunASRMaxSentenceSilence: input.AliyunASRMaxSentenceSilence,
+		AliyunASREnableVoiceDetection: input.AliyunASREnableVoiceDetection,
+		AliyunASRMaxStartSilence:   input.AliyunASRMaxStartSilence,
+		AliyunASRMaxEndSilence:     input.AliyunASRMaxEndSilence,
 	}
 }
 

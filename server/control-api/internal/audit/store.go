@@ -44,6 +44,7 @@ const (
 	ActionStorageSettingsTested  Action = "settings.storage_tested"
 	ActionSpeechSettingsUpdated  Action = "settings.speech_updated"
 	ActionSpeechSettingsTested   Action = "settings.speech_tested"
+	ActionPipelineSettingsUpdated Action = "settings.pipeline_updated"
 	ActionResumeUploaded         Action = "resume.uploaded"
 	ActionResumeDeleted          Action = "resume.deleted"
 	ActionResumeIndexed          Action = "resume.indexed"
@@ -211,6 +212,7 @@ func (action Action) valid() bool {
 		ActionStorageSettingsTested,
 		ActionSpeechSettingsUpdated,
 		ActionSpeechSettingsTested,
+		ActionPipelineSettingsUpdated,
 		ActionResumeUploaded,
 		ActionResumeDeleted,
 		ActionResumeIndexed,

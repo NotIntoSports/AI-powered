@@ -82,19 +82,11 @@ func (fake *fakeSettingsAdmin) GetRTC(context.Context) (settings.PublicRTC, erro
 
 func (fake *fakeSettingsAdmin) PutRTC(_ context.Context, _ users.User, _ string, input settings.RTCInput) (settings.PublicRTC, error) {
 	fake.putRTC = input
-	provider := input.ActiveProvider
-	if provider == "" {
-		provider = "volcengine"
-	}
 	fake.rtc = settings.PublicRTC{
 		Configured:              true,
 		Available:               true,
-		ActiveProvider:          provider,
-		AppID:                   input.AppID,
+		Provider:                settings.ProviderLiveKit,
 		Language:                input.Language,
-		Mode:                    input.Mode,
-		TokenServiceURL:         input.TokenServiceURL,
-		SecretConfigured:        input.Secret != "",
 		LiveKitURL:              input.LiveKitURL,
 		LiveKitAPIKey:           input.LiveKitAPIKey,
 		LiveKitSecretConfigured: input.LiveKitAPISecret != "",
@@ -112,24 +104,15 @@ func (fake *fakeSettingsAdmin) TestRTC(context.Context, users.User, string, *set
 }
 
 func (fake *fakeSettingsAdmin) IssueRTC(_ context.Context, roomID, userID string) (settings.RTCConnection, error) {
-	provider := fake.rtc.ActiveProvider
-	if provider == "" {
-		provider = "volcengine"
-	}
-	connection := settings.RTCConnection{
-		Provider:  provider,
+	return settings.RTCConnection{
+		Provider:  settings.ProviderLiveKit,
 		Token:     "issued-token",
+		URL:       fake.rtc.LiveKitURL,
 		RoomID:    roomID,
 		UserID:    userID,
 		Language:  "zh",
 		ExpiresAt: "2026-08-16T08:00:00Z",
-	}
-	if provider == "livekit" {
-		connection.URL = fake.rtc.LiveKitURL
-		return connection, nil
-	}
-	connection.AppID = fake.rtc.AppID
-	return connection, nil
+	}, nil
 }
 
 func (fake *fakeSettingsAdmin) GetStorage(context.Context) (settings.PublicStorage, error) {
@@ -240,6 +223,38 @@ func (fake *fakeSettingsAdmin) TestSpeech(context.Context, users.User, string, *
 	return settings.SpeechTestResult{Reachable: true, Message: "豆包语音鉴权可用"}, nil
 }
 
+func (fake *fakeSettingsAdmin) GetPipeline(context.Context) (settings.PublicPipeline, error) {
+	return settings.EmptyPublicPipeline(), nil
+}
+
+func (fake *fakeSettingsAdmin) PutPipeline(_ context.Context, _ users.User, _ string, input settings.PipelineInput) (settings.PublicPipeline, error) {
+	return settings.PublicPipelineFrom(settings.PipelineRecord{
+		Mode: input.Mode, E2EProvider: input.E2EProvider, CascadedASR: settings.CascadedASRLiveKit, CascadedTTS: input.CascadedTTS,
+	}), nil
+}
+
+func (fake *fakeSettingsAdmin) GetAgentSpeech(context.Context) (settings.AgentSpeechSettings, error) {
+	return settings.AgentSpeechSettings{Language: "zh"}, nil
+}
+
+func (fake *fakeSettingsAdmin) GetAgentPipeline(context.Context) (settings.AgentPipeline, error) {
+	return settings.AgentPipeline{Mode: settings.PipelineModeCascaded}, nil
+}
+
+func (fake *fakeSettingsAdmin) DeleteUserVoice(context.Context, string) error { return nil }
+
+func (fake *fakeSettingsAdmin) PreviewSpeech(context.Context, *settings.SpeechInput) (settings.SpeechPreviewResult, error) {
+	return settings.SpeechPreviewResult{Message: "preview"}, nil
+}
+
+func (fake *fakeSettingsAdmin) TestSpeechASR(context.Context, *settings.SpeechInput) (settings.SpeechASRTestResult, error) {
+	return settings.SpeechASRTestResult{Message: "asr ok"}, nil
+}
+
+func (fake *fakeSettingsAdmin) ListSpeechVoices(context.Context) ([]settings.SpeechVoiceEntry, error) {
+	return []settings.SpeechVoiceEntry{{ID: "xiaoyun", Name: "小云", Source: "catalog"}}, nil
+}
+
 func TestAdminSettingsRequireAdministratorAndOmitSecrets(t *testing.T) {
 	router := NewRouter(Dependencies{
 		Authentication: adminBrowserAuth(),
@@ -324,10 +339,10 @@ func TestAdminSettingsOperatorForbidden(t *testing.T) {
 	assertAPIError(t, response, http.StatusForbidden, "FORBIDDEN")
 }
 
-func TestClientRTCTokenIssuesForActiveProvider(t *testing.T) {
+func TestClientRTCTokenIssuesLiveKitConnection(t *testing.T) {
 	router := NewRouter(Dependencies{
 		Authentication: adminBrowserAuth(),
-		SettingsAdmin:  &fakeSettingsAdmin{rtc: settings.PublicRTC{AppID: "volc-app"}},
+		SettingsAdmin:  &fakeSettingsAdmin{rtc: settings.PublicRTC{LiveKitURL: "wss://livekit.example.com", Provider: settings.ProviderLiveKit}},
 	})
 	response := performAdminCookieRequest(t, router, http.MethodPost, "/api/v1/client/rtc/token", `{"roomId":"interview_1","userId":"bridge_1"}`)
 	if response.Code != http.StatusOK {
@@ -338,7 +353,7 @@ func TestClientRTCTokenIssuesForActiveProvider(t *testing.T) {
 	}
 	var connection settings.RTCConnection
 	decodeJSON(t, response, &connection)
-	if connection.Provider != "volcengine" || connection.RoomID != "interview_1" || connection.Token == "" {
+	if connection.Provider != settings.ProviderLiveKit || connection.RoomID != "interview_1" || connection.Token == "" {
 		t.Fatalf("connection=%#v", connection)
 	}
 }
@@ -350,29 +365,29 @@ func TestAdminSettingsPutRTCAcceptsLiveKitFieldsAndOmitsSecret(t *testing.T) {
 		UserAdmin:      &fakeUserAdmin{list: func(users.User) ([]users.User, error) { return nil, nil }},
 		SettingsAdmin:  admin,
 	})
-	response := performAdminCookieRequest(t, router, http.MethodPut, "/api/v1/admin/settings/rtc", `{"activeProvider":"livekit","language":"zh","mode":"production","livekitUrl":"wss://livekit.example.com","livekitApiKey":"devkey","livekitApiSecret":"lk-secret-value"}`)
+	response := performAdminCookieRequest(t, router, http.MethodPut, "/api/v1/admin/settings/rtc", `{"language":"zh","livekitUrl":"wss://livekit.example.com","livekitApiKey":"devkey","livekitApiSecret":"lk-secret-value"}`)
 	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 	if strings.Contains(response.Body.String(), "lk-secret-value") {
 		t.Fatal("put response echoed livekit secret")
 	}
-	if admin.putRTC.ActiveProvider != "livekit" || admin.putRTC.LiveKitURL != "wss://livekit.example.com" || admin.putRTC.LiveKitAPISecret != "lk-secret-value" {
+	if admin.putRTC.LiveKitURL != "wss://livekit.example.com" || admin.putRTC.LiveKitAPISecret != "lk-secret-value" {
 		t.Fatalf("stored input=%#v", admin.putRTC)
 	}
 	var public settings.PublicRTC
 	decodeJSON(t, response, &public)
-	if public.ActiveProvider != "livekit" || !public.LiveKitSecretConfigured || public.LiveKitURL != "wss://livekit.example.com" {
+	if public.Provider != settings.ProviderLiveKit || !public.LiveKitSecretConfigured || public.LiveKitURL != "wss://livekit.example.com" {
 		t.Fatalf("public=%#v", public)
 	}
 }
 
-func TestClientRTCTokenIssuesLiveKitConnection(t *testing.T) {
+func TestClientRTCTokenIssuesLiveKitConnectionWithURL(t *testing.T) {
 	router := NewRouter(Dependencies{
 		Authentication: adminBrowserAuth(),
 		SettingsAdmin: &fakeSettingsAdmin{rtc: settings.PublicRTC{
-			ActiveProvider: "livekit",
-			LiveKitURL:     "wss://livekit.example.com",
+			Provider:   settings.ProviderLiveKit,
+			LiveKitURL: "wss://livekit.example.com",
 		}},
 	})
 	response := performAdminCookieRequest(t, router, http.MethodPost, "/api/v1/client/rtc/token", `{"roomId":"interview_2","userId":"bridge_2"}`)
@@ -381,7 +396,7 @@ func TestClientRTCTokenIssuesLiveKitConnection(t *testing.T) {
 	}
 	var connection settings.RTCConnection
 	decodeJSON(t, response, &connection)
-	if connection.Provider != "livekit" || connection.URL != "wss://livekit.example.com" || connection.AppID != "" {
+	if connection.Provider != settings.ProviderLiveKit || connection.URL != "wss://livekit.example.com" {
 		t.Fatalf("connection=%#v", connection)
 	}
 }

@@ -76,6 +76,9 @@ func NewRouter(dependencies Dependencies) http.Handler {
 				r.Patch("/{id}", adminUsers.patch)
 				r.Post("/{id}/reset-password", adminUsers.resetPassword)
 				r.Post("/{id}/revoke-sessions", adminUsers.revokeSessions)
+				if dependencies.SettingsAdmin != nil {
+					r.Delete("/{id}/voice", adminUsers.deleteVoice)
+				}
 			})
 			if dependencies.PresenceAdmin != nil {
 				adminPresence := newAdminPresenceHandler(dependencies.PresenceAdmin)
@@ -97,6 +100,11 @@ func NewRouter(dependencies Dependencies) http.Handler {
 					r.Get("/speech", adminSettings.getSpeech)
 					r.Put("/speech", adminSettings.putSpeech)
 					r.Post("/speech/test", adminSettings.testSpeech)
+					r.Post("/speech/preview", adminSettings.previewSpeech)
+					r.Post("/speech/asr-test", adminSettings.testSpeechASR)
+					r.Get("/speech/voices", adminSettings.listSpeechVoices)
+					r.Get("/pipeline", adminSettings.getPipeline)
+					r.Put("/pipeline", adminSettings.putPipeline)
 					r.Get("/roles", adminSettings.getRoles)
 					r.Put("/roles", adminSettings.putRoles)
 				})
