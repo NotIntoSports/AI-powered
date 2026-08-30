@@ -127,4 +127,6 @@ test("RTC pipeline save does not synchronize the client speech line", () => {
   assert.doesNotMatch(page, /syncSpeechLine/);
   assert.doesNotMatch(page, /requestJSON\("\/api\/v1\/admin\/settings\/speech"/);
   assert.doesNotMatch(page, /管线已保存，但同步语音线路失败/);
+  assert.doesNotMatch(page, /保存仍会按厂商同步语音线路/);
+  assert.match(page, /保存互动管线不会修改「语音」页的客户端线路/);
 });

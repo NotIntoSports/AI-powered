@@ -430,7 +430,7 @@ export default function RTCSettingsPage() {
                   />
                 </label>
                 <p className="muted">
-                  端对端模型使用会话内置语音，无独立官方音色目录。保存仍会按厂商同步语音线路。桌面端若尚未接入 Realtime/Omni，会返回 E2E_NOT_IMPLEMENTED，不会静默退回级联。
+                  端对端模型使用会话内置语音，无独立官方音色目录。保存互动管线不会修改「语音」页的客户端线路。桌面端若尚未接入 Realtime/Omni，会返回 E2E_NOT_IMPLEMENTED，不会静默退回级联。
                 </p>
               </div>
             )}
