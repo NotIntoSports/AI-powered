@@ -9,6 +9,7 @@ Required environment:
 - `LIVEKIT_URL`
 - `LIVEKIT_API_KEY`
 - `LIVEKIT_API_SECRET`
+- `CONTROL_API_ORIGIN` and `AGENT_INTERNAL_TOKEN` (preferred; loads speech/pipeline from control-api)
 
 Required Alibaba Cloud NLS environment:
 

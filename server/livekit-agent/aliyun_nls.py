@@ -23,6 +23,43 @@ class AliyunNlsError(RuntimeError):
     pass
 
 
+def _coalesce_str(*values: object) -> str:
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _coalesce_bool(value: object, default: bool) -> bool:
+    return default if not isinstance(value, bool) else value
+
+
+def _coalesce_int(value: object, default: int) -> int:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return default
+
+
+def _optional_int(value: object) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
+
+
 @dataclass(frozen=True)
 class AliyunNlsConfig:
     app_key: str
@@ -31,28 +68,115 @@ class AliyunNlsConfig:
     token: str = ""
     gateway: str = DEFAULT_GATEWAY
     language: str = "zh"
+    customization_id: str = ""
+    vocabulary_id: str = ""
+    enable_intermediate_result: bool = True
+    enable_punctuation_prediction: bool = True
+    enable_inverse_text_normalization: bool = True
+    enable_disfluency: bool = False
+    enable_semantic_sentence_detection: bool = False
+    max_sentence_silence: int = 800
+    enable_voice_detection: bool = False
+    max_start_silence: int | None = None
+    max_end_silence: int | None = None
 
     @classmethod
     def from_env(cls) -> "AliyunNlsConfig":
+        return cls.from_dict({}, env_fallback=True)
+
+    @classmethod
+    def from_dict(cls, data: dict | None, *, env_fallback: bool = True) -> "AliyunNlsConfig":
+        payload = data or {}
         config = cls(
-            app_key=os.environ.get("ALIYUN_NLS_APPKEY", "").strip(),
-            access_key_id=(
-                os.environ.get("ALIYUN_NLS_ACCESS_KEY_ID", "")
-                or os.environ.get("ALIYUN_AK_ID", "")
-            ).strip(),
-            access_key_secret=(
-                os.environ.get("ALIYUN_NLS_ACCESS_KEY_SECRET", "")
-                or os.environ.get("ALIYUN_AK_SECRET", "")
-            ).strip(),
-            token=os.environ.get("ALIYUN_NLS_TOKEN", "").strip(),
-            gateway=(os.environ.get("ALIYUN_NLS_GATEWAY", "") or DEFAULT_GATEWAY).strip(),
-            language=(os.environ.get("STT_LANGUAGE", "") or "zh").strip(),
+            app_key=_coalesce_str(payload.get("aliyunAppKey"), payload.get("appKey"))
+            or (os.environ.get("ALIYUN_NLS_APPKEY", "").strip() if env_fallback else ""),
+            access_key_id=_coalesce_str(payload.get("aliyunAccessKeyId"), payload.get("accessKeyId"))
+            or (
+                (
+                    os.environ.get("ALIYUN_NLS_ACCESS_KEY_ID", "")
+                    or os.environ.get("ALIYUN_AK_ID", "")
+                ).strip()
+                if env_fallback
+                else ""
+            ),
+            access_key_secret=_coalesce_str(
+                payload.get("aliyunAccessKeySecret"), payload.get("accessKeySecret")
+            )
+            or (
+                (
+                    os.environ.get("ALIYUN_NLS_ACCESS_KEY_SECRET", "")
+                    or os.environ.get("ALIYUN_AK_SECRET", "")
+                ).strip()
+                if env_fallback
+                else ""
+            ),
+            token=_coalesce_str(payload.get("aliyunToken"), payload.get("token"))
+            or (os.environ.get("ALIYUN_NLS_TOKEN", "").strip() if env_fallback else ""),
+            gateway=_coalesce_str(payload.get("aliyunGateway"), payload.get("gateway"))
+            or (
+                (os.environ.get("ALIYUN_NLS_GATEWAY", "") or DEFAULT_GATEWAY).strip()
+                if env_fallback
+                else DEFAULT_GATEWAY
+            ),
+            language=_coalesce_str(payload.get("language"))
+            or (
+                (os.environ.get("STT_LANGUAGE", "") or "zh").strip()
+                if env_fallback
+                else "zh"
+            ),
+            customization_id=_coalesce_str(
+                payload.get("aliyunAsrCustomizationId"), payload.get("customizationId")
+            ),
+            vocabulary_id=_coalesce_str(
+                payload.get("aliyunAsrVocabularyId"), payload.get("vocabularyId")
+            ),
+            enable_intermediate_result=_coalesce_bool(
+                payload.get("aliyunAsrEnableIntermediate"), True
+            ),
+            enable_punctuation_prediction=_coalesce_bool(payload.get("aliyunAsrEnablePunc"), True),
+            enable_inverse_text_normalization=_coalesce_bool(payload.get("aliyunAsrEnableItn"), True),
+            enable_disfluency=_coalesce_bool(payload.get("aliyunAsrEnableDisfluency"), False),
+            enable_semantic_sentence_detection=_coalesce_bool(
+                payload.get("aliyunAsrEnableSemanticBreak"), False
+            ),
+            max_sentence_silence=_coalesce_int(payload.get("aliyunAsrMaxSentenceSilence"), 800),
+            enable_voice_detection=_coalesce_bool(
+                payload.get("aliyunAsrEnableVoiceDetection"), False
+            ),
+            max_start_silence=_optional_int(payload.get("aliyunAsrMaxStartSilence")),
+            max_end_silence=_optional_int(payload.get("aliyunAsrMaxEndSilence")),
         )
         if not config.app_key:
             raise AliyunNlsError("ALIYUN_NLS_APPKEY_MISSING")
         if not config.token and not (config.access_key_id and config.access_key_secret):
             raise AliyunNlsError("ALIYUN_NLS_CREDENTIALS_MISSING")
         return config
+
+    def start_transcription_payload(self) -> dict:
+        payload: dict = {
+            "format": "pcm",
+            "sample_rate": SAMPLE_RATE,
+            "enable_intermediate_result": self.enable_intermediate_result,
+            "enable_punctuation_prediction": self.enable_punctuation_prediction,
+            "enable_inverse_text_normalization": self.enable_inverse_text_normalization,
+        }
+        if self.customization_id:
+            payload["customization_id"] = self.customization_id
+        if self.vocabulary_id:
+            payload["vocabulary_id"] = self.vocabulary_id
+        if self.enable_disfluency:
+            payload["enable_disfluency"] = True
+        if self.enable_semantic_sentence_detection:
+            payload["enable_semantic_sentence_detection"] = True
+        if self.max_sentence_silence > 0:
+            payload["max_sentence_silence"] = self.max_sentence_silence
+        if self.enable_voice_detection:
+            payload["enable_voice_detection"] = True
+        if self.max_start_silence is not None:
+            payload["max_start_silence"] = self.max_start_silence
+        if self.max_end_silence is not None:
+            payload["max_end_silence"] = self.max_end_silence
+        return payload
 
     @property
     def websocket_url(self) -> str:
@@ -184,16 +308,7 @@ class AliyunNlsSession:
             max_size=1 << 20,
         )
         await self._socket.send(
-            self._command(
-                "StartTranscription",
-                {
-                    "format": "pcm",
-                    "sample_rate": SAMPLE_RATE,
-                    "enable_intermediate_result": True,
-                    "enable_punctuation_prediction": True,
-                    "enable_inverse_text_normalization": True,
-                },
-            )
+            self._command("StartTranscription", self._config.start_transcription_payload())
         )
         while True:
             message = await asyncio.wait_for(self._socket.recv(), timeout=10)

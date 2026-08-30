@@ -34,6 +34,11 @@ type SettingsAdmin interface {
 	TestStorage(ctx context.Context, actor users.User, requestID string, input *settings.StorageInput) (settings.StorageTestResult, error)
 	GetRoles(ctx context.Context) (settings.RoleProfiles, error)
 	PutRoles(ctx context.Context, actor users.User, requestID string, input []settings.RoleProfileInput) (settings.RoleProfiles, error)
+	GetPipeline(ctx context.Context) (settings.PublicPipeline, error)
+	PutPipeline(ctx context.Context, actor users.User, requestID string, input settings.PipelineInput) (settings.PublicPipeline, error)
+	GetAgentSpeech(ctx context.Context) (settings.AgentSpeechSettings, error)
+	GetAgentPipeline(ctx context.Context) (settings.AgentPipeline, error)
+	DeleteUserVoice(ctx context.Context, userID string) error
 }
 
 type voiceAllocationAdmin interface {
@@ -54,17 +59,8 @@ type aiSettingsRequest struct {
 }
 
 type rtcSettingsRequest struct {
-	AppID              string `json:"appId"`
 	Language           string `json:"language"`
-	Mode               string `json:"mode"`
-	TokenServiceURL    string `json:"tokenServiceUrl"`
-	Secret             string `json:"secret"`
-	ClearSecret        bool   `json:"clearSecret"`
-	TrialExpiresAt     string `json:"trialExpiresAt"`
-	TrialRoomID        string `json:"trialRoomId"`
-	TrialUserID        string `json:"trialUserId"`
 	Enabled            *bool  `json:"enabled"`
-	ActiveProvider     string `json:"activeProvider"`
 	LiveKitURL         string `json:"livekitUrl"`
 	LiveKitAPIKey      string `json:"livekitApiKey"`
 	LiveKitAPISecret   string `json:"livekitApiSecret"`
@@ -73,7 +69,6 @@ type rtcSettingsRequest struct {
 	ASRModel           string `json:"asrModel"`
 	ASRAPIKey          string `json:"asrApiKey"`
 	ClearASRAPIKey     bool   `json:"clearAsrApiKey"`
-	TestProvider       string `json:"testProvider"`
 }
 
 type storageSettingsRequest struct {
@@ -349,6 +344,22 @@ func (handler *adminSettingsHandler) getSpeech(w http.ResponseWriter, request *h
 	writeJSON(w, http.StatusOK, public)
 }
 
+func (handler *adminSettingsHandler) getAgentSpeech(w http.ResponseWriter, request *http.Request) {
+	public, err := handler.admin.GetAgentSpeech(request.Context())
+	if !writeSettingsError(w, request, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, public)
+}
+
+func (handler *adminSettingsHandler) getAgentPipeline(w http.ResponseWriter, request *http.Request) {
+	public, err := handler.admin.GetAgentPipeline(request.Context())
+	if !writeSettingsError(w, request, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, public)
+}
+
 func (handler *adminSettingsHandler) getClientSpeech(w http.ResponseWriter, request *http.Request) {
 	authenticated, ok := request.Context().Value(authenticatedSessionKey{}).(AuthenticatedSession)
 	if !ok {
@@ -582,17 +593,8 @@ func speechInputFromRequest(input speechSettingsRequest) settings.SpeechInput {
 
 func rtcInputFromRequest(input rtcSettingsRequest) settings.RTCInput {
 	return settings.RTCInput{
-		AppID:              input.AppID,
 		Language:           input.Language,
-		Mode:               input.Mode,
-		TokenServiceURL:    input.TokenServiceURL,
-		Secret:             input.Secret,
-		ClearSecret:        input.ClearSecret,
-		TrialExpiresAt:     input.TrialExpiresAt,
-		TrialRoomID:        input.TrialRoomID,
-		TrialUserID:        input.TrialUserID,
 		Enabled:            input.Enabled,
-		ActiveProvider:     input.ActiveProvider,
 		LiveKitURL:         input.LiveKitURL,
 		LiveKitAPIKey:      input.LiveKitAPIKey,
 		LiveKitAPISecret:   input.LiveKitAPISecret,
@@ -601,6 +603,5 @@ func rtcInputFromRequest(input rtcSettingsRequest) settings.RTCInput {
 		ASRModel:           input.ASRModel,
 		ASRAPIKey:          input.ASRAPIKey,
 		ClearASRAPIKey:     input.ClearASRAPIKey,
-		TestProvider:       input.TestProvider,
 	}
 }

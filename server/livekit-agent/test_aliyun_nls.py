@@ -36,6 +36,40 @@ class AliyunNlsConfigTests(unittest.TestCase):
             config = AliyunNlsConfig.from_env()
         self.assertEqual(config.websocket_url, "wss://example.com/ws/v1")
 
+    def test_from_dict_applies_api_asr_settings(self):
+        config = AliyunNlsConfig.from_dict(
+            {
+                "aliyunAppKey": "app",
+                "aliyunToken": "token",
+                "language": "en",
+                "aliyunAsrCustomizationId": "custom-1",
+                "aliyunAsrVocabularyId": "vocab-1",
+                "aliyunAsrEnableIntermediate": False,
+                "aliyunAsrEnablePunc": False,
+                "aliyunAsrEnableItn": False,
+                "aliyunAsrEnableDisfluency": True,
+                "aliyunAsrEnableSemanticBreak": True,
+                "aliyunAsrMaxSentenceSilence": 1200,
+                "aliyunAsrEnableVoiceDetection": True,
+                "aliyunAsrMaxStartSilence": 5000,
+                "aliyunAsrMaxEndSilence": 800,
+            },
+            env_fallback=False,
+        )
+        payload = config.start_transcription_payload()
+        self.assertEqual(config.language, "en")
+        self.assertEqual(payload["customization_id"], "custom-1")
+        self.assertEqual(payload["vocabulary_id"], "vocab-1")
+        self.assertFalse(payload["enable_intermediate_result"])
+        self.assertFalse(payload["enable_punctuation_prediction"])
+        self.assertFalse(payload["enable_inverse_text_normalization"])
+        self.assertTrue(payload["enable_disfluency"])
+        self.assertTrue(payload["enable_semantic_sentence_detection"])
+        self.assertEqual(payload["max_sentence_silence"], 1200)
+        self.assertTrue(payload["enable_voice_detection"])
+        self.assertEqual(payload["max_start_silence"], 5000)
+        self.assertEqual(payload["max_end_silence"], 800)
+
     def test_create_token_signature_matches_existing_contract_vector(self):
         url = build_create_token_url(
             "LTAItestkey",

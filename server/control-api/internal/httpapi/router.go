@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/netip"
+	"strings"
 	"time"
 
 	"github.com/ai-interviewer/ai-powered/control-api/internal/ratelimit"
@@ -13,17 +14,18 @@ import (
 )
 
 type Dependencies struct {
-	Authentication    Authentication
-	UserAdmin         UserAdmin
-	SettingsAdmin     SettingsAdmin
-	PresenceAdmin     PresenceAdmin
-	ResumeAdmin       ResumeAdmin
-	KnowledgeAdmin    KnowledgeAdmin
-	VoiceSampleAdmin  VoiceSampleAdmin
-	LoginLimiter      *ratelimit.LoginLimiter
-	SessionTTL        time.Duration
-	CookieSecure      bool
-	TrustedProxyCIDRs []netip.Prefix
+	Authentication     Authentication
+	UserAdmin          UserAdmin
+	SettingsAdmin      SettingsAdmin
+	PresenceAdmin      PresenceAdmin
+	ResumeAdmin        ResumeAdmin
+	KnowledgeAdmin     KnowledgeAdmin
+	VoiceSampleAdmin   VoiceSampleAdmin
+	LoginLimiter       *ratelimit.LoginLimiter
+	SessionTTL         time.Duration
+	CookieSecure       bool
+	TrustedProxyCIDRs  []netip.Prefix
+	AgentInternalToken string
 }
 
 func NewRouter(dependencies Dependencies) http.Handler {
@@ -144,6 +146,16 @@ func NewRouter(dependencies Dependencies) http.Handler {
 				r.Post("/voice-samples", clientVoiceSamples.upload)
 				r.Delete("/voice-samples/{id}", clientVoiceSamples.delete)
 			}
+		})
+	}
+
+	if dependencies.SettingsAdmin != nil && strings.TrimSpace(dependencies.AgentInternalToken) != "" {
+		agentSettings := newAdminSettingsHandler(dependencies.SettingsAdmin)
+		r.Route("/api/v1/agent", func(r chi.Router) {
+			r.Use(noStore)
+			r.Use(requireAgentToken(dependencies.AgentInternalToken))
+			r.Get("/settings/speech", agentSettings.getAgentSpeech)
+			r.Get("/settings/pipeline", agentSettings.getAgentPipeline)
 		})
 	}
 
