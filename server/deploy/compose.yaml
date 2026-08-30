@@ -32,6 +32,8 @@ services:
       EMBEDDING_BASE_URL: http://embedding:80
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-m3}
       AGENT_INTERNAL_TOKEN: ${AGENT_INTERNAL_TOKEN:-}
+      INITIAL_ADMIN_USERNAME: ${INITIAL_ADMIN_USERNAME:-admin}
+      INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:-adminqaz}
     depends_on:
       postgres:
         condition: service_healthy

@@ -44,6 +44,14 @@ func main() {
 	}
 	defer pool.Close()
 
+	if _, err := identity.NewService(pool).CreateInitialAdmin(context.Background(), cfg.InitialAdminUsername, cfg.InitialAdminPassword); err != nil {
+		if !errors.Is(err, identity.ErrAdminAlreadyExists) {
+			log.Fatalf("bootstrap initial administrator: %v", err)
+		}
+	} else {
+		log.Printf("bootstrapped initial administrator %q (change the default password after first login)", cfg.InitialAdminUsername)
+	}
+
 	providerName, err := knowledge.NormalizeProviderName(cfg.KnowledgeProvider)
 	if err != nil {
 		log.Fatal(err)

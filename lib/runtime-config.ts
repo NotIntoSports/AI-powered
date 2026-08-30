@@ -29,11 +29,34 @@ const dataDirectory = process.env.INTERVIEW_DATA_DIR
 const settingsPath = path.join(dataDirectory, "model.json");
 const dpapiScript = path.join(process.cwd(), "scripts", "dpapi-secret.ps1");
 
+type ClientPipelinePayload = {
+  mode?: string;
+  message?: string;
+  voice?: string;
+  llm?: { baseUrl?: string; modelId?: string; apiKey?: string; providerName?: string };
+  asr?: { baseUrl?: string; modelId?: string; apiKey?: string };
+  tts?: { modelId?: string; providerId?: string };
+  e2e?: { baseUrl?: string; modelId?: string; apiKey?: string };
+};
+
 const globalConfig = globalThis as typeof globalThis & {
   modelSettingsPromise?: Promise<StoredSettings | null>;
   decryptedModelKey?: string;
   managementModelCache?: { token: string; at: number; config: ModelRuntimeConfig };
+  pipelineCache?: { token: string; at: number; pipeline: ClientPipelinePayload | null };
 };
+
+export async function getClientPipeline(): Promise<ClientPipelinePayload | null> {
+  const token = await readDesktopToken();
+  if (!token) return null;
+  const cached = globalConfig.pipelineCache;
+  if (cached && cached.token === token && Date.now() - cached.at < 5_000) {
+    return cached.pipeline;
+  }
+  const data = await fetchDesktopControlJson<ClientPipelinePayload>("/api/v1/client/settings/pipeline");
+  globalConfig.pipelineCache = { token, at: Date.now(), pipeline: data };
+  return data;
+}
 
 function runDpapi(mode: "Protect" | "Unprotect", value: string) {
   if (process.platform !== "win32") {
@@ -123,6 +146,31 @@ async function getManagementModelConfig(): Promise<ModelRuntimeConfig | null> {
   const cached = globalConfig.managementModelCache;
   if (cached && cached.token === token && Date.now() - cached.at < 5_000) {
     return cached.config;
+  }
+  const pipeline = await getClientPipeline();
+  if (pipeline?.mode === "e2e") {
+    // Explicit error — never silently fall back to cascaded / local LLM.
+    if (pipeline.message === "E2E_NOT_IMPLEMENTED" || !pipeline.e2e?.baseUrl || !pipeline.e2e.modelId) {
+      throw new Error("E2E_NOT_IMPLEMENTED");
+    }
+    const config: ModelRuntimeConfig = {
+      apiKey: pipeline.e2e.apiKey || "",
+      baseUrl: String(pipeline.e2e.baseUrl || "").replace(/\/$/, ""),
+      model: String(pipeline.e2e.modelId || ""),
+      source: "management"
+    };
+    globalConfig.managementModelCache = { token, at: Date.now(), config };
+    return config;
+  }
+  if (pipeline?.llm?.baseUrl && pipeline.llm.modelId) {
+    const config: ModelRuntimeConfig = {
+      apiKey: pipeline.llm.apiKey || "",
+      baseUrl: String(pipeline.llm.baseUrl || "").replace(/\/$/, ""),
+      model: String(pipeline.llm.modelId || ""),
+      source: "management"
+    };
+    globalConfig.managementModelCache = { token, at: Date.now(), config };
+    return config;
   }
   const data = await fetchDesktopControlJson<{
     available?: boolean;

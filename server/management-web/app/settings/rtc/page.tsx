@@ -1,16 +1,53 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ConsoleShell } from "../../console-shell";
 import { useAdminSession } from "../../use-admin-session";
 import {
   displayError,
   parseAPIError,
+  readJSON,
   requestJSON,
+  type CatalogEntry,
   type PublicRTCSettings,
   type RTCTestResult
 } from "../../../lib/control-api";
 import { ConfigStatus, SecretField } from "../config-status";
+import { SearchableCombobox } from "../../../components/searchable-combobox";
+import { COSYVOICE_VOICES } from "../../../lib/cosyvoice-voice-catalog";
+import {
+  inferSpeechProviderFromPipeline,
+  speechProviderLabel,
+  type CatalogHint
+} from "../../../lib/speech-provider-infer";
+
+type SectionId = "pipeline" | "livekit";
+type SectionFeedback = { ok?: string; error?: string };
+
+function catalogValue(providerId: string, modelId: string) {
+  if (!providerId || !modelId) return "";
+  return `${providerId}::${modelId}`;
+}
+
+function parseCatalogValue(value: string) {
+  const idx = value.indexOf("::");
+  if (idx <= 0) return { providerId: "", modelId: "" };
+  return { providerId: value.slice(0, idx), modelId: value.slice(idx + 2) };
+}
+
+function hintFromRef(value: string, catalog: CatalogEntry[]): CatalogHint {
+  const parsed = parseCatalogValue(value);
+  const entry = catalog.find(
+    (item) => item.providerId === parsed.providerId && item.modelId === parsed.modelId
+  );
+  return {
+    providerId: parsed.providerId,
+    modelId: parsed.modelId,
+    providerName: entry?.providerName,
+    baseUrl: entry?.baseUrl,
+    label: entry?.label
+  };
+}
 
 export default function RTCSettingsPage() {
   const { me, error, setError } = useAdminSession();
@@ -23,8 +60,19 @@ export default function RTCSettingsPage() {
   const [asrModel, setAsrModel] = useState("");
   const [asrApiKey, setAsrApiKey] = useState("");
   const [enabled, setEnabled] = useState(true);
-  const [notice, setNotice] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [pipelineMode, setPipelineMode] = useState<"cascaded" | "e2e">("cascaded");
+  const [asrRef, setAsrRef] = useState("");
+  const [llmRef, setLlmRef] = useState("");
+  const [ttsRef, setTtsRef] = useState("");
+  const [e2eRef, setE2eRef] = useState("");
+  const [ttsVoiceId, setTtsVoiceId] = useState("");
+  const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
+  const [previewUrl, setPreviewUrl] = useState("");
+  const [editing, setEditing] = useState<SectionId | null>(null);
+  const [busySection, setBusySection] = useState<SectionId | "preview" | null>(null);
+  const [feedback, setFeedback] = useState<Partial<Record<SectionId, SectionFeedback>>>({});
+  const previewUrlRef = useRef("");
+  const snapshotRef = useRef<Record<string, unknown> | null>(null);
 
   function apply(data: PublicRTCSettings) {
     setConfig(data);
@@ -34,15 +82,28 @@ export default function RTCSettingsPage() {
     setAsrBaseUrl(data.asrBaseUrl || "");
     setAsrModel(data.asrModel || "");
     setEnabled(data.enabled);
+    setPipelineMode(data.pipelineMode === "e2e" ? "e2e" : "cascaded");
+    setAsrRef(catalogValue(data.asrProviderId || "", data.asrModelId || ""));
+    setLlmRef(catalogValue(data.llmProviderId || "", data.llmModelId || ""));
+    setTtsRef(catalogValue(data.ttsProviderId || "", data.ttsModelId || ""));
+    setE2eRef(catalogValue(data.e2eProviderId || "", data.e2eModelId || ""));
+    setTtsVoiceId(data.ttsVoiceId || "");
+  }
+
+  async function loadCatalog() {
+    const result = await requestJSON("/api/v1/admin/settings/catalog");
+    if (result.response.ok) {
+      setCatalog(result.body as CatalogEntry[]);
+    }
   }
 
   async function load() {
-    const result = await requestJSON("/api/v1/admin/settings/rtc");
-    if (!result.response.ok) {
-      setError(displayError(parseAPIError(result.body, "无法读取 RTC 配置")));
+    const [rtcResult] = await Promise.all([requestJSON("/api/v1/admin/settings/rtc"), loadCatalog()]);
+    if (!rtcResult.response.ok) {
+      setError(displayError(parseAPIError(rtcResult.body, "无法读取 RTC 配置")));
       return;
     }
-    apply(result.body as PublicRTCSettings);
+    apply(rtcResult.body as PublicRTCSettings);
     setError("");
   }
 
@@ -50,7 +111,94 @@ export default function RTCSettingsPage() {
     if (me) void load();
   }, [me]);
 
-  function payload() {
+  useEffect(() => {
+    return () => {
+      if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+    };
+  }, []);
+
+  const optionsFor = useMemo(() => {
+    const make = (capability: string) =>
+      catalog
+        .filter((entry) => entry.enabled && entry.capability === capability)
+        .map((entry) => ({
+          value: catalogValue(entry.providerId, entry.modelId),
+          label: entry.label,
+          keywords: `${entry.providerName} ${entry.modelId} ${entry.displayName || ""}`
+        }));
+    return {
+      asr: make("asr"),
+      llm: make("llm"),
+      tts: make("tts"),
+      e2e: make("e2e")
+    };
+  }, [catalog]);
+
+  const ttsModelId = parseCatalogValue(ttsRef).modelId;
+  const ttsIsCosyVoice =
+    ttsModelId.startsWith("cosyvoice") || parseCatalogValue(ttsRef).providerId === "speech:aliyun";
+  const voiceOptions = useMemo(() => {
+    if (pipelineMode !== "cascaded") return [];
+    return COSYVOICE_VOICES.map((voice) => ({
+      value: voice.id,
+      label: `${voice.name} · ${voice.id}`,
+      keywords: `${voice.name} ${voice.id} ${voice.language} ${voice.gender}`
+    }));
+  }, [pipelineMode]);
+
+  function setSectionFeedback(section: SectionId, next: SectionFeedback) {
+    setFeedback((current) => ({ ...current, [section]: next }));
+  }
+
+  function beginEdit(section: SectionId) {
+    snapshotRef.current = {
+      language,
+      livekitUrl,
+      livekitApiKey,
+      livekitApiSecret,
+      asrBaseUrl,
+      asrModel,
+      asrApiKey,
+      enabled,
+      pipelineMode,
+      asrRef,
+      llmRef,
+      ttsRef,
+      e2eRef,
+      ttsVoiceId
+    };
+    setEditing(section);
+    setSectionFeedback(section, {});
+    setError("");
+  }
+
+  function cancelEdit() {
+    const snap = snapshotRef.current;
+    if (snap) {
+      setLanguage(String(snap.language || "zh"));
+      setLivekitUrl(String(snap.livekitUrl || ""));
+      setLivekitApiKey(String(snap.livekitApiKey || ""));
+      setLivekitApiSecret(String(snap.livekitApiSecret || ""));
+      setAsrBaseUrl(String(snap.asrBaseUrl || ""));
+      setAsrModel(String(snap.asrModel || ""));
+      setAsrApiKey(String(snap.asrApiKey || ""));
+      setEnabled(Boolean(snap.enabled));
+      setPipelineMode(snap.pipelineMode as "cascaded" | "e2e");
+      setAsrRef(String(snap.asrRef || ""));
+      setLlmRef(String(snap.llmRef || ""));
+      setTtsRef(String(snap.ttsRef || ""));
+      setE2eRef(String(snap.e2eRef || ""));
+      setTtsVoiceId(String(snap.ttsVoiceId || ""));
+    }
+    snapshotRef.current = null;
+    setEditing(null);
+  }
+
+  function fullPayload() {
+    const asr = parseCatalogValue(asrRef);
+    const llm = parseCatalogValue(llmRef);
+    const tts = parseCatalogValue(ttsRef);
+    const e2e = parseCatalogValue(e2eRef);
     return {
       language,
       enabled,
@@ -59,149 +207,385 @@ export default function RTCSettingsPage() {
       livekitApiSecret: livekitApiSecret.trim(),
       asrBaseUrl,
       asrModel,
-      asrApiKey: asrApiKey.trim()
+      asrApiKey: asrApiKey.trim(),
+      pipelineMode,
+      asrProviderId: asr.providerId,
+      asrModelId: asr.modelId,
+      llmProviderId: llm.providerId,
+      llmModelId: llm.modelId,
+      ttsProviderId: tts.providerId,
+      ttsModelId: tts.modelId,
+      ttsVoiceId,
+      e2eProviderId: e2e.providerId,
+      e2eModelId: e2e.modelId
     };
   }
 
-  async function save(event: FormEvent) {
-    event.preventDefault();
-    setBusy(true);
-    setNotice("");
+  async function putRtc(section: SectionId, successMessage: string) {
+    setBusySection(section);
+    setSectionFeedback(section, {});
     setError("");
     try {
       const result = await requestJSON("/api/v1/admin/settings/rtc", {
         method: "PUT",
-        body: JSON.stringify(payload())
+        body: JSON.stringify(fullPayload())
       });
       if (!result.response.ok) {
-        setError(displayError(parseAPIError(result.body, "保存失败")));
-        return;
+        setSectionFeedback(section, { error: displayError(parseAPIError(result.body, "保存失败")) });
+        return false;
       }
-      const data = result.body as PublicRTCSettings;
-      apply(data);
+      apply(result.body as PublicRTCSettings);
       setLivekitApiSecret("");
       setAsrApiKey("");
-      setNotice(data.available ? "LiveKit RTC 配置已写入数据库并可用。" : "已保存，但 LiveKit 尚未就绪。");
+      setSectionFeedback(section, { ok: successMessage });
+      setEditing(null);
+      snapshotRef.current = null;
+      return true;
     } finally {
-      setBusy(false);
+      setBusySection(null);
     }
   }
 
-  async function test() {
-    setBusy(true);
-    setNotice("");
-    setError("");
+  async function syncSpeechLine(): Promise<string> {
+    const inferred = inferSpeechProviderFromPipeline({
+      mode: pipelineMode,
+      tts: hintFromRef(ttsRef, catalog),
+      e2e: hintFromRef(e2eRef, catalog)
+    });
+    if (!inferred) return "";
+    const body: Record<string, unknown> = { activeProvider: inferred };
+    if (pipelineMode === "cascaded" && ttsVoiceId.trim() && (ttsIsCosyVoice || ttsVoiceId === "xiaoyun")) {
+      body.aliyunVoice = ttsVoiceId.trim();
+    }
+    const result = await requestJSON("/api/v1/admin/settings/speech", {
+      method: "PUT",
+      body: JSON.stringify(body)
+    });
+    if (!result.response.ok) {
+      return `管线已保存，但同步语音线路失败：${displayError(parseAPIError(result.body, "同步失败"))}`;
+    }
+    return `已将语音线路切换为${speechProviderLabel(inferred)}。`;
+  }
+
+  async function savePipeline() {
+    const ok = await putRtc("pipeline", "互动管线已保存。");
+    if (!ok) return;
+    const syncMsg = await syncSpeechLine();
+    if (!syncMsg) return;
+    if (syncMsg.startsWith("管线已保存")) {
+      setSectionFeedback("pipeline", { error: syncMsg });
+      return;
+    }
+    setSectionFeedback("pipeline", { ok: `互动管线已保存。${syncMsg}` });
+  }
+
+  async function saveLivekit() {
+    await putRtc(
+      "livekit",
+      config?.available || (livekitUrl && livekitApiKey)
+        ? "LiveKit 配置已保存。"
+        : "已保存，但 LiveKit 尚未就绪。"
+    );
+  }
+
+  async function testLivekit() {
+    setBusySection("livekit");
+    setSectionFeedback("livekit", {});
     try {
       const result = await requestJSON("/api/v1/admin/settings/rtc/test", {
         method: "POST",
-        body: JSON.stringify(payload())
+        body: JSON.stringify(fullPayload())
       });
       const body = result.body as RTCTestResult;
       if (!result.response.ok) {
-        setError(displayError(parseAPIError(result.body, "测试失败")));
+        setSectionFeedback("livekit", { error: displayError(parseAPIError(result.body, "测试失败")) });
         return;
       }
-      setNotice(body.message);
+      setSectionFeedback("livekit", { ok: body.message || "测试完成" });
     } finally {
-      setBusy(false);
+      setBusySection(null);
     }
   }
+
+  async function previewVoice() {
+    if (!ttsVoiceId) {
+      setSectionFeedback("pipeline", { error: "请先选择音色" });
+      return;
+    }
+    setBusySection("preview");
+    setSectionFeedback("pipeline", {});
+    try {
+      const response = await fetch("/api/v1/admin/settings/speech/preview", {
+        method: "POST",
+        credentials: "include",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          activeProvider: "aliyun",
+          aliyunVoice: ttsVoiceId,
+          aliyunEnabled: true
+        })
+      });
+      if (!response.ok) {
+        const body = await readJSON(response);
+        setSectionFeedback("pipeline", { error: displayError(parseAPIError(body, "试听失败")) });
+        return;
+      }
+      const blob = await response.blob();
+      if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+      const url = URL.createObjectURL(blob);
+      previewUrlRef.current = url;
+      setPreviewUrl(url);
+      setSectionFeedback("pipeline", { ok: `正在试听：${ttsVoiceId}` });
+    } catch {
+      setSectionFeedback("pipeline", { error: "试听失败，请先在「语音」页配好阿里云并保存" });
+    } finally {
+      setBusySection(null);
+    }
+  }
+
+  function Feedback({ section }: { section: SectionId }) {
+    const item = feedback[section];
+    if (!item?.ok && !item?.error) return null;
+    return (
+      <>
+        {item.error ? <p className="error section-feedback">{item.error}</p> : null}
+        {item.ok ? <p className="ok section-feedback">{item.ok}</p> : null}
+      </>
+    );
+  }
+
+  function SectionActions({
+    section,
+    onSave,
+    extra
+  }: {
+    section: SectionId;
+    onSave: () => void;
+    extra?: ReactNode;
+  }) {
+    const isEditing = editing === section;
+    const busy = busySection === section || busySection === "preview";
+    return (
+      <div className="row section-actions">
+        {!isEditing ? (
+          <button
+            className="secondary allow-when-readonly"
+            type="button"
+            disabled={editing !== null && !isEditing}
+            onClick={() => beginEdit(section)}
+          >
+            编辑
+          </button>
+        ) : (
+          <>
+            <button type="button" disabled={busy} onClick={() => void onSave()}>
+              {busy && busySection === section ? "保存中…" : "保存本项"}
+            </button>
+            <button className="secondary" type="button" disabled={busy} onClick={cancelEdit}>
+              取消
+            </button>
+          </>
+        )}
+        {extra}
+      </div>
+    );
+  }
+
+  const readOnly = (section: SectionId) => editing !== section;
 
   return (
     <ConsoleShell me={me}>
       {error ? <p className="error">{error}</p> : null}
-      {notice ? <p className="ok">{notice}</p> : null}
-      <form onSubmit={save} autoComplete="off">
-        <section className="card">
-          <div className="card-head">
-            <h2>LiveKit 字幕线路</h2>
-            <ConfigStatus
-              ready={Boolean(config?.available)}
-              readyText="已配置 · LiveKit 可用"
-              waitText="尚未配齐 URL、API Key 和 Secret"
-            />
-          </div>
+
+      <details className="card config-details" open>
+        <summary>
+          <span>互动管线</span>
+        </summary>
+        <div className="stack">
           <p className="muted">
-            自建 SFU 负责实时推流与字幕分发。Secret 加密存储，页面不回显明文。
+            从模型目录选择 ASR / LLM / TTS，或改用端对端模型。保存后会同步「语音」页的当前线路；进行中的客户端会话不会热切。
           </p>
-          <label>
-            字幕语言
-            <input value={language} onChange={(event) => setLanguage(event.target.value)} required />
-          </label>
-          <label>
-            启用字幕
-            <select value={enabled ? "yes" : "no"} onChange={(event) => setEnabled(event.target.value === "yes")}>
-              <option value="yes">启用</option>
-              <option value="no">停用</option>
-            </select>
-          </label>
-          <p className="muted">
-            线路：{config?.provider || "livekit"}
-            {config?.livekitAvailable ? " · LiveKit 就绪" : " · LiveKit 未就绪"}
-          </p>
-        </section>
-
-        <section className="card">
-          <div className="card-head">
-            <h2>LiveKit 连接</h2>
-            <ConfigStatus
-              ready={Boolean(config?.livekitAvailable)}
-              readyText="已配置并可用"
-              waitText="尚未配齐 URL、API Key 和 Secret"
-            />
-          </div>
-          <label>
-            LiveKit URL
-            <input value={livekitUrl} onChange={(event) => setLivekitUrl(event.target.value)} placeholder="wss://livekit.example.com" />
-          </label>
-          <label>
-            API Key
-            <input value={livekitApiKey} onChange={(event) => setLivekitApiKey(event.target.value)} />
-          </label>
-          <SecretField
-            label="API Secret"
-            configured={Boolean(config?.livekitSecretConfigured)}
-            value={livekitApiSecret}
-            onChange={setLivekitApiSecret}
+          <Feedback section="pipeline" />
+          <fieldset className="config-fieldset" disabled={readOnly("pipeline")}>
+            <label>
+              管线模式
+              <select value={pipelineMode} onChange={(event) => setPipelineMode(event.target.value as "cascaded" | "e2e")}>
+                <option value="cascaded">级联 ASR + LLM + TTS</option>
+                <option value="e2e">端对端</option>
+              </select>
+            </label>
+            {pipelineMode === "cascaded" ? (
+              <div className="stack">
+                <label>
+                  ASR
+                  <SearchableCombobox
+                    options={optionsFor.asr}
+                    value={asrRef}
+                    onChange={setAsrRef}
+                    placeholder="搜索 ASR 模型…"
+                    disabled={readOnly("pipeline")}
+                  />
+                </label>
+                <label>
+                  LLM
+                  <SearchableCombobox
+                    options={optionsFor.llm}
+                    value={llmRef}
+                    onChange={setLlmRef}
+                    placeholder="搜索 LLM 模型…"
+                    disabled={readOnly("pipeline")}
+                  />
+                </label>
+                <label>
+                  TTS
+                  <SearchableCombobox
+                    options={optionsFor.tts}
+                    value={ttsRef}
+                    onChange={setTtsRef}
+                    placeholder="搜索 TTS 模型…"
+                    disabled={readOnly("pipeline")}
+                  />
+                </label>
+                {ttsIsCosyVoice || !ttsRef || parseCatalogValue(ttsRef).providerId === "speech:aliyun" ? (
+                  <>
+                    <label>
+                      官方免费音色
+                      <SearchableCombobox
+                        options={voiceOptions}
+                        value={ttsVoiceId}
+                        onChange={setTtsVoiceId}
+                        placeholder="搜索音色…"
+                        disabled={readOnly("pipeline")}
+                      />
+                    </label>
+                    <p className="muted">试听使用「语音」页已保存的阿里云凭证，不会静默改用其它线路。</p>
+                  </>
+                ) : (
+                  <p className="muted">当前 TTS 不是阿里云 CosyVoice / NLS 目录项时，不提供官方音色试听。</p>
+                )}
+              </div>
+            ) : (
+              <div className="stack">
+                <label>
+                  端对端模型
+                  <SearchableCombobox
+                    options={optionsFor.e2e}
+                    value={e2eRef}
+                    onChange={setE2eRef}
+                    placeholder="搜索端对端模型…"
+                    disabled={readOnly("pipeline")}
+                  />
+                </label>
+                <p className="muted">
+                  端对端模型使用会话内置语音，无独立官方音色目录。保存仍会按厂商同步语音线路。桌面端若尚未接入 Realtime/Omni，会返回 E2E_NOT_IMPLEMENTED，不会静默退回级联。
+                </p>
+              </div>
+            )}
+          </fieldset>
+          <SectionActions
+            section="pipeline"
+            onSave={savePipeline}
+            extra={
+              pipelineMode === "cascaded" &&
+              (ttsIsCosyVoice || parseCatalogValue(ttsRef).providerId === "speech:aliyun" || !ttsRef) ? (
+                <button
+                  className="secondary allow-when-readonly"
+                  type="button"
+                  disabled={busySection !== null || !ttsVoiceId}
+                  onClick={() => void previewVoice()}
+                >
+                  {busySection === "preview" ? "试听中…" : "试听音色"}
+                </button>
+              ) : null
+            }
           />
-          <div className="row">
-            <button className="secondary" type="button" disabled={busy} onClick={() => void test()}>测试 LiveKit</button>
-          </div>
-        </section>
-
-        <section className="card">
-          <div className="card-head">
-            <h2>流式 ASR（可选）</h2>
-            <ConfigStatus
-              ready={Boolean(config?.asrKeyConfigured && config.asrBaseUrl)}
-              readyText="已配置备用 ASR"
-              waitText="未配置（LiveKit Agent 仍可用阿里云 NLS）"
-            />
-          </div>
-          <p className="muted">OpenAI-compatible 流式 ASR。不填也不影响 LiveKit 推流与 Agent 字幕。</p>
-          <label>
-            ASR 地址
-            <input value={asrBaseUrl} onChange={(event) => setAsrBaseUrl(event.target.value)} placeholder="https://asr.example.com/v1" />
-          </label>
-          <label>
-            ASR 模型
-            <input value={asrModel} onChange={(event) => setAsrModel(event.target.value)} placeholder="whisper-1" />
-          </label>
-          <SecretField
-            label="ASR API Key"
-            configured={Boolean(config?.asrKeyConfigured)}
-            value={asrApiKey}
-            onChange={setAsrApiKey}
-          />
-        </section>
-
-        <div className="row">
-          <button type="submit" disabled={busy}>{busy ? "处理中…" : "保存到数据库"}</button>
+          {previewUrl ? <audio className="voice-preview" src={previewUrl} controls autoPlay /> : null}
         </div>
-        {config?.updatedAt ? (
-          <p className="muted">版本 {config.configVersion} · {config.updatedByUsername || "未知"} · {config.updatedAt}</p>
-        ) : null}
-      </form>
+      </details>
+
+      <details className="card config-details" open>
+        <summary>
+          <span>LiveKit 字幕线路</span>
+          <ConfigStatus
+            ready={Boolean(config?.available)}
+            readyText="已配置 · LiveKit 可用"
+            waitText="尚未配齐 URL、API Key 和 Secret"
+          />
+        </summary>
+        <div className="stack">
+          <p className="muted">自建 SFU 负责实时推流与字幕分发。Secret 加密存储，页面不回显明文。</p>
+          <Feedback section="livekit" />
+          <fieldset className="config-fieldset" disabled={readOnly("livekit")}>
+            <label>
+              字幕语言
+              <input value={language} onChange={(event) => setLanguage(event.target.value)} required />
+            </label>
+            <label>
+              启用字幕
+              <select value={enabled ? "yes" : "no"} onChange={(event) => setEnabled(event.target.value === "yes")}>
+                <option value="yes">启用</option>
+                <option value="no">停用</option>
+              </select>
+            </label>
+            <label>
+              LiveKit URL
+              <input value={livekitUrl} onChange={(event) => setLivekitUrl(event.target.value)} placeholder="wss://livekit.example.com" />
+            </label>
+            <label>
+              API Key
+              <input value={livekitApiKey} onChange={(event) => setLivekitApiKey(event.target.value)} />
+            </label>
+            <SecretField
+              label="API Secret"
+              configured={Boolean(config?.livekitSecretConfigured)}
+              value={livekitApiSecret}
+              onChange={setLivekitApiSecret}
+            />
+            <details className="muted">
+              <summary>流式 ASR（可选，不填也不影响 LiveKit 推流）</summary>
+              <div className="stack" style={{ marginTop: 12 }}>
+                <label>
+                  ASR 地址（OpenAI-compatible）
+                  <input value={asrBaseUrl} onChange={(event) => setAsrBaseUrl(event.target.value)} placeholder="https://asr.example.com/v1" />
+                </label>
+                <label>
+                  ASR 模型
+                  <input value={asrModel} onChange={(event) => setAsrModel(event.target.value)} placeholder="whisper-1" />
+                </label>
+                <SecretField
+                  label="ASR API Key"
+                  configured={Boolean(config?.asrKeyConfigured)}
+                  value={asrApiKey}
+                  onChange={setAsrApiKey}
+                />
+              </div>
+            </details>
+            <p className="muted">
+              线路：{config?.provider || "livekit"}
+              {config?.livekitAvailable ? " · LiveKit 就绪" : " · LiveKit 未就绪"}
+            </p>
+          </fieldset>
+          <SectionActions
+            section="livekit"
+            onSave={saveLivekit}
+            extra={
+              <button
+                className="secondary allow-when-readonly"
+                type="button"
+                disabled={busySection !== null}
+                onClick={() => void testLivekit()}
+              >
+                测试 LiveKit
+              </button>
+            }
+          />
+        </div>
+      </details>
+
+      {config?.updatedAt ? (
+        <p className="muted">版本 {config.configVersion} · {config.updatedByUsername || "未知"} · {config.updatedAt}</p>
+      ) : null}
     </ConsoleShell>
   );
 }

@@ -62,7 +62,7 @@ export default function LoginPage() {
         <button type="submit" disabled={busy}>
           {busy ? "登录中…" : "登录"}
         </button>
-        <p className="muted">没有公开注册。初始管理员只能通过服务器 CLI 创建。</p>
+        <p className="muted">没有公开注册。空库首次启动默认账号为 admin / adminqaz；已改密后不会被覆盖。</p>
       </form>
     </main>
   );

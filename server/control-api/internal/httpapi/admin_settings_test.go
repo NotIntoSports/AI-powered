@@ -243,16 +243,12 @@ func (fake *fakeSettingsAdmin) GetAgentPipeline(context.Context) (settings.Agent
 
 func (fake *fakeSettingsAdmin) GetAgentAI(context.Context) (settings.AgentAISettings, error) {
 	return settings.AgentAISettings{
-		BaseURL: "https://api.example.com/v1",
-		Model:   "gpt-4o-audio-preview",
-		APIKey:  "sk-test",
-		Enabled: true,
+		BaseURL:  "https://api.example.com/v1",
+		Model:    "gpt-4o-audio-preview",
+		APIKey:   "sk-test",
+		Enabled:  true,
 		Language: "zh",
 	}, nil
-}
-
-func (fake *fakeSettingsAdmin) GetClientPipeline(context.Context) (settings.PublicPipeline, error) {
-	return settings.EmptyPublicPipeline(), nil
 }
 
 func (fake *fakeSettingsAdmin) DeleteUserVoice(context.Context, string) error { return nil }
@@ -267,6 +263,94 @@ func (fake *fakeSettingsAdmin) TestSpeechASR(context.Context, *settings.SpeechIn
 
 func (fake *fakeSettingsAdmin) ListSpeechVoices(context.Context) ([]settings.SpeechVoiceEntry, error) {
 	return []settings.SpeechVoiceEntry{{ID: "xiaoyun", Name: "小云", Source: "catalog"}}, nil
+}
+
+func (fake *fakeSettingsAdmin) DiscoverModels(context.Context, string, string) ([]settings.DiscoveredModel, error) {
+	return nil, nil
+}
+
+func (fake *fakeSettingsAdmin) ListDiscoveredModels(context.Context, string) ([]settings.DiscoveredModel, error) {
+	return nil, nil
+}
+
+func (fake *fakeSettingsAdmin) SetModelEnabled(context.Context, string, string, bool) error {
+	return nil
+}
+
+func (fake *fakeSettingsAdmin) GetEnabledModels(context.Context, string) ([]string, error) {
+	return nil, nil
+}
+
+func (fake *fakeSettingsAdmin) ListAIProviders(context.Context) ([]settings.PublicAIProvider, error) {
+	return []settings.PublicAIProvider{}, nil
+}
+
+func (fake *fakeSettingsAdmin) GetAIProvider(_ context.Context, id string) (settings.PublicAIProvider, error) {
+	return settings.PublicAIProvider{ID: id, Configured: true}, nil
+}
+
+func (fake *fakeSettingsAdmin) CreateAIProvider(_ context.Context, _ users.User, _ string, input settings.AIProviderInput) (settings.PublicAIProvider, error) {
+	return settings.PublicAIProvider{Name: input.Name, BaseURL: input.BaseURL, Model: input.Model, Configured: true, APIKeyConfigured: input.APIKey != ""}, nil
+}
+
+func (fake *fakeSettingsAdmin) UpdateAIProvider(_ context.Context, _ users.User, _ string, id string, input settings.AIProviderInput) (settings.PublicAIProvider, error) {
+	return settings.PublicAIProvider{ID: id, Name: input.Name, BaseURL: input.BaseURL, Model: input.Model, Configured: true}, nil
+}
+
+func (fake *fakeSettingsAdmin) DeleteAIProvider(context.Context, users.User, string, string) error {
+	return nil
+}
+
+func (fake *fakeSettingsAdmin) ActivateAIProvider(_ context.Context, _ users.User, _ string, id string) (settings.PublicAIProvider, error) {
+	return settings.PublicAIProvider{ID: id, IsDefault: true, Configured: true}, nil
+}
+
+func (fake *fakeSettingsAdmin) TestAIProvider(context.Context, users.User, string, string, *settings.AIProviderInput) (settings.AITestResult, error) {
+	return settings.AITestResult{Reachable: true, Message: "ok"}, nil
+}
+
+func (fake *fakeSettingsAdmin) DiscoverProviderModels(context.Context, string, *settings.AIProviderInput) ([]settings.DiscoveredModel, error) {
+	return nil, nil
+}
+
+func (fake *fakeSettingsAdmin) ListProviderModels(context.Context, string) ([]settings.DiscoveredModel, error) {
+	return nil, nil
+}
+
+func (fake *fakeSettingsAdmin) AddProviderModel(_ context.Context, _, modelID, ownedBy string) (settings.DiscoveredModel, error) {
+	return settings.DiscoveredModel{ModelID: modelID, OwnedBy: ownedBy, Enabled: true}, nil
+}
+
+func (fake *fakeSettingsAdmin) DeleteProviderModel(context.Context, string, string) error {
+	return nil
+}
+
+func (fake *fakeSettingsAdmin) SetProviderModelEnabled(context.Context, string, string, bool) error {
+	return nil
+}
+
+func (fake *fakeSettingsAdmin) ActivateProviderModel(_ context.Context, _ users.User, _ string, providerID, modelID string) (settings.PublicAIProvider, error) {
+	return settings.PublicAIProvider{ID: providerID, Model: modelID, IsDefault: true, Configured: true}, nil
+}
+
+func (fake *fakeSettingsAdmin) ListCatalog(context.Context, string, string) ([]settings.CatalogEntry, error) {
+	return []settings.CatalogEntry{}, nil
+}
+
+func (fake *fakeSettingsAdmin) SyncCatalog(context.Context) (settings.CatalogSyncResult, error) {
+	return settings.CatalogSyncResult{}, nil
+}
+
+func (fake *fakeSettingsAdmin) ReclassifyCatalog(context.Context) (int, error) {
+	return 0, nil
+}
+
+func (fake *fakeSettingsAdmin) PatchCatalogModel(_ context.Context, providerID, modelID string, _ settings.CatalogPatchInput) (settings.DiscoveredModel, error) {
+	return settings.DiscoveredModel{ProviderID: providerID, ModelID: modelID, Capability: settings.CapabilityLLM}, nil
+}
+
+func (fake *fakeSettingsAdmin) GetClientPipeline(context.Context) (settings.ClientPipeline, error) {
+	return settings.ClientPipeline{Mode: settings.PipelineModeCascaded}, nil
 }
 
 func TestAdminSettingsRequireAdministratorAndOmitSecrets(t *testing.T) {

@@ -9,7 +9,7 @@ require (
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/pgvector/pgvector-go v0.4.1
 	github.com/pgvector/pgvector-go/pgx v0.4.1
-	github.com/pressly/goose/v3 v3.27.3
+	github.com/pressly/goose/v3 v3.26.0
 	github.com/tencentyun/cos-go-sdk-v5 v0.7.59
 	golang.org/x/crypto v0.54.0
 	golang.org/x/term v0.45.0
@@ -17,8 +17,10 @@ require (
 
 require (
 	github.com/clbanning/mxj v1.8.4 // indirect
+	github.com/coder/websocket v1.8.13 // indirect
 	github.com/google/go-querystring v1.0.0 // indirect
 	github.com/google/jsonschema-go v0.4.3 // indirect
+	github.com/google/uuid v1.6.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect

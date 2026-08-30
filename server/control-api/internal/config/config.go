@@ -12,14 +12,16 @@ import (
 )
 
 const (
-	defaultListenAddress     = "127.0.0.1:8080"
-	defaultSessionTTL        = 8 * time.Hour
-	minimumSessionTTL        = 15 * time.Minute
-	maximumSessionTTL        = 30 * 24 * time.Hour
-	defaultKnowledgeProvider = "local-pgvector"
-	defaultEmbeddingBaseURL  = "http://127.0.0.1:8090"
-	defaultEmbeddingModel    = "BAAI/bge-m3"
-	defaultMCPListenAddress  = "127.0.0.1:8091"
+	defaultListenAddress         = "127.0.0.1:8080"
+	defaultSessionTTL            = 8 * time.Hour
+	minimumSessionTTL            = 15 * time.Minute
+	maximumSessionTTL            = 30 * 24 * time.Hour
+	defaultKnowledgeProvider     = "local-pgvector"
+	defaultEmbeddingBaseURL      = "http://127.0.0.1:8090"
+	defaultEmbeddingModel        = "BAAI/bge-m3"
+	defaultMCPListenAddress      = "127.0.0.1:8091"
+	defaultInitialAdminUsername  = "admin"
+	defaultInitialAdminPassword  = "adminqaz"
 )
 
 var (
@@ -32,31 +34,35 @@ var (
 )
 
 type Config struct {
-	ListenAddress     string
-	DatabaseURL       string
-	SessionTTL        time.Duration
-	CookieSecure      bool
-	TrustedProxyCIDRs []netip.Prefix
-	SettingsMasterKey []byte
-	KnowledgeProvider string
-	EmbeddingBaseURL  string
-	EmbeddingModel    string
-	MCPListenAddress  string
-	MCPAdminToken     string
-	MCPActorUsername  string
-	AgentInternalToken string
+	ListenAddress          string
+	DatabaseURL            string
+	SessionTTL             time.Duration
+	CookieSecure           bool
+	TrustedProxyCIDRs      []netip.Prefix
+	SettingsMasterKey      []byte
+	KnowledgeProvider      string
+	EmbeddingBaseURL       string
+	EmbeddingModel         string
+	MCPListenAddress       string
+	MCPAdminToken          string
+	MCPActorUsername       string
+	AgentInternalToken     string
+	InitialAdminUsername   string
+	InitialAdminPassword   string
 }
 
 func Load(getenv func(string) string) (Config, error) {
 	cfg := Config{
-		ListenAddress:     defaultListenAddress,
-		DatabaseURL:       getenv("DATABASE_URL"),
-		SessionTTL:        defaultSessionTTL,
-		CookieSecure:      true,
-		KnowledgeProvider: defaultKnowledgeProvider,
-		EmbeddingBaseURL:  defaultEmbeddingBaseURL,
-		EmbeddingModel:    defaultEmbeddingModel,
-		MCPListenAddress:  defaultMCPListenAddress,
+		ListenAddress:        defaultListenAddress,
+		DatabaseURL:          getenv("DATABASE_URL"),
+		SessionTTL:           defaultSessionTTL,
+		CookieSecure:         true,
+		KnowledgeProvider:    defaultKnowledgeProvider,
+		EmbeddingBaseURL:     defaultEmbeddingBaseURL,
+		EmbeddingModel:       defaultEmbeddingModel,
+		MCPListenAddress:     defaultMCPListenAddress,
+		InitialAdminUsername: defaultInitialAdminUsername,
+		InitialAdminPassword: defaultInitialAdminPassword,
 	}
 	if cfg.DatabaseURL == "" {
 		return Config{}, ErrDatabaseURLRequired
@@ -110,6 +116,12 @@ func Load(getenv func(string) string) (Config, error) {
 	cfg.MCPAdminToken = strings.TrimSpace(getenv("MCP_ADMIN_TOKEN"))
 	cfg.MCPActorUsername = strings.TrimSpace(getenv("MCP_ACTOR_USERNAME"))
 	cfg.AgentInternalToken = strings.TrimSpace(getenv("AGENT_INTERNAL_TOKEN"))
+	if value := strings.TrimSpace(getenv("INITIAL_ADMIN_USERNAME")); value != "" {
+		cfg.InitialAdminUsername = value
+	}
+	if value := getenv("INITIAL_ADMIN_PASSWORD"); value != "" {
+		cfg.InitialAdminPassword = value
+	}
 
 	return cfg, nil
 }

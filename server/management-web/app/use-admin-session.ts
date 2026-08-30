@@ -12,6 +12,8 @@ export function useAdminSession() {
   async function refresh() {
     const meResult = await requestJSON("/api/v1/auth/me");
     if (meResult.response.status === 401) {
+      // Drop stale HttpOnly cookie so middleware does not trap the user on /overview.
+      await requestJSON("/clear-session", { method: "POST" }).catch(() => undefined);
       router.replace("/login");
       return null;
     }

@@ -1,4 +1,4 @@
-import { fetchDesktopControlJson, getModelRuntimeConfig } from "./runtime-config";
+import { fetchDesktopControlJson, getClientPipeline, getModelRuntimeConfig } from "./runtime-config";
 import {
   areEquivalentBaseUrls,
   isSecureEndpoint,
@@ -96,6 +96,20 @@ async function getManagementASRConfig(): Promise<ManagementASR | null> {
   const cached = globalTranscription.managementAsrCache;
   if (cached && Date.now() - cached.at < 5_000) {
     return cached.config;
+  }
+  const pipeline = await getClientPipeline();
+  if (pipeline?.mode === "cascaded" && pipeline.asr?.baseUrl && pipeline.asr.modelId) {
+    const config: ManagementASR = {
+      available: true,
+      baseUrl: String(pipeline.asr.baseUrl || "").replace(/\/$/, ""),
+      model: String(pipeline.asr.modelId || "whisper-1"),
+      language: "zh",
+      apiKey: typeof pipeline.asr.apiKey === "string" ? pipeline.asr.apiKey : ""
+    };
+    if (isSecureTranscriptionEndpoint(config.baseUrl)) {
+      globalTranscription.managementAsrCache = { at: Date.now(), config };
+      return config;
+    }
   }
   const data = await fetchDesktopControlJson<{
     available?: boolean;

@@ -117,6 +117,102 @@ func resolveAliyunToken(ctx context.Context, client HTTPDoer, accessKeyID, acces
 	return createAliyunNLSToken(ctx, client, accessKeyID, accessKeySecret)
 }
 
+const (
+	aliyunPreviewText   = "你好，这是当前音色试听。"
+	aliyunPreviewMaxWAV = 2 << 20
+)
+
+func decodeAliyunErrorBody(body []byte) string {
+	var record struct {
+		Message string `json:"message"`
+		Status  int    `json:"status"`
+	}
+	if json.Unmarshal(body, &record) == nil {
+		if strings.TrimSpace(record.Message) != "" {
+			return strings.TrimSpace(record.Message)
+		}
+		if record.Status != 0 {
+			return fmt.Sprintf("ALIYUN_TTS_%d", record.Status)
+		}
+	}
+	trimmed := strings.TrimSpace(string(body))
+	if trimmed != "" && len(trimmed) < 500 {
+		return trimmed
+	}
+	return ""
+}
+
+func synthesizeAliyunSpeech(
+	ctx context.Context,
+	client HTTPDoer,
+	record SpeechRecord,
+	accessKeyID, accessKeySecret, token, text string,
+) ([]byte, string, error) {
+	if strings.TrimSpace(record.AliyunAppKey) == "" {
+		return nil, "请填写阿里云 Appkey", ErrInvalidInput
+	}
+	if strings.TrimSpace(token) == "" && (strings.TrimSpace(accessKeyID) == "" || strings.TrimSpace(accessKeySecret) == "") {
+		return nil, "请填写 AccessKey ID 和 Secret，或临时 Token", ErrInvalidInput
+	}
+	if client == nil {
+		client = &http.Client{Timeout: 20 * time.Second}
+	}
+	resolved, err := resolveAliyunToken(ctx, client, accessKeyID, accessKeySecret, token)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, "阿里云 Token 连接超时", err
+		}
+		return nil, "阿里云鉴权失败，请检查 AccessKey", err
+	}
+	gateway := strings.TrimRight(record.AliyunGateway, "/")
+	if gateway == "" {
+		gateway = defaultAliyunGate
+	}
+	voice := strings.TrimSpace(record.AliyunVoice)
+	if voice == "" {
+		voice = defaultAliyunVoice
+	}
+	if strings.TrimSpace(text) == "" {
+		text = aliyunPreviewText
+	}
+	body, _ := json.Marshal(map[string]any{
+		"appkey":      strings.TrimSpace(record.AliyunAppKey),
+		"text":        text,
+		"format":      "wav",
+		"sample_rate": 16000,
+		"voice":       voice,
+	})
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, gateway+"/stream/v1/tts", strings.NewReader(string(body)))
+	if err != nil {
+		return nil, "无法连接阿里云语音", err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-NLS-Token", resolved)
+	response, err := client.Do(request)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, "阿里云语音连接超时", err
+		}
+		return nil, "无法连接阿里云语音", err
+	}
+	defer response.Body.Close()
+	payload, _ := io.ReadAll(io.LimitReader(response.Body, aliyunPreviewMaxWAV))
+	contentType := strings.ToLower(response.Header.Get("Content-Type"))
+	if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
+		return nil, "阿里云语音鉴权失败，请检查 Appkey 或 Token", ErrInvalidInput
+	}
+	if strings.Contains(contentType, "audio/") || (len(payload) >= 12 && string(payload[:4]) == "RIFF") {
+		return payload, "", nil
+	}
+	if response.StatusCode >= 500 {
+		return nil, "阿里云语音暂时不可达", ErrStore
+	}
+	if detail := decodeAliyunErrorBody(payload); detail != "" {
+		return nil, fmt.Sprintf("阿里云语音合成失败：%s（音色 %s）", detail, voice), ErrInvalidInput
+	}
+	return nil, "阿里云语音鉴权可用，但合成未成功。请确认项目已开通语音合成并启用该音色。", ErrInvalidInput
+}
+
 func probeAliyunSpeech(ctx context.Context, client HTTPDoer, record SpeechRecord, accessKeyID, accessKeySecret, token string, decryptErr error) SpeechTestResult {
 	result := SpeechTestResult{Provider: SpeechProviderAliyun}
 	if decryptErr != nil {
@@ -127,73 +223,17 @@ func probeAliyunSpeech(ctx context.Context, client HTTPDoer, record SpeechRecord
 		result.Message = "阿里云语音已停用"
 		return result
 	}
-	if strings.TrimSpace(record.AliyunAppKey) == "" {
-		result.Message = "请填写阿里云 Appkey"
-		return result
-	}
-	if strings.TrimSpace(token) == "" && (strings.TrimSpace(accessKeyID) == "" || strings.TrimSpace(accessKeySecret) == "") {
-		result.Message = "请填写 AccessKey ID 和 Secret，或临时 Token"
-		return result
-	}
-	if client == nil {
-		client = &http.Client{Timeout: 8 * time.Second}
-	}
-	resolved, err := resolveAliyunToken(ctx, client, accessKeyID, accessKeySecret, token)
-	if err != nil {
-		if ctx.Err() != nil {
-			result.Message = "阿里云 Token 连接超时"
-			return result
+	probeRecord := record
+	probeRecord.AliyunVoice = defaultAliyunVoice
+	audio, message, err := synthesizeAliyunSpeech(ctx, client, probeRecord, accessKeyID, accessKeySecret, token, "测")
+	if err != nil || len(audio) == 0 {
+		if message == "" {
+			message = "无法连接阿里云语音"
 		}
-		result.Message = "阿里云鉴权失败，请检查 AccessKey"
+		result.Message = message
 		return result
 	}
-	gateway := strings.TrimRight(record.AliyunGateway, "/")
-	if gateway == "" {
-		gateway = defaultAliyunGate
-	}
-	voice := strings.TrimSpace(record.AliyunVoice)
-	if voice == "" {
-		voice = defaultAliyunVoice
-	}
-	body, _ := json.Marshal(map[string]any{
-		"appkey":      strings.TrimSpace(record.AliyunAppKey),
-		"text":        "测",
-		"format":      "wav",
-		"sample_rate": 16000,
-		"voice":       voice,
-	})
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, gateway+"/stream/v1/tts", strings.NewReader(string(body)))
-	if err != nil {
-		result.Message = "无法连接阿里云语音"
-		return result
-	}
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("X-NLS-Token", resolved)
-	response, err := client.Do(request)
-	if err != nil {
-		if ctx.Err() != nil {
-			result.Message = "阿里云语音连接超时"
-			return result
-		}
-		result.Message = "无法连接阿里云语音"
-		return result
-	}
-	defer response.Body.Close()
-	payload, _ := io.ReadAll(io.LimitReader(response.Body, 1<<16))
-	contentType := strings.ToLower(response.Header.Get("Content-Type"))
-	if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
-		result.Message = "阿里云语音鉴权失败，请检查 Appkey 或 Token"
-		return result
-	}
-	if strings.Contains(contentType, "audio/") || (len(payload) >= 12 && string(payload[:4]) == "RIFF") {
-		result.Reachable = true
-		result.Message = "阿里云语音已连通"
-		return result
-	}
-	if response.StatusCode >= 500 {
-		result.Message = "阿里云语音暂时不可达"
-		return result
-	}
-	result.Message = "阿里云语音鉴权可用，但合成未成功。请确认项目已开通语音合成并启用该音色。"
+	result.Reachable = true
+	result.Message = "阿里云语音已连通"
 	return result
 }

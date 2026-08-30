@@ -9,7 +9,7 @@ const links = [
   { href: "/overview", label: "概览" },
   { href: "/users", label: "账户" },
   { href: "/sessions", label: "当前线路" },
-  { href: "/settings/ai", label: "AI 配置" },
+  { href: "/settings/ai", label: "模型管理" },
   { href: "/settings/rtc", label: "RTC 配置" },
   { href: "/settings/speech", label: "语音" },
   { href: "/settings/pipeline", label: "语音管线" },

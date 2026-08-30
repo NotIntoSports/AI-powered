@@ -10,9 +10,9 @@ export function middleware(request: NextRequest) {
   if (!hasSession && !isLogin) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
-  if (hasSession && isLogin) {
-    return NextResponse.redirect(new URL("/overview", request.url));
-  }
+  // Cookie presence alone does not mean the session is still valid (password reset,
+  // container restart, or expiry). Let the login page render so the client can
+  // replace stale cookies after /auth/me returns 401.
   return NextResponse.next();
 }
 

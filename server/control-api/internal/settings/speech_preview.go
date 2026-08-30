@@ -3,12 +3,8 @@ package settings
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
-	"io"
-	"net/http"
 	"strings"
-	"time"
 )
 
 type SpeechPreviewResult struct {
@@ -166,43 +162,16 @@ func mergeSpeechPreviewRecord(record *SpeechRecord, input SpeechInput, stored bo
 }
 
 func previewAliyunTTS(ctx context.Context, client HTTPDoer, record SpeechRecord, accessKeyID, accessKeySecret, token string) (SpeechPreviewResult, error) {
-	if client == nil {
-		client = &http.Client{Timeout: 12 * time.Second}
-	}
-	resolved, err := resolveAliyunToken(ctx, client, accessKeyID, accessKeySecret, token)
-	if err != nil {
-		return SpeechPreviewResult{Message: "阿里云鉴权失败"}, nil
-	}
-	gateway := strings.TrimRight(record.AliyunGateway, "/")
-	if gateway == "" {
-		gateway = defaultAliyunGate
-	}
-	voice := strings.TrimSpace(record.AliyunVoice)
-	if voice == "" {
-		voice = defaultAliyunVoice
-	}
-	body, _ := json.Marshal(map[string]any{
-		"appkey": record.AliyunAppKey, "text": "你好，这是语音试听。", "format": "wav",
-		"sample_rate": 16000, "voice": voice,
-	})
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, gateway+"/stream/v1/tts", strings.NewReader(string(body)))
-	if err != nil {
-		return SpeechPreviewResult{Message: "无法连接阿里云语音"}, nil
-	}
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("X-NLS-Token", resolved)
-	response, err := client.Do(request)
-	if err != nil {
-		return SpeechPreviewResult{Message: "阿里云语音连接失败"}, nil
-	}
-	defer response.Body.Close()
-	payload, _ := io.ReadAll(io.LimitReader(response.Body, 1<<20))
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return SpeechPreviewResult{Message: "阿里云合成失败"}, nil
+	audio, message, err := synthesizeAliyunPreviewSpeech(ctx, client, record, accessKeyID, accessKeySecret, token, "你好，这是语音试听。")
+	if err != nil || len(audio) == 0 {
+		if message == "" {
+			message = "阿里云合成失败"
+		}
+		return SpeechPreviewResult{Message: message}, nil
 	}
 	return SpeechPreviewResult{
-		ContentType: response.Header.Get("Content-Type"),
-		AudioBase64: base64.StdEncoding.EncodeToString(payload),
+		ContentType: "audio/wav",
+		AudioBase64: base64.StdEncoding.EncodeToString(audio),
 		Message:     "试听音频已生成",
 	}, nil
 }

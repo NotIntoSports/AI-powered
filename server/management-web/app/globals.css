@@ -76,3 +76,26 @@ th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid #262c36; 
 .config-details > summary::after { content: "展开"; color: #8d99aa; font-size: 12px; font-weight: 600; }
 .config-details[open] > summary::after { content: "收起"; }
 .config-details > .stack { margin-top: 14px; }
+.section-feedback { margin: 0 0 8px; font-size: 13px; }
+.section-actions { margin-top: 12px; }
+fieldset.config-fieldset { border: 0; margin: 0; padding: 0; min-inline-size: 0; }
+fieldset.config-fieldset:disabled { opacity: .85; }
+fieldset.config-fieldset:disabled input,
+fieldset.config-fieldset:disabled select,
+fieldset.config-fieldset:disabled textarea,
+fieldset.config-fieldset:disabled button:not(.allow-when-readonly) {
+  pointer-events: none;
+}
+.nested-details { border: 1px solid #303744; border-radius: 12px; padding: 12px 14px; background: #0d1118; }
+.voice-preview { width: 100%; margin-top: 8px; }
+.combobox { position: relative; display: grid; gap: 8px; }
+.combobox-list {
+  list-style: none; margin: 0; padding: 6px; max-height: 240px; overflow: auto;
+  border: 1px solid #303744; border-radius: 10px; background: #0d1118;
+}
+.combobox-list button {
+  width: 100%; text-align: left; background: transparent; border: 0; color: inherit;
+  padding: 8px 10px; border-radius: 8px; cursor: pointer;
+}
+.combobox-list button:hover, .combobox-list button.active { background: #1b2330; }
+.combobox-clear { justify-self: start; }

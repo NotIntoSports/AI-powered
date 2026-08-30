@@ -2,6 +2,30 @@
 
 每项新功能实施前，在此追加一条记录。
 
+## 模型目录与 RTC 互动管线
+
+- 目标：多密钥线路全量同步模型目录；规则 + 单次 OpenAI 兼容 JSON 分类（`llm|asr|tts|e2e|unknown`）；RTC 绑定 `cascaded`（ASR+LLM+TTS）或 `e2e`；管理端可搜索 Combobox；TTS 官方音色试听；桌面 `GET /client/settings/pipeline` 按 mode 消费。
+- 采用：扩展已有 Go `control-api` + PostgreSQL（`00014_model_catalog.sql`）；复用现有 `/models` discover 与 HTTP chat 客户端；管理端原生 Combobox；试听复用 `POST .../speech/preview`。**不引入** LangChain / LangGraph / langchaingo / ADK 或自研 Agent 运行时——本轮只需目录 + 分类 + 绑定，编排框架非必要条件；以后若加 Agent，只调现有 REST，不必改表。
+- 限制：`e2e` 运行时未接好时客户端抛 `E2E_NOT_IMPLEMENTED`，不静默降级到级联；分类依赖默认线路可用的 chat 模型。
+
+## 初始管理员默认口令种子
+
+- 目标：项目空库启动即可登录管理端，默认 `admin` / `adminqaz`，写入 compose / `.env.example`；已有管理员二次改密后不被覆盖。
+- 采用：`control-api` 启动时调用已有 `CreateInitialAdmin`；新增 `INITIAL_ADMIN_USERNAME` / `INITIAL_ADMIN_PASSWORD`（代码与 compose 默认值均为 admin/adminqaz）。无新依赖。
+- 限制：这是开发/自建默认口令，生产环境首次登录后应立即改密；改环境变量不会重置已有密码。
+
+## 管理端音色试听与 AI 多线路 CRUD
+
+- 目标：CosyVoice 系统音色可在管理端试听；AI 支持多条 OpenAI 兼容线路（TOKENPLAN、DeepSeek 等）完整增删改查，无需 agent 框架。
+- 采用：control-api 新增 `aliyun_cosyvoice.go`（`github.com/coder/websocket` FlowingSpeechSynthesizer）；`ai_provider_configs` 迁移增加 `name`/`is_default` 多行；REST `/ai/providers` CRUD + 模型 CRUD；管理端二级菜单按线路展开。
+- 限制：试听仍仅阿里云；客户端仍读默认线路；密钥加密入库。
+
+## 管理端音色试听与 AI 配置二级菜单
+
+- 目标：管理端选阿里云音色时可直接试听；AI 配置页与语音页一致，默认只显示已配置线路摘要，展开后才改密钥/模型；支持阿里云 token-plan OpenAI Compatible 端点发现模型。
+- 采用：复用 control-api 已有阿里云 NLS HTTP `/stream/v1/tts` 合成（与连通探针同源），新增 `POST /api/v1/admin/settings/speech/preview` 返回 `audio/wav`；不新引入 TTS SDK。AI 仍为单一 `openai-compatible` 提供商，UI 做成可折叠二级菜单；`/ai/discover` 允许携带草稿 `baseUrl`/`apiKey` 以便未保存前拉模型。无新增 npm/Go 依赖。
+- 限制：试听目前仅阿里云线路；CosyVoice 复刻音色 ID（`cosyvoice-*`）仍走客户端 WebSocket 合成。API Key 不得写入前端源码或仓库，仅加密入库。
+
 ## 虚拟声卡改用官方 VB-CABLE Pack45
 
 - 目标：在 Windows 11 内存完整性 / VBS 开启时，把 AI TTS 送到腾讯会议、飞书、Zoom 等会议麦克风。

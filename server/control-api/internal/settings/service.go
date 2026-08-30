@@ -73,7 +73,7 @@ func (s *Service) PutAI(ctx context.Context, actor users.User, requestID string,
 			ActorUserID: actor.ID,
 			Action:      audit.ActionAISettingsUpdated,
 			TargetType:  "ai_provider_config",
-			TargetID:    singletonID,
+			TargetID:    record.ID,
 			Result:      audit.ResultSuccess,
 			RequestID:   requestID,
 			Metadata:    AuditMetadata(record.ConfigVersion, public.Available),
@@ -360,6 +360,9 @@ func (s *Service) PutSpeech(ctx context.Context, actor users.User, requestID str
 			Metadata:    AuditMetadata(record.ConfigVersion, public.Available),
 		})
 	})
+	if err == nil {
+		_ = s.SyncSpeechCatalog(ctx)
+	}
 	return public, err
 }
 
@@ -403,106 +406,123 @@ func (s *Service) ListUserSpeechVoices(ctx context.Context) (map[string]UserSpee
 	return NewStore(s.db, s.box).ListUserSpeechVoices(ctx)
 }
 
-func (s *Service) TestSpeech(ctx context.Context, actor users.User, requestID string, input *SpeechInput) (SpeechTestResult, error) {
+type speechCredentials struct {
+	record       SpeechRecord
+	stored       bool
+	provider     string
+	apiKey       string
+	accessToken  string
+	aliyunID     string
+	aliyunSecret string
+	aliyunToken  string
+	volcErr      error
+	aliyunErr    error
+}
+
+func (s *Service) resolveSpeechCredentials(ctx context.Context, input *SpeechInput) (speechCredentials, error) {
 	store := NewStore(s.db, s.box)
 	record, err := store.GetSpeech(ctx)
-	stored := err == nil
+	out := speechCredentials{record: record, stored: err == nil, provider: record.ActiveProvider}
 	if err != nil && !errors.Is(err, ErrNotConfigured) {
+		return out, err
+	}
+	if out.stored {
+		out.apiKey, out.volcErr = store.DecryptSpeechAPIKey(record)
+		if out.volcErr == nil {
+			out.accessToken, out.volcErr = store.DecryptSpeechAccessToken(record)
+		}
+		out.aliyunID, out.aliyunErr = store.DecryptAliyunAccessKeyID(record)
+		if out.aliyunErr == nil {
+			out.aliyunSecret, out.aliyunErr = store.DecryptAliyunAccessKeySecret(record)
+		}
+		if out.aliyunErr == nil {
+			out.aliyunToken, out.aliyunErr = store.DecryptAliyunToken(record)
+		}
+	}
+	if input == nil {
+		return out, nil
+	}
+	normalized, normErr := normalizeSpeechInput(*input)
+	if normErr != nil {
+		return out, normErr
+	}
+	if normalized.AppID != "" {
+		out.record.AppID = normalized.AppID
+	}
+	if normalized.SpeakerID != "" {
+		out.record.SpeakerID = normalized.SpeakerID
+	}
+	if normalized.TTSResourceID != "" {
+		out.record.TTSResourceID = normalized.TTSResourceID
+	}
+	if normalized.ASRResourceID != "" {
+		out.record.ASRResourceID = normalized.ASRResourceID
+	}
+	if normalized.Enabled != nil {
+		out.record.Enabled = *normalized.Enabled
+	} else {
+		out.record.Enabled = true
+	}
+	if normalized.ActiveProvider != "" {
+		out.record.ActiveProvider = normalized.ActiveProvider
+		out.provider = normalized.ActiveProvider
+	}
+	if normalized.AliyunAppKey != "" {
+		out.record.AliyunAppKey = normalized.AliyunAppKey
+	}
+	if normalized.AliyunVoice != "" {
+		out.record.AliyunVoice = normalized.AliyunVoice
+	}
+	if normalized.AliyunGateway != "" {
+		out.record.AliyunGateway = normalized.AliyunGateway
+	}
+	if normalized.AliyunEnabled != nil {
+		out.record.AliyunEnabled = *normalized.AliyunEnabled
+	} else {
+		out.record.AliyunEnabled = true
+	}
+	if strings.TrimSpace(normalized.APIKey) != "" {
+		out.apiKey = strings.TrimSpace(normalized.APIKey)
+		out.record.EncryptedAPIKey = []byte("pending")
+		out.volcErr = nil
+	}
+	if strings.TrimSpace(normalized.AccessToken) != "" {
+		out.accessToken = strings.TrimSpace(normalized.AccessToken)
+		out.record.EncryptedAccessToken = []byte("pending")
+		out.volcErr = nil
+	}
+	if strings.TrimSpace(normalized.AliyunAccessKeyID) != "" {
+		out.aliyunID = strings.TrimSpace(normalized.AliyunAccessKeyID)
+		out.record.EncryptedAliyunAccessKeyID = []byte("pending")
+		out.aliyunErr = nil
+	}
+	if strings.TrimSpace(normalized.AliyunAccessKeySecret) != "" {
+		out.aliyunSecret = strings.TrimSpace(normalized.AliyunAccessKeySecret)
+		out.record.EncryptedAliyunAccessKeySecret = []byte("pending")
+		out.aliyunErr = nil
+	}
+	if strings.TrimSpace(normalized.AliyunToken) != "" {
+		out.aliyunToken = strings.TrimSpace(normalized.AliyunToken)
+		out.record.EncryptedAliyunToken = []byte("pending")
+		out.aliyunErr = nil
+	}
+	if normalized.TestProvider != "" {
+		out.provider = normalized.TestProvider
+	} else if normalized.ActiveProvider != "" {
+		out.provider = normalized.ActiveProvider
+	}
+	return out, nil
+}
+
+func (s *Service) TestSpeech(ctx context.Context, actor users.User, requestID string, input *SpeechInput) (SpeechTestResult, error) {
+	creds, err := s.resolveSpeechCredentials(ctx, input)
+	if err != nil {
 		return SpeechTestResult{}, err
 	}
-	apiKey := ""
-	accessToken := ""
-	aliyunID := ""
-	aliyunSecret := ""
-	aliyunToken := ""
-	var volcErr, aliyunErr error
-	if stored {
-		apiKey, volcErr = store.DecryptSpeechAPIKey(record)
-		if volcErr == nil {
-			accessToken, volcErr = store.DecryptSpeechAccessToken(record)
-		}
-		aliyunID, aliyunErr = store.DecryptAliyunAccessKeyID(record)
-		if aliyunErr == nil {
-			aliyunSecret, aliyunErr = store.DecryptAliyunAccessKeySecret(record)
-		}
-		if aliyunErr == nil {
-			aliyunToken, aliyunErr = store.DecryptAliyunToken(record)
-		}
-	}
-	provider := record.ActiveProvider
-	if input != nil {
-		normalized, normErr := normalizeSpeechInput(*input)
-		if normErr != nil {
-			return SpeechTestResult{}, normErr
-		}
-		if normalized.AppID != "" {
-			record.AppID = normalized.AppID
-		}
-		if normalized.SpeakerID != "" {
-			record.SpeakerID = normalized.SpeakerID
-		}
-		if normalized.TTSResourceID != "" {
-			record.TTSResourceID = normalized.TTSResourceID
-		}
-		if normalized.ASRResourceID != "" {
-			record.ASRResourceID = normalized.ASRResourceID
-		}
-		if normalized.Enabled != nil {
-			record.Enabled = *normalized.Enabled
-		} else {
-			record.Enabled = true
-		}
-		if normalized.ActiveProvider != "" {
-			record.ActiveProvider = normalized.ActiveProvider
-		}
-		if normalized.AliyunAppKey != "" {
-			record.AliyunAppKey = normalized.AliyunAppKey
-		}
-		if normalized.AliyunVoice != "" {
-			record.AliyunVoice = normalized.AliyunVoice
-		}
-		if normalized.AliyunGateway != "" {
-			record.AliyunGateway = normalized.AliyunGateway
-		}
-		if normalized.AliyunEnabled != nil {
-			record.AliyunEnabled = *normalized.AliyunEnabled
-		} else {
-			record.AliyunEnabled = true
-		}
-		if strings.TrimSpace(normalized.APIKey) != "" {
-			apiKey = strings.TrimSpace(normalized.APIKey)
-			record.EncryptedAPIKey = []byte("pending")
-			volcErr = nil
-		}
-		if strings.TrimSpace(normalized.AccessToken) != "" {
-			accessToken = strings.TrimSpace(normalized.AccessToken)
-			record.EncryptedAccessToken = []byte("pending")
-			volcErr = nil
-		}
-		if strings.TrimSpace(normalized.AliyunAccessKeyID) != "" {
-			aliyunID = strings.TrimSpace(normalized.AliyunAccessKeyID)
-			record.EncryptedAliyunAccessKeyID = []byte("pending")
-			aliyunErr = nil
-		}
-		if strings.TrimSpace(normalized.AliyunAccessKeySecret) != "" {
-			aliyunSecret = strings.TrimSpace(normalized.AliyunAccessKeySecret)
-			record.EncryptedAliyunAccessKeySecret = []byte("pending")
-			aliyunErr = nil
-		}
-		if strings.TrimSpace(normalized.AliyunToken) != "" {
-			aliyunToken = strings.TrimSpace(normalized.AliyunToken)
-			record.EncryptedAliyunToken = []byte("pending")
-			aliyunErr = nil
-		}
-		if normalized.TestProvider != "" {
-			provider = normalized.TestProvider
-		} else if normalized.ActiveProvider != "" {
-			provider = normalized.ActiveProvider
-		}
-	} else if !stored {
+	if !creds.stored && input == nil {
 		return SpeechTestResult{Message: "尚未配置语音"}, nil
 	}
-	result := ProbeSpeechLine(ctx, s.client, record, provider, apiKey, accessToken, aliyunID, aliyunSecret, aliyunToken, volcErr, aliyunErr)
+	result := ProbeSpeechLine(ctx, s.client, creds.record, creds.provider, creds.apiKey, creds.accessToken, creds.aliyunID, creds.aliyunSecret, creds.aliyunToken, creds.volcErr, creds.aliyunErr)
 	_ = audit.NewStore(s.db).Append(ctx, audit.Event{
 		ActorUserID: actor.ID,
 		Action:      audit.ActionSpeechSettingsTested,
@@ -513,6 +533,32 @@ func (s *Service) TestSpeech(ctx context.Context, actor users.User, requestID st
 		Metadata:    map[string]any{"reachable": result.Reachable, "provider": result.Provider},
 	})
 	return result, nil
+}
+
+func (s *Service) DiscoverModels(ctx context.Context, baseURL, apiKey string) ([]DiscoveredModel, error) {
+	baseURL = strings.TrimRight(baseURL, "/")
+	providerID := ""
+	store := NewStore(s.db, s.box)
+	providers, _ := store.ListAIProviders(ctx)
+	for _, p := range providers {
+		if strings.TrimRight(p.BaseURL, "/") == baseURL {
+			providerID = p.ID
+			break
+		}
+	}
+	return s.DiscoverModelsForProvider(ctx, providerID, baseURL, apiKey)
+}
+
+func (s *Service) ListDiscoveredModels(ctx context.Context, baseURL string) ([]DiscoveredModel, error) {
+	return NewStore(s.db, s.box).ListDiscoveredModels(ctx, baseURL)
+}
+
+func (s *Service) SetModelEnabled(ctx context.Context, baseURL, modelID string, enabled bool) error {
+	return NewStore(s.db, s.box).SetModelEnabled(ctx, baseURL, modelID, enabled)
+}
+
+func (s *Service) GetEnabledModels(ctx context.Context, baseURL string) ([]string, error) {
+	return NewStore(s.db, s.box).GetEnabledModels(ctx, baseURL)
 }
 
 func firstDecryptErr(errs ...error) error {

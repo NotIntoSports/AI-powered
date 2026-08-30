@@ -167,10 +167,6 @@ func (s *Service) GetAgentAI(ctx context.Context) (AgentAISettings, error) {
 	return AgentAIFrom(record, language, apiKey), nil
 }
 
-func (s *Service) GetClientPipeline(ctx context.Context) (PublicPipeline, error) {
-	return s.GetPipeline(ctx)
-}
-
 func (s *Service) GetAgentPipeline(ctx context.Context) (AgentPipeline, error) {
 	store := NewStore(s.db, s.box)
 	record, err := store.GetPipeline(ctx)

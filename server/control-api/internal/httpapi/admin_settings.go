@@ -10,6 +10,7 @@ import (
 	"github.com/ai-interviewer/ai-powered/control-api/internal/sessions"
 	"github.com/ai-interviewer/ai-powered/control-api/internal/settings"
 	"github.com/ai-interviewer/ai-powered/control-api/internal/users"
+	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
 
@@ -39,11 +40,32 @@ type SettingsAdmin interface {
 	GetAgentSpeech(ctx context.Context) (settings.AgentSpeechSettings, error)
 	GetAgentPipeline(ctx context.Context) (settings.AgentPipeline, error)
 	GetAgentAI(ctx context.Context) (settings.AgentAISettings, error)
-	GetClientPipeline(ctx context.Context) (settings.PublicPipeline, error)
 	DeleteUserVoice(ctx context.Context, userID string) error
 	PreviewSpeech(ctx context.Context, input *settings.SpeechInput) (settings.SpeechPreviewResult, error)
 	TestSpeechASR(ctx context.Context, input *settings.SpeechInput) (settings.SpeechASRTestResult, error)
 	ListSpeechVoices(ctx context.Context) ([]settings.SpeechVoiceEntry, error)
+	DiscoverModels(ctx context.Context, baseURL, apiKey string) ([]settings.DiscoveredModel, error)
+	ListDiscoveredModels(ctx context.Context, baseURL string) ([]settings.DiscoveredModel, error)
+	SetModelEnabled(ctx context.Context, baseURL, modelID string, enabled bool) error
+	GetEnabledModels(ctx context.Context, baseURL string) ([]string, error)
+	ListAIProviders(ctx context.Context) ([]settings.PublicAIProvider, error)
+	GetAIProvider(ctx context.Context, id string) (settings.PublicAIProvider, error)
+	CreateAIProvider(ctx context.Context, actor users.User, requestID string, input settings.AIProviderInput) (settings.PublicAIProvider, error)
+	UpdateAIProvider(ctx context.Context, actor users.User, requestID, id string, input settings.AIProviderInput) (settings.PublicAIProvider, error)
+	DeleteAIProvider(ctx context.Context, actor users.User, requestID, id string) error
+	ActivateAIProvider(ctx context.Context, actor users.User, requestID, id string) (settings.PublicAIProvider, error)
+	TestAIProvider(ctx context.Context, actor users.User, requestID, id string, input *settings.AIProviderInput) (settings.AITestResult, error)
+	DiscoverProviderModels(ctx context.Context, id string, draft *settings.AIProviderInput) ([]settings.DiscoveredModel, error)
+	ListProviderModels(ctx context.Context, providerID string) ([]settings.DiscoveredModel, error)
+	AddProviderModel(ctx context.Context, providerID, modelID, ownedBy string) (settings.DiscoveredModel, error)
+	DeleteProviderModel(ctx context.Context, providerID, modelID string) error
+	SetProviderModelEnabled(ctx context.Context, providerID, modelID string, enabled bool) error
+	ActivateProviderModel(ctx context.Context, actor users.User, requestID, providerID, modelID string) (settings.PublicAIProvider, error)
+	ListCatalog(ctx context.Context, capability, query string) ([]settings.CatalogEntry, error)
+	SyncCatalog(ctx context.Context) (settings.CatalogSyncResult, error)
+	ReclassifyCatalog(ctx context.Context) (int, error)
+	PatchCatalogModel(ctx context.Context, providerID, modelID string, input settings.CatalogPatchInput) (settings.DiscoveredModel, error)
+	GetClientPipeline(ctx context.Context) (settings.ClientPipeline, error)
 }
 
 type voiceAllocationAdmin interface {
@@ -74,6 +96,16 @@ type rtcSettingsRequest struct {
 	ASRModel           string `json:"asrModel"`
 	ASRAPIKey          string `json:"asrApiKey"`
 	ClearASRAPIKey     bool   `json:"clearAsrApiKey"`
+	PipelineMode       string `json:"pipelineMode"`
+	ASRProviderID      string `json:"asrProviderId"`
+	ASRModelID         string `json:"asrModelId"`
+	LLMProviderID      string `json:"llmProviderId"`
+	LLMModelID         string `json:"llmModelId"`
+	TTSProviderID      string `json:"ttsProviderId"`
+	TTSModelID         string `json:"ttsModelId"`
+	TTSVoiceID         string `json:"ttsVoiceId"`
+	E2EProviderID      string `json:"e2eProviderId"`
+	E2EModelID         string `json:"e2eModelId"`
 }
 
 type storageSettingsRequest struct {
@@ -292,6 +324,102 @@ func (handler *adminSettingsHandler) testAI(w http.ResponseWriter, request *http
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+func (handler *adminSettingsHandler) discoverModels(w http.ResponseWriter, request *http.Request) {
+	if _, ok := requestActor(w, request); !ok {
+		return
+	}
+	baseURL := ""
+	apiKey := ""
+	if request.Body != nil && request.ContentLength != 0 {
+		input := aiSettingsRequest{}
+		if err := decodeBoundedJSON(w, request, &input); err != nil {
+			writeJSONDecodeError(w, request, err)
+			return
+		}
+		baseURL = strings.TrimSpace(input.BaseURL)
+		apiKey = strings.TrimSpace(input.APIKey)
+	}
+	if baseURL == "" || apiKey == "" {
+		ai, err := handler.admin.GetAI(request.Context())
+		if !writeSettingsError(w, request, err) {
+			return
+		}
+		if !ai.Configured {
+			writeAPIError(w, request, http.StatusServiceUnavailable, "AI_NOT_CONFIGURED", "AI provider is not configured")
+			return
+		}
+		clientAI, clientErr := handler.admin.GetClientAI(request.Context())
+		if clientErr != nil {
+			writeSettingsError(w, request, clientErr)
+			return
+		}
+		if baseURL == "" {
+			baseURL = ai.BaseURL
+		}
+		if apiKey == "" {
+			apiKey = clientAI.APIKey
+		}
+	}
+	if strings.TrimSpace(baseURL) == "" || strings.TrimSpace(apiKey) == "" {
+		writeAPIError(w, request, http.StatusServiceUnavailable, "AI_NOT_CONFIGURED", "AI provider is not configured")
+		return
+	}
+	models, err := handler.admin.DiscoverModels(request.Context(), baseURL, apiKey)
+	if !writeSettingsError(w, request, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, models)
+}
+
+func (handler *adminSettingsHandler) listModels(w http.ResponseWriter, request *http.Request) {
+	if _, ok := requestActor(w, request); !ok {
+		return
+	}
+	ai, err := handler.admin.GetAI(request.Context())
+	if !writeSettingsError(w, request, err) {
+		return
+	}
+	if !ai.Configured {
+		writeJSON(w, http.StatusOK, []any{})
+		return
+	}
+	models, err := handler.admin.ListDiscoveredModels(request.Context(), ai.BaseURL)
+	if !writeSettingsError(w, request, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, models)
+}
+
+func (handler *adminSettingsHandler) patchModel(w http.ResponseWriter, request *http.Request) {
+	if _, ok := requestActor(w, request); !ok {
+		return
+	}
+	modelID := chi.URLParam(request, "modelId")
+	if modelID == "" {
+		writeAPIError(w, request, http.StatusUnprocessableEntity, "INVALID_INPUT", "modelId is required")
+		return
+	}
+	var input struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := decodeBoundedJSON(w, request, &input); err != nil {
+		writeJSONDecodeError(w, request, err)
+		return
+	}
+	ai, err := handler.admin.GetAI(request.Context())
+	if !writeSettingsError(w, request, err) {
+		return
+	}
+	if !ai.Configured {
+		writeAPIError(w, request, http.StatusServiceUnavailable, "AI_NOT_CONFIGURED", "AI provider is not configured")
+		return
+	}
+	if err := handler.admin.SetModelEnabled(request.Context(), ai.BaseURL, modelID, input.Enabled); !writeSettingsError(w, request, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (handler *adminSettingsHandler) getRTC(w http.ResponseWriter, request *http.Request) {
@@ -679,6 +807,10 @@ func writeSettingsError(w http.ResponseWriter, request *http.Request, err error)
 		writeAPIError(w, request, http.StatusConflict, "VOICE_ALLOCATION_IN_PROGRESS", "voice allocation is already in progress")
 	case errors.Is(err, settings.ErrVoiceAllocationToken):
 		writeAPIError(w, request, http.StatusConflict, "VOICE_ALLOCATION_TOKEN_INVALID", "voice allocation token is invalid")
+	case errors.Is(err, settings.ErrAIProviderNotFound):
+		writeAPIError(w, request, http.StatusNotFound, "AI_PROVIDER_NOT_FOUND", "ai provider not found")
+	case errors.Is(err, settings.ErrLastAIProvider):
+		writeAPIError(w, request, http.StatusConflict, "LAST_AI_PROVIDER", "cannot delete the last ai provider")
 	case errors.Is(err, settings.ErrInvalidInput):
 		writeAPIError(w, request, http.StatusUnprocessableEntity, "INVALID_INPUT", "settings input is invalid")
 	case errors.Is(err, settings.ErrNotConfigured), errors.Is(err, settings.ErrRTCUnavailable):
@@ -751,5 +883,64 @@ func rtcInputFromRequest(input rtcSettingsRequest) settings.RTCInput {
 		ASRModel:           input.ASRModel,
 		ASRAPIKey:          input.ASRAPIKey,
 		ClearASRAPIKey:     input.ClearASRAPIKey,
+		PipelineMode:       input.PipelineMode,
+		ASRProviderID:      input.ASRProviderID,
+		ASRModelID:         input.ASRModelID,
+		LLMProviderID:      input.LLMProviderID,
+		LLMModelID:         input.LLMModelID,
+		TTSProviderID:      input.TTSProviderID,
+		TTSModelID:         input.TTSModelID,
+		TTSVoiceID:         input.TTSVoiceID,
+		E2EProviderID:      input.E2EProviderID,
+		E2EModelID:         input.E2EModelID,
 	}
+}
+
+func (handler *adminSettingsHandler) listCatalog(w http.ResponseWriter, request *http.Request) {
+	if _, ok := requestActor(w, request); !ok {
+		return
+	}
+	entries, err := handler.admin.ListCatalog(request.Context(), request.URL.Query().Get("capability"), request.URL.Query().Get("q"))
+	if !writeSettingsError(w, request, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, entries)
+}
+
+func (handler *adminSettingsHandler) syncCatalog(w http.ResponseWriter, request *http.Request) {
+	if _, ok := requestActor(w, request); !ok {
+		return
+	}
+	result, err := handler.admin.SyncCatalog(request.Context())
+	if !writeSettingsError(w, request, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (handler *adminSettingsHandler) reclassifyCatalog(w http.ResponseWriter, request *http.Request) {
+	if _, ok := requestActor(w, request); !ok {
+		return
+	}
+	count, err := handler.admin.ReclassifyCatalog(request.Context())
+	if !writeSettingsError(w, request, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"classified": count})
+}
+
+func (handler *adminSettingsHandler) patchCatalogModel(w http.ResponseWriter, request *http.Request) {
+	if _, ok := requestActor(w, request); !ok {
+		return
+	}
+	input := settings.CatalogPatchInput{}
+	if err := decodeBoundedJSON(w, request, &input); err != nil {
+		writeJSONDecodeError(w, request, err)
+		return
+	}
+	model, err := handler.admin.PatchCatalogModel(request.Context(), chi.URLParam(request, "providerId"), chi.URLParam(request, "modelId"), input)
+	if !writeSettingsError(w, request, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, model)
 }

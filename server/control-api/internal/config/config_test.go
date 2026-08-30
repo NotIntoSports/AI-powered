@@ -50,6 +50,30 @@ func TestLoadUsesDefaults(t *testing.T) {
 	if cfg.EmbeddingModel != defaultEmbeddingModel {
 		t.Errorf("EmbeddingModel = %q", cfg.EmbeddingModel)
 	}
+	if cfg.InitialAdminUsername != defaultInitialAdminUsername {
+		t.Errorf("InitialAdminUsername = %q", cfg.InitialAdminUsername)
+	}
+	if cfg.InitialAdminPassword != defaultInitialAdminPassword {
+		t.Errorf("InitialAdminPassword = %q", cfg.InitialAdminPassword)
+	}
+}
+
+func TestLoadAcceptsInitialAdminOverrides(t *testing.T) {
+	env := map[string]string{
+		"DATABASE_URL":           "postgres://test",
+		"INITIAL_ADMIN_USERNAME": "owner",
+		"INITIAL_ADMIN_PASSWORD": "custom-password",
+	}
+	cfg, err := Load(func(key string) string { return env[key] })
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.InitialAdminUsername != "owner" {
+		t.Errorf("InitialAdminUsername = %q", cfg.InitialAdminUsername)
+	}
+	if cfg.InitialAdminPassword != "custom-password" {
+		t.Errorf("InitialAdminPassword = %q", cfg.InitialAdminPassword)
+	}
 }
 
 func TestLoadAcceptsConfiguredValuesAtMaximumTTL(t *testing.T) {

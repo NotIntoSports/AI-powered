@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getTtsRuntimeConfig, toAliyunNlsAuth } from "../../../lib/speech-runtime";
 import { synthesizeAliyunSpeech } from "../../../lib/aliyun-nls";
 import { isCosyVoiceSpeakerId, synthesizeCosyVoiceSpeech } from "../../../lib/aliyun-cosyvoice";
+import { isCosyVoiceSystemVoice } from "../../../lib/cosyvoice-voice-catalog";
 import {
   buildUnidirectionalTtsBody,
   concatTtsAudioChunks,
@@ -90,7 +91,7 @@ export async function POST(request: Request) {
 async function synthesizeWithFallback(text: string, traceId?: string) {
   const speech = await getTtsRuntimeConfig();
   const clonedVoice = speech.provider === "aliyun"
-    ? isCosyVoiceSpeakerId(speech.speakerId)
+    ? isCosyVoiceSpeakerId(speech.speakerId) || isCosyVoiceSystemVoice(speech.speakerId)
     : speech.provider === "volcengine" && isPrepaidSpeakerId(speech.speakerId);
   console.log(`[tts] provider=${speech.provider} ttsAvailable=${speech.ttsAvailable} clonedVoice=${clonedVoice}`);
   console.log(formatPipelineLog({
@@ -101,7 +102,7 @@ async function synthesizeWithFallback(text: string, traceId?: string) {
   if (speech.provider === "aliyun" && speech.ttsAvailable) {
     try {
       // 复刻音色（cosyvoice-*）只能走 CosyVoice 大模型 WebSocket 合成，xiaoyun 等系统音色保持 HTTP 合成。
-      if (isCosyVoiceSpeakerId(speech.speakerId)) {
+      if (isCosyVoiceSpeakerId(speech.speakerId) || isCosyVoiceSystemVoice(speech.speakerId)) {
         return { ok: true as const, wav: await synthesizeCosyVoiceSpeech(toAliyunNlsAuth(speech), text) };
       }
       return { ok: true as const, wav: await synthesizeAliyunSpeech(toAliyunNlsAuth(speech), text) };

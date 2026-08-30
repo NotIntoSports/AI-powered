@@ -2,8 +2,10 @@
 
 Private Go management API for administrator accounts, revocable sessions, and
 audit events. It is separate from the Electron/Next.js **AI虚拟助手** client and
-**does not offer public registration**. Create the first administrator with the
-CLI; later operators are created only by an existing administrator.
+**does not offer public registration**. On first start with an empty user table,
+`control-api` seeds `INITIAL_ADMIN_USERNAME` / `INITIAL_ADMIN_PASSWORD` (defaults
+`admin` / `adminqaz`). If an administrator already exists, startup leaves that
+password unchanged. Operators are created only by an existing administrator.
 
 Compose in this directory is **development-only**. It binds the API to
 `127.0.0.1:8080` and PostgreSQL to `127.0.0.1:54329`, and sets
@@ -19,15 +21,21 @@ From this directory:
 
 ```powershell
 docker compose up -d postgres
-docker compose run --rm control-api-admin admin create --username owner
 docker compose up -d control-api embedding
 go test ./...
 go vet ./...
 ```
 
+Empty databases get the default administrator (`admin` / `adminqaz` unless
+`INITIAL_ADMIN_*` is set in `.env`). Optional CLI bootstrap still works:
+
+```powershell
+docker compose run --rm control-api-admin admin create --username owner
+```
+
 `admin create` and `admin reset-password` read the password from an interactive
-terminal or two matching stdin lines. Never pass the password as a flag,
-argument, or environment variable.
+terminal or two matching stdin lines when you want a non-default password.
+Startup seeding never overwrites an existing administrator.
 
 Resume indexing uses the `embedding` service (TEI `cpu-1.9` + `BAAI/bge-m3`) on
 the compose network only. It does not publish a host port. `control-api` starts
@@ -85,6 +93,8 @@ go test ./integration -run TestSmoke -v
 | `KNOWLEDGE_PROVIDER` | no | `local-pgvector` | Knowledge backend. Unknown values fail startup. Phase one only registers `local-pgvector`. |
 | `EMBEDDING_BASE_URL` | no | `http://127.0.0.1:8090` | OpenAI-compatible TEI base URL. Compose sets `http://embedding:80` on the internal network and does not publish a host port. |
 | `EMBEDDING_MODEL` | no | `BAAI/bge-m3` | Embedding model id stored with chunks. Changing it requires a full reindex. |
+| `INITIAL_ADMIN_USERNAME` | no | `admin` | Seeded only when no administrator exists. |
+| `INITIAL_ADMIN_PASSWORD` | no | `adminqaz` | Seeded only when no administrator exists. Changing this env later does not reset an existing password. |
 
 The HTTP server applies embedded goose migrations on start. Empty databases are
 created and upgraded automatically; keep a backup before upgrading a populated

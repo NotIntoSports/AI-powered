@@ -53,6 +53,16 @@ export default function OverviewPage() {
   const onlineUsers = users.filter((user) => user.online).length;
   const onlineLines = lines.filter((line) => line.online).length;
 
+  if (!me) {
+    return (
+      <ConsoleShell me={me}>
+        <section className="card">
+          <p className="muted">正在验证登录状态…</p>
+        </section>
+      </ConsoleShell>
+    );
+  }
+
   return (
     <ConsoleShell me={me}>
       {error ? <p className="error">{error}</p> : null}

@@ -588,6 +588,34 @@ paths:
           $ref: '#/components/responses/Unauthenticated'
         '403':
           $ref: '#/components/responses/Forbidden'
+  /api/v1/admin/settings/speech/preview:
+    post:
+      operationId: previewAdminSpeechVoice
+      summary: Synthesize a short Aliyun TTS sample for the selected voice and return audio/wav.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PutSpeechSettingsRequest'}
+      responses:
+        '200':
+          description: WAV audio sample for the selected Aliyun voice.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            audio/wav:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/InvalidInputUnprocessable'
   /api/v1/admin/resumes:
     get:
       operationId: listAdminResumes

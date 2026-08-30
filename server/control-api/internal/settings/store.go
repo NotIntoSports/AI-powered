@@ -39,6 +39,9 @@ const (
 )
 
 type AIRecord struct {
+	ID                string
+	Name              string
+	IsDefault         bool
 	Provider          string
 	BaseURL           string
 	Model             string
@@ -64,6 +67,16 @@ type RTCRecord struct {
 	LiveKitASRModel           string
 	EncryptedASRAPIKey        []byte
 	LiveKitKeyVersion         int
+	PipelineMode              string
+	ASRProviderID             string
+	ASRModelID                string
+	LLMProviderID             string
+	LLMModelID                string
+	TTSProviderID             string
+	TTSModelID                string
+	TTSVoiceID                string
+	E2EProviderID             string
+	E2EModelID                string
 	ConfigVersion             int
 	UpdatedByUserID           string
 	UpdatedByUsername         string
@@ -93,6 +106,16 @@ type RTCInput struct {
 	ASRModel           string
 	ASRAPIKey          string
 	ClearASRAPIKey     bool
+	PipelineMode       string
+	ASRProviderID      string
+	ASRModelID         string
+	LLMProviderID      string
+	LLMModelID         string
+	TTSProviderID      string
+	TTSModelID         string
+	TTSVoiceID         string
+	E2EProviderID      string
+	E2EModelID         string
 }
 
 type PublicAI struct {
@@ -139,6 +162,16 @@ type PublicRTC struct {
 	ASRBaseURL              string     `json:"asrBaseUrl"`
 	ASRModel                string     `json:"asrModel"`
 	ASRKeyConfigured        bool       `json:"asrKeyConfigured"`
+	PipelineMode            string     `json:"pipelineMode"`
+	ASRProviderID           string     `json:"asrProviderId"`
+	ASRModelID              string     `json:"asrModelId"`
+	LLMProviderID           string     `json:"llmProviderId"`
+	LLMModelID              string     `json:"llmModelId"`
+	TTSProviderID           string     `json:"ttsProviderId"`
+	TTSModelID              string     `json:"ttsModelId"`
+	TTSVoiceID              string     `json:"ttsVoiceId"`
+	E2EProviderID           string     `json:"e2eProviderId"`
+	E2EModelID              string     `json:"e2eModelId"`
 	Enabled                 bool       `json:"enabled"`
 	ConfigVersion           int        `json:"configVersion"`
 	UpdatedAt               *time.Time `json:"updatedAt,omitempty"`
@@ -164,116 +197,6 @@ func NewStore(db database.DBTX, box *secretbox.Box) *Store {
 	return &Store{db: db, box: box}
 }
 
-func (s *Store) GetAI(ctx context.Context) (AIRecord, error) {
-	record := AIRecord{}
-	var encrypted []byte
-	var updatedBy *string
-	var username *string
-	err := s.db.QueryRow(ctx, `
-		select
-			c.provider, c.base_url, c.model, c.question_timeout_ms, c.report_timeout_ms,
-			c.enabled, c.encrypted_api_key, c.key_version, c.config_version,
-			coalesce(c.updated_by_user_id, ''), coalesce(u.username, ''),
-			c.created_at, c.updated_at
-		from ai_provider_configs as c
-		left join users as u on u.id = c.updated_by_user_id
-		where c.id = $1
-	`, singletonID).Scan(
-		&record.Provider,
-		&record.BaseURL,
-		&record.Model,
-		&record.QuestionTimeoutMs,
-		&record.ReportTimeoutMs,
-		&record.Enabled,
-		&encrypted,
-		&record.KeyVersion,
-		&record.ConfigVersion,
-		&record.UpdatedByUserID,
-		&record.UpdatedByUsername,
-		&record.CreatedAt,
-		&record.UpdatedAt,
-	)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return AIRecord{}, ErrNotConfigured
-	}
-	if err != nil {
-		return AIRecord{}, ErrStore
-	}
-	record.EncryptedAPIKey = encrypted
-	_ = updatedBy
-	_ = username
-	return record, nil
-}
-
-func (s *Store) PutAI(ctx context.Context, actor users.User, input AIInput) (AIRecord, error) {
-	normalized, err := normalizeAIInput(input)
-	if err != nil {
-		return AIRecord{}, err
-	}
-	current, currentErr := s.GetAI(ctx)
-	if currentErr != nil && !errors.Is(currentErr, ErrNotConfigured) {
-		return AIRecord{}, currentErr
-	}
-
-	encrypted := current.EncryptedAPIKey
-	keyVersion := current.KeyVersion
-	if current.KeyVersion == 0 {
-		keyVersion = 1
-	}
-	if normalized.ClearAPIKey {
-		encrypted = nil
-	} else if strings.TrimSpace(normalized.APIKey) != "" {
-		if s.box == nil {
-			return AIRecord{}, ErrMasterKeyMissing
-		}
-		sealed, sealErr := s.box.Seal([]byte(strings.TrimSpace(normalized.APIKey)))
-		if sealErr != nil {
-			return AIRecord{}, sealErr
-		}
-		encrypted = sealed
-		keyVersion = s.box.KeyVersion()
-	}
-
-	enabled := true
-	if normalized.Enabled != nil {
-		enabled = *normalized.Enabled
-	} else if currentErr == nil {
-		enabled = current.Enabled
-	}
-
-	now := time.Now().UTC().Truncate(time.Microsecond)
-	configVersion := 1
-	if currentErr == nil {
-		configVersion = current.ConfigVersion + 1
-	}
-
-	_, err = s.db.Exec(ctx, `
-		insert into ai_provider_configs (
-			id, provider, base_url, model, question_timeout_ms, report_timeout_ms,
-			enabled, encrypted_api_key, key_version, config_version, updated_by_user_id,
-			created_at, updated_at
-		) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12)
-		on conflict (id) do update set
-			provider = excluded.provider,
-			base_url = excluded.base_url,
-			model = excluded.model,
-			question_timeout_ms = excluded.question_timeout_ms,
-			report_timeout_ms = excluded.report_timeout_ms,
-			enabled = excluded.enabled,
-			encrypted_api_key = excluded.encrypted_api_key,
-			key_version = excluded.key_version,
-			config_version = excluded.config_version,
-			updated_by_user_id = excluded.updated_by_user_id,
-			updated_at = excluded.updated_at
-	`, singletonID, normalized.Provider, normalized.BaseURL, normalized.Model,
-		normalized.QuestionTimeoutMs, normalized.ReportTimeoutMs, enabled,
-		encrypted, keyVersion, configVersion, actor.ID, now)
-	if err != nil {
-		return AIRecord{}, ErrStore
-	}
-	return s.GetAI(ctx)
-}
-
 func (s *Store) DecryptAPIKey(record AIRecord) (string, error) {
 	if len(record.EncryptedAPIKey) == 0 {
 		return "", nil
@@ -296,6 +219,11 @@ func (s *Store) GetRTC(ctx context.Context) (RTCRecord, error) {
 			coalesce(c.livekit_url, ''), coalesce(c.livekit_api_key, ''),
 			c.encrypted_livekit_api_secret, coalesce(c.livekit_asr_base_url, ''),
 			coalesce(c.livekit_asr_model, ''), c.encrypted_asr_api_key, c.livekit_key_version,
+			coalesce(c.pipeline_mode, 'cascaded'),
+			coalesce(c.asr_provider_id, ''), coalesce(c.asr_model_id, ''),
+			coalesce(c.llm_provider_id, ''), coalesce(c.llm_model_id, ''),
+			coalesce(c.tts_provider_id, ''), coalesce(c.tts_model_id, ''), coalesce(c.tts_voice_id, ''),
+			coalesce(c.e2e_provider_id, ''), coalesce(c.e2e_model_id, ''),
 			c.config_version, coalesce(c.updated_by_user_id, ''),
 			coalesce(u.username, ''), c.created_at, c.updated_at
 		from rtc_configs as c
@@ -311,6 +239,16 @@ func (s *Store) GetRTC(ctx context.Context) (RTCRecord, error) {
 		&record.LiveKitASRModel,
 		&record.EncryptedASRAPIKey,
 		&record.LiveKitKeyVersion,
+		&record.PipelineMode,
+		&record.ASRProviderID,
+		&record.ASRModelID,
+		&record.LLMProviderID,
+		&record.LLMModelID,
+		&record.TTSProviderID,
+		&record.TTSModelID,
+		&record.TTSVoiceID,
+		&record.E2EProviderID,
+		&record.E2EModelID,
 		&record.ConfigVersion,
 		&record.UpdatedByUserID,
 		&record.UpdatedByUsername,
@@ -322,6 +260,9 @@ func (s *Store) GetRTC(ctx context.Context) (RTCRecord, error) {
 	}
 	if err != nil {
 		return RTCRecord{}, ErrStore
+	}
+	if record.PipelineMode == "" {
+		record.PipelineMode = PipelineModeCascaded
 	}
 	return record, nil
 }
@@ -379,8 +320,10 @@ func (s *Store) PutRTC(ctx context.Context, actor users.User, input RTCInput) (R
 		insert into rtc_configs (
 			id, language, enabled, config_version, updated_by_user_id, created_at, updated_at,
 			livekit_url, livekit_api_key, encrypted_livekit_api_secret,
-			livekit_asr_base_url, livekit_asr_model, encrypted_asr_api_key, livekit_key_version
-		) values ($1,$2,$3,$4,$5,$6,$6,$7,$8,$9,$10,$11,$12,$13)
+			livekit_asr_base_url, livekit_asr_model, encrypted_asr_api_key, livekit_key_version,
+			pipeline_mode, asr_provider_id, asr_model_id, llm_provider_id, llm_model_id,
+			tts_provider_id, tts_model_id, tts_voice_id, e2e_provider_id, e2e_model_id
+		) values ($1,$2,$3,$4,$5,$6,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
 		on conflict (id) do update set
 			language = excluded.language,
 			enabled = excluded.enabled,
@@ -393,10 +336,23 @@ func (s *Store) PutRTC(ctx context.Context, actor users.User, input RTCInput) (R
 			livekit_asr_base_url = excluded.livekit_asr_base_url,
 			livekit_asr_model = excluded.livekit_asr_model,
 			encrypted_asr_api_key = excluded.encrypted_asr_api_key,
-			livekit_key_version = excluded.livekit_key_version
+			livekit_key_version = excluded.livekit_key_version,
+			pipeline_mode = excluded.pipeline_mode,
+			asr_provider_id = excluded.asr_provider_id,
+			asr_model_id = excluded.asr_model_id,
+			llm_provider_id = excluded.llm_provider_id,
+			llm_model_id = excluded.llm_model_id,
+			tts_provider_id = excluded.tts_provider_id,
+			tts_model_id = excluded.tts_model_id,
+			tts_voice_id = excluded.tts_voice_id,
+			e2e_provider_id = excluded.e2e_provider_id,
+			e2e_model_id = excluded.e2e_model_id
 	`, singletonID, normalized.Language, enabled, configVersion, actor.ID, now,
 		normalized.LiveKitURL, normalized.LiveKitAPIKey, livekitSecret,
-		asrURL, asrModel, asrKey, livekitKeyVersion)
+		asrURL, asrModel, asrKey, livekitKeyVersion,
+		normalized.PipelineMode, normalized.ASRProviderID, normalized.ASRModelID,
+		normalized.LLMProviderID, normalized.LLMModelID, normalized.TTSProviderID,
+		normalized.TTSModelID, normalized.TTSVoiceID, normalized.E2EProviderID, normalized.E2EModelID)
 	if err != nil {
 		return RTCRecord{}, ErrStore
 	}
@@ -504,6 +460,16 @@ func PublicRTCFrom(record RTCRecord, livekitDecryptErr error) PublicRTC {
 		ASRBaseURL:              record.LiveKitASRBaseURL,
 		ASRModel:                record.LiveKitASRModel,
 		ASRKeyConfigured:        len(record.EncryptedASRAPIKey) > 0,
+		PipelineMode:            pipelineModeOrDefault(record.PipelineMode),
+		ASRProviderID:           record.ASRProviderID,
+		ASRModelID:              record.ASRModelID,
+		LLMProviderID:           record.LLMProviderID,
+		LLMModelID:              record.LLMModelID,
+		TTSProviderID:           record.TTSProviderID,
+		TTSModelID:              record.TTSModelID,
+		TTSVoiceID:              record.TTSVoiceID,
+		E2EProviderID:           record.E2EProviderID,
+		E2EModelID:              record.E2EModelID,
 		Enabled:                 record.Enabled,
 		ConfigVersion:           record.ConfigVersion,
 		UpdatedAt:               &updated,
@@ -513,9 +479,18 @@ func PublicRTCFrom(record RTCRecord, livekitDecryptErr error) PublicRTC {
 
 func EmptyPublicRTC() PublicRTC {
 	return PublicRTC{
-		Language: "zh",
-		Provider: ProviderLiveKit,
+		Language:     "zh",
+		Provider:     ProviderLiveKit,
+		PipelineMode: PipelineModeCascaded,
 	}
+}
+
+func pipelineModeOrDefault(mode string) string {
+	mode = strings.TrimSpace(mode)
+	if mode == PipelineModeE2E {
+		return PipelineModeE2E
+	}
+	return PipelineModeCascaded
 }
 
 func normalizeAIInput(input AIInput) (AIInput, error) {
@@ -583,6 +558,36 @@ func mergeRTCInput(input RTCInput, current RTCRecord, hasCurrent bool) RTCInput 
 		enabled := current.Enabled
 		input.Enabled = &enabled
 	}
+	if strings.TrimSpace(input.PipelineMode) == "" {
+		input.PipelineMode = current.PipelineMode
+	}
+	if strings.TrimSpace(input.ASRProviderID) == "" {
+		input.ASRProviderID = current.ASRProviderID
+	}
+	if strings.TrimSpace(input.ASRModelID) == "" {
+		input.ASRModelID = current.ASRModelID
+	}
+	if strings.TrimSpace(input.LLMProviderID) == "" {
+		input.LLMProviderID = current.LLMProviderID
+	}
+	if strings.TrimSpace(input.LLMModelID) == "" {
+		input.LLMModelID = current.LLMModelID
+	}
+	if strings.TrimSpace(input.TTSProviderID) == "" {
+		input.TTSProviderID = current.TTSProviderID
+	}
+	if strings.TrimSpace(input.TTSModelID) == "" {
+		input.TTSModelID = current.TTSModelID
+	}
+	if strings.TrimSpace(input.TTSVoiceID) == "" {
+		input.TTSVoiceID = current.TTSVoiceID
+	}
+	if strings.TrimSpace(input.E2EProviderID) == "" {
+		input.E2EProviderID = current.E2EProviderID
+	}
+	if strings.TrimSpace(input.E2EModelID) == "" {
+		input.E2EModelID = current.E2EModelID
+	}
 	return input
 }
 
@@ -618,6 +623,16 @@ func normalizeRTCInput(input RTCInput) (RTCInput, error) {
 	input.LiveKitAPIKey = livekitKey
 	input.ASRBaseURL = strings.TrimRight(asrURL, "/")
 	input.ASRModel = asrModel
+	input.PipelineMode = pipelineModeOrDefault(input.PipelineMode)
+	input.ASRProviderID = strings.TrimSpace(input.ASRProviderID)
+	input.ASRModelID = strings.TrimSpace(input.ASRModelID)
+	input.LLMProviderID = strings.TrimSpace(input.LLMProviderID)
+	input.LLMModelID = strings.TrimSpace(input.LLMModelID)
+	input.TTSProviderID = strings.TrimSpace(input.TTSProviderID)
+	input.TTSModelID = strings.TrimSpace(input.TTSModelID)
+	input.TTSVoiceID = strings.TrimSpace(input.TTSVoiceID)
+	input.E2EProviderID = strings.TrimSpace(input.E2EProviderID)
+	input.E2EModelID = strings.TrimSpace(input.E2EModelID)
 	return input, nil
 }
 
@@ -678,4 +693,158 @@ func AuditMetadata(configVersion int, available bool) map[string]any {
 		"configVersion": configVersion,
 		"available":     available,
 	}
+}
+
+type DiscoveredModel struct {
+	ID           string     `json:"id"`
+	ProviderID   string     `json:"providerId,omitempty"`
+	ModelID      string     `json:"modelId"`
+	BaseURL      string     `json:"baseUrl"`
+	Enabled      bool       `json:"enabled"`
+	OwnedBy      string     `json:"ownedBy,omitempty"`
+	Capability   string     `json:"capability,omitempty"`
+	DisplayName  string     `json:"displayName,omitempty"`
+	ClassifiedBy string     `json:"classifiedBy,omitempty"`
+	ClassifiedAt *time.Time `json:"classifiedAt,omitempty"`
+	DiscoveredAt time.Time  `json:"discoveredAt"`
+	UpdatedAt    time.Time  `json:"updatedAt"`
+}
+
+const (
+	CapabilityLLM     = "llm"
+	CapabilityASR     = "asr"
+	CapabilityTTS     = "tts"
+	CapabilityE2E     = "e2e"
+	CapabilityUnknown = "unknown"
+
+	CatalogSpeechAliyun     = "speech:aliyun"
+	CatalogSpeechVolcengine = "speech:volcengine"
+)
+
+func (s *Store) ListDiscoveredModels(ctx context.Context, baseURL string) ([]DiscoveredModel, error) {
+	rows, err := s.db.Query(ctx, `
+		select id, coalesce(provider_id, ''), model_id, base_url, enabled, coalesce(owned_by, ''),
+		       coalesce(capability, 'unknown'), coalesce(display_name, ''), coalesce(classified_by, ''),
+		       classified_at, discovered_at, updated_at
+		from discovered_models
+		where base_url = $1
+		order by model_id
+	`, baseURL)
+	if err != nil {
+		return nil, ErrStore
+	}
+	defer rows.Close()
+	return scanDiscoveredModels(rows)
+}
+
+func (s *Store) UpsertDiscoveredModels(ctx context.Context, baseURL string, models []DiscoveredModel) error {
+	providerID := ""
+	if len(models) > 0 {
+		providerID = strings.TrimSpace(models[0].ProviderID)
+	}
+	if providerID == "" {
+		providers, err := s.ListAIProviders(ctx)
+		if err != nil {
+			return err
+		}
+		trimmed := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+		for _, p := range providers {
+			if strings.TrimRight(p.BaseURL, "/") == trimmed {
+				providerID = p.ID
+				break
+			}
+		}
+		if providerID == "" {
+			providerID = "orphan:" + trimmed
+		}
+	}
+	for _, m := range models {
+		capability := strings.TrimSpace(m.Capability)
+		if capability == "" {
+			capability = ClassifyModelID(m.ModelID)
+		}
+		classifiedBy := strings.TrimSpace(m.ClassifiedBy)
+		if classifiedBy == "" {
+			if capability == CapabilityUnknown {
+				classifiedBy = ""
+			} else {
+				classifiedBy = "rules"
+			}
+		}
+		pid := strings.TrimSpace(m.ProviderID)
+		if pid == "" {
+			pid = providerID
+		}
+		_, err := s.db.Exec(ctx, `
+			insert into discovered_models (
+				model_id, base_url, provider_id, owned_by, capability, display_name,
+				classified_by, classified_at, discovered_at, updated_at
+			) values ($1, $2, $3, $4, $5, $6, $7, case when $5 = 'unknown' then null else now() end, now(), now())
+			on conflict (provider_id, model_id) do update set
+				base_url = excluded.base_url,
+				owned_by = excluded.owned_by,
+				capability = case
+					when discovered_models.classified_by = 'manual' then discovered_models.capability
+					when excluded.capability <> 'unknown' then excluded.capability
+					else discovered_models.capability
+				end,
+				classified_by = case
+					when discovered_models.classified_by = 'manual' then discovered_models.classified_by
+					when excluded.capability <> 'unknown' then excluded.classified_by
+					else discovered_models.classified_by
+				end,
+				classified_at = case
+					when discovered_models.classified_by = 'manual' then discovered_models.classified_at
+					when excluded.capability <> 'unknown' then now()
+					else discovered_models.classified_at
+				end,
+				updated_at = now()
+		`, m.ModelID, baseURL, pid, m.OwnedBy, capability, strings.TrimSpace(m.DisplayName), classifiedBy)
+		if err != nil {
+			return ErrStore
+		}
+	}
+	return nil
+}
+
+func (s *Store) SetModelEnabled(ctx context.Context, baseURL, modelID string, enabled bool) error {
+	tag, err := s.db.Exec(ctx, `
+		update discovered_models
+		set enabled = $1, updated_at = now()
+		where base_url = $2 and model_id = $3
+	`, enabled, baseURL, modelID)
+	if err != nil {
+		return ErrStore
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrInvalidInput
+	}
+	return nil
+}
+
+func (s *Store) GetEnabledModels(ctx context.Context, baseURL string) ([]string, error) {
+	rows, err := s.db.Query(ctx, `
+		select model_id from discovered_models
+		where base_url = $1 and enabled = true
+		order by model_id
+	`, baseURL)
+	if err != nil {
+		return nil, ErrStore
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, ErrStore
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, ErrStore
+	}
+	if ids == nil {
+		ids = []string{}
+	}
+	return ids, nil
 }

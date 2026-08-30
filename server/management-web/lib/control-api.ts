@@ -58,10 +58,49 @@ export type PublicRTCSettings = {
   asrBaseUrl?: string;
   asrModel?: string;
   asrKeyConfigured?: boolean;
+  pipelineMode?: "cascaded" | "e2e" | string;
+  asrProviderId?: string;
+  asrModelId?: string;
+  llmProviderId?: string;
+  llmModelId?: string;
+  ttsProviderId?: string;
+  ttsModelId?: string;
+  ttsVoiceId?: string;
+  e2eProviderId?: string;
+  e2eModelId?: string;
   enabled: boolean;
   configVersion: number;
   updatedAt?: string;
   updatedByUsername?: string;
+};
+
+export type CatalogEntry = {
+  id: string;
+  providerId: string;
+  providerName: string;
+  modelId: string;
+  baseUrl: string;
+  capability: string;
+  enabled: boolean;
+  label: string;
+  displayName?: string;
+};
+
+export type CatalogSyncResult = {
+  providers: number;
+  models: number;
+  classified: number;
+};
+
+export type ClientPipeline = {
+  mode: "cascaded" | "e2e" | string;
+  asr?: { providerId: string; providerName: string; modelId: string; baseUrl?: string; apiKey?: string; source?: string };
+  llm?: { providerId: string; providerName: string; modelId: string; baseUrl?: string; apiKey?: string; source?: string };
+  tts?: { providerId: string; providerName: string; modelId: string; baseUrl?: string; apiKey?: string; source?: string };
+  e2e?: { providerId: string; providerName: string; modelId: string; baseUrl?: string; apiKey?: string; source?: string };
+  voice?: string;
+  e2eAvailable?: boolean;
+  message?: string;
 };
 
 export type AITestResult = {
@@ -175,6 +214,22 @@ export type ResumeRecord = {
   indexStatus?: string;
   indexError?: string;
   indexedAt?: string;
+};
+
+export type PublicAIProvider = PublicAISettings & {
+  id: string;
+  name: string;
+  isDefault: boolean;
+};
+
+export type DiscoveredModel = {
+  id: string;
+  modelId: string;
+  baseUrl: string;
+  enabled: boolean;
+  ownedBy?: string;
+  discoveredAt: string;
+  updatedAt: string;
 };
 
 export type APIError = {
