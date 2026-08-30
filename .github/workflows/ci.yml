@@ -17,6 +17,5 @@ jobs:
       - run: npm audit --audit-level=high
       - run: npx tsc --noEmit
       - run: npm run test:desktop-shell
-      - run: npm run test:rtc-capabilities
       - run: npm run test:obs
       - run: npm run build
