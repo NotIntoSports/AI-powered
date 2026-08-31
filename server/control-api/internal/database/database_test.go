@@ -173,7 +173,7 @@ func TestMigrateCreatesIdentityTables(t *testing.T) {
 		t.Fatalf("current schema = %q, want %q", currentSchema, testPool.schema)
 	}
 
-	for _, table := range []string{"users", "user_sessions", "devices", "audit_logs", "ai_provider_configs", "rtc_configs", "voice_routes", "discovered_models"} {
+	for _, table := range []string{"users", "user_sessions", "devices", "audit_logs", "ai_provider_configs", "rtc_configs", "voice_routes", "discovered_models", "pipeline_configs"} {
 		var exists bool
 		err := testPool.QueryRow(context.Background(), `select to_regclass($1 || '.' || $2) is not null`, testPool.schema, table).Scan(&exists)
 		if err != nil || !exists {
@@ -187,6 +187,59 @@ func TestMigrateCreatesIdentityTables(t *testing.T) {
 	}
 	if !migrationApplied {
 		t.Fatal("00001_identity.sql was not applied in the test schema")
+	}
+}
+
+func TestSpeechParamsRepairMigrationIsIdempotent(t *testing.T) {
+	sql, err := migrations.ReadFile("migrations/00019_speech_params_repair.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(sql)
+	downMarker := strings.Index(body, "-- +goose Down")
+	if downMarker < 0 {
+		t.Fatal("00019 must declare a goose Down section")
+	}
+	up := body[:downMarker]
+	for _, needle := range []string{
+		"add column if not exists tts_volume",
+		"create table if not exists pipeline_configs",
+	} {
+		if !strings.Contains(strings.ToLower(up), needle) {
+			t.Fatalf("00019 Up must contain %q", needle)
+		}
+	}
+}
+
+func TestMigrateCreatesSpeechParamsAndPipelineConfigs(t *testing.T) {
+	testPool := openTestPool(t)
+	if err := Migrate(context.Background(), testPool.Pool); err != nil {
+		t.Fatal(err)
+	}
+
+	var pipelineExists bool
+	if err := testPool.QueryRow(context.Background(), `select to_regclass($1 || '.pipeline_configs') is not null`, testPool.schema).Scan(&pipelineExists); err != nil {
+		t.Fatalf("pipeline_configs: %v", err)
+	}
+	if !pipelineExists {
+		t.Fatal("pipeline_configs was not created")
+	}
+
+	for _, column := range []string{"tts_volume", "tts_speech_rate", "asr_enable_itn", "aliyun_asr_enable_itn"} {
+		var exists bool
+		if err := testPool.QueryRow(context.Background(), `
+			select exists(
+				select 1 from information_schema.columns
+				where table_schema = current_schema()
+				  and table_name = 'speech_configs'
+				  and column_name = $1
+			)
+		`, column).Scan(&exists); err != nil {
+			t.Fatalf("column %s: %v", column, err)
+		}
+		if !exists {
+			t.Fatalf("speech_configs.%s was not created", column)
+		}
 	}
 }
 

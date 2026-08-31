@@ -30,6 +30,7 @@ $caFiles = @(
     "internal/database/migrations/00016_token_plan_personal_catalog.sql",
     "internal/database/migrations/00017_voice_routes.sql",
     "internal/database/migrations/00018_voice_routes_backfill.sql",
+    "internal/database/migrations/00019_speech_params_repair.sql",
     "internal/settings/store.go",
     "internal/settings/service.go",
     "internal/settings/catalog.go",
@@ -91,7 +92,7 @@ $remoteScript = @"
 set -e
 cd $ServerBase/deploy
 echo '>>> 构建 control-api...'
-docker compose build control-api
+docker compose build --build-arg GOPROXY=https://goproxy.cn,direct control-api
 echo '>>> 构建 management-web...'
 docker compose build management-web
 echo '>>> 重启服务...'
