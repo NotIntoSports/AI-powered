@@ -45,26 +45,22 @@ test("AI reference mode defaults off and persists explicit choices", () => {
   assert.equal(referenceModeModule.parseAiReferenceModeEnabled("false"), false);
 });
 
-test("workspace owns TTS and stage is visual-only", async () => {
+test("LiveKit adapter owns Agent audio and stage is visual-only", async () => {
   const workspace = await readFile(new URL("../../app/page.tsx", import.meta.url), "utf8");
   const stage = await readFile(new URL("../../app/stage/page.tsx", import.meta.url), "utf8");
-  const controller = await readFile(new URL("../../features/audio/workspace-tts.ts", import.meta.url), "utf8");
-  assert.match(workspace, /useWorkspaceTts/);
-  assert.match(controller, /fetch\("\/api\/tts"/);
+  const controller = await readFile(new URL("../../desktop/rtc/livekit-adapter.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(workspace, /useWorkspaceTts|\/api\/tts/);
   assert.match(controller, /setSinkId/);
-  assert.doesNotMatch(controller, /speechSynthesis|playWebSpeech|mode:\s*"default"/);
+  assert.match(controller, /TrackSubscribed/);
+  assert.match(controller, /loadLocalAiMonitorEnabled/);
+  assert.doesNotMatch(controller, /speechSynthesis|playWebSpeech|\/api\/tts/);
   assert.doesNotMatch(stage, /\/api\/tts|setSinkId|speechSynthesis/);
-  assert.equal(controller.match(/fetch\("\/api\/tts"/g)?.length, 1);
-  assert.match(controller, /mode:\s*"local-monitor"/);
-  assert.match(controller, /localMonitorAudioRef/);
-  assert.doesNotMatch(controller, /\.volume\s*=\s*0\./);
 });
 
-test("workspace TTS reports a clear virtual microphone delivery error", async () => {
-  const controller = await readFile(new URL("../../features/audio/workspace-tts.ts", import.meta.url), "utf8");
-  assert.match(controller, /AI 声音未送入会议麦克风/);
-  assert.match(controller, /tts\.sink-selected/);
-  assert.match(controller, /tts\.playback-started/);
+test("Agent audio output failure is logged without credentials", async () => {
+  const controller = await readFile(new URL("../../desktop/rtc/livekit-adapter.ts", import.meta.url), "utf8");
+  assert.match(controller, /agent audio output failed/);
+  assert.doesNotMatch(controller, /apiKey|apiSecret/);
 });
 
 test("intervention controls expose an independent local AI monitor switch", async () => {

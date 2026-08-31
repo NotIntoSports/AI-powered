@@ -7,21 +7,17 @@ const ready = {
   bridgeState: "captured",
   bridgeSessionKey: "meet_1",
   sessionStatus: "idle",
-  modelConfigured: true,
-  stageConnected: true,
   assistantRole: "interviewer",
   pending: false
 };
 
-test("starts once when bridge, model and stage are ready", () => {
+test("starts once when the LiveKit bridge is ready", () => {
   assert.equal(decideAutoSessionStart(ready).shouldStart, true);
   assert.equal(decideAutoSessionStart({ ...ready, attemptedSessionKey: "meet_1" }).shouldStart, false);
   assert.equal(decideAutoSessionStart({ ...ready, bridgeSessionKey: "meet_2", attemptedSessionKey: "meet_1" }).shouldStart, true);
 });
 
-test("does not auto start without model, stage or a stable bridge key", () => {
-  assert.match(decideAutoSessionStart({ ...ready, modelConfigured: false }).message, /模型/);
-  assert.match(decideAutoSessionStart({ ...ready, stageConnected: false }).message, /播报引擎/);
+test("does not auto start without a stable bridge key", () => {
   assert.equal(decideAutoSessionStart({ ...ready, bridgeSessionKey: undefined }).shouldStart, false);
 });
 

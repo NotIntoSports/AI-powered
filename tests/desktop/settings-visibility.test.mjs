@@ -22,11 +22,11 @@ test("desktop settings do not expose RTC credentials or AI model configuration",
   assert.match(source, /VirtualCameraPreview/);
   assert.match(source, /virtualMode \? <VirtualCameraPreview/);
   assert.match(source, /AppChrome current="settings"/);
-  assert.match(source, /label="语音转写"/);
+  assert.match(source, /label="管理端"/);
   assert.match(source, /label="网络"/);
   assert.match(source, /label="播报引擎"/);
-  assert.match(source, /已从管理端同步/);
-  assert.match(source, /请先登录客户端/);
+  assert.match(source, /模型、转写和播报由当前启用的 LiveKit Agent 语音线路统一执行/);
+  assert.doesNotMatch(source, /label="语音转写"|已从管理端同步|请先登录客户端/);
   assert.doesNotMatch(source, /当前未使用虚拟摄像头/);
   assert.match(source, /可选。不上传则使用默认助手形象。/);
 });
@@ -39,9 +39,9 @@ test("OBS automatic connection uses a bounded 30 second cold-start window", asyn
   assert.match(source, /OBS_PORT_NOT_READY/);
 });
 
-test("virtual audio one-click installs the signed driver and stages TTS to the virtual sink", async () => {
+test("virtual audio one-click installs the signed driver and Agent audio uses the virtual sink", async () => {
   const audioRoute = await readFile(new URL("../../features/audio/audio-route-control.tsx", import.meta.url), "utf8");
-  const controller = await readFile(new URL("../../features/audio/workspace-tts.ts", import.meta.url), "utf8");
+  const controller = await readFile(new URL("../../desktop/rtc/livekit-adapter.ts", import.meta.url), "utf8");
   assert.match(audioRoute, /CABLE Output/);
   assert.match(audioRoute, /CABLE Input/);
   assert.doesNotMatch(audioRoute, /www\.vb-cable\.com/);

@@ -17,7 +17,6 @@ import {
 import { AVATAR_ACCEPT, classifyAvatarSelection, type AvatarSelectionResult } from "../../lib/avatar-policy";
 import { AppChrome } from "../../features/settings/app-chrome";
 import { AppNavigation } from "../../features/settings/app-navigation";
-import { readControlSession } from "../../features/auth/control-session";
 import {
   describeNetwork,
   getNetworkQuality,
@@ -30,10 +29,7 @@ type AvatarMetadata = { available: boolean; kind?: "image" | "video"; originalNa
 type SelectedAvatar = AvatarSelectionResult & { name: string; size: number };
 type Diagnostics = {
   server: boolean;
-  modelConfigured: boolean;
-  modelSource: "management" | "settings" | "environment" | "default" | "none";
   managementReachable: boolean;
-  managementLoggedIn: boolean;
   stageConnected: boolean;
   ttsSupported: boolean;
   voiceCount: number;
@@ -43,16 +39,10 @@ type Diagnostics = {
   ttsError: string;
   lastSpeechAt: number;
   mediaReady: boolean;
-  transcriptionConfigured: boolean;
-  transcriptionReady: boolean;
-  transcriptionSource: "aliyun" | "volcengine" | "management" | "environment" | "whisper-cpp" | "none";
 };
 const emptyDiagnostics: Diagnostics = {
   server: false,
-  modelConfigured: false,
-  modelSource: "none",
   managementReachable: false,
-  managementLoggedIn: false,
   stageConnected: false,
   ttsSupported: false,
   voiceCount: 0,
@@ -61,10 +51,7 @@ const emptyDiagnostics: Diagnostics = {
   ttsState: "idle",
   ttsError: "",
   lastSpeechAt: 0,
-  mediaReady: false,
-  transcriptionConfigured: false,
-  transcriptionReady: false,
-  transcriptionSource: "none"
+  mediaReady: false
 };
 
 export default function SettingsPage() {
@@ -124,27 +111,16 @@ export default function SettingsPage() {
     let active = true;
     async function refreshDiagnostics() {
       try {
-        const [healthResponse, stageResponse, session] = await Promise.all([
+        const [healthResponse, stageResponse] = await Promise.all([
           fetch("/api/health", { cache: "no-store" }),
-          fetch("/api/stage-status", { cache: "no-store" }),
-          readControlSession().catch(() => ({ connected: false, user: null }))
+          fetch("/api/stage-status", { cache: "no-store" })
         ]);
         const health = await healthResponse.json();
         const stage = await stageResponse.json();
         if (!active) return;
-        const modelSource =
-          health.modelSource === "management" ||
-          health.modelSource === "settings" ||
-          health.modelSource === "environment" ||
-          health.modelSource === "default"
-            ? health.modelSource
-            : "none";
         setDiagnostics({
           server: healthResponse.ok && health.status === "ok",
-          modelConfigured: Boolean(health.modelConfigured),
-          modelSource,
           managementReachable: Boolean(health.managementReachable),
-          managementLoggedIn: Boolean(session.connected),
           stageConnected: Boolean(stage.connected),
           ttsSupported: Boolean(stage.ttsSupported),
           voiceCount: Number(stage.voiceCount || 0),
@@ -153,17 +129,7 @@ export default function SettingsPage() {
           ttsState: ["idle", "speaking", "ready", "error"].includes(stage.ttsState) ? stage.ttsState : "idle",
           ttsError: String(stage.ttsError || ""),
           lastSpeechAt: Number(stage.lastSpeechAt || 0),
-          mediaReady: Boolean(stage.mediaReady),
-          transcriptionConfigured: Boolean(health.transcriptionConfigured),
-          transcriptionReady: Boolean(health.transcriptionReady),
-          transcriptionSource:
-            health.transcriptionSource === "aliyun" ||
-            health.transcriptionSource === "volcengine" ||
-            health.transcriptionSource === "management" ||
-            health.transcriptionSource === "environment" ||
-            health.transcriptionSource === "whisper-cpp"
-              ? health.transcriptionSource
-              : "none"
+          mediaReady: Boolean(stage.mediaReady)
         });
         setManagementNetwork({
           reachable: Boolean(health.managementReachable),
@@ -193,7 +159,7 @@ export default function SettingsPage() {
   async function clearAvatar() { setUploading(true); setError(""); try { const response = await fetch("/api/avatar", { method: "DELETE" }); const data = await response.json(); if (!response.ok) throw new Error(data.message || "恢复失败"); setAvatar(data); } catch (cause) { setError(cause instanceof Error ? cause.message : "恢复失败"); } finally { setUploading(false); } }
   async function playTestSpeech() { setTestingSpeech(true); setSpeechTestRequestedAt(0); setError(""); try { const response = await fetch("/api/stage-test-speech", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: "你好，这是一段虚拟助手音视频线路测试。" }) }); const data = await response.json(); if (!response.ok) throw new Error(data.message || "测试语音发送失败"); setSpeechTestRequestedAt(Number(data.createdAt || Date.now())); } catch (cause) { setError(cause instanceof Error ? cause.message : "测试语音发送失败"); } finally { setTestingSpeech(false); } }
 
-  const readiness = getInterviewReadiness({ outputMode, modelConfigured: diagnostics.modelConfigured, stageConnected: diagnostics.stageConnected, mediaReady: diagnostics.mediaReady, speechReady, obsConnected, virtualCameraActive, virtualCameraVerified, virtualAudioReady, meetingPreviewConfirmed });
+  const readiness = getInterviewReadiness({ outputMode, stageConnected: diagnostics.stageConnected, mediaReady: diagnostics.mediaReady, speechReady, obsConnected, virtualCameraActive, virtualCameraVerified, virtualAudioReady, meetingPreviewConfirmed });
   return <main className="console settingsPage">
     <AppChrome current="settings" />
     <header className="topbar"><div><p className="eyebrow">CONFIGURATION</p><h1>设置与检测</h1></div><AppNavigation current="settings" /></header>
@@ -214,17 +180,11 @@ export default function SettingsPage() {
           </div>
         </article>
       </SettingSection>
-      <SettingSection number="02" title="系统诊断" detail="只显示当前模式需要的状态。AI / 转写由管理端配置，客户端登录后自动同步。">
+      <SettingSection number="02" title="系统诊断" detail="模型、转写和播报由当前启用的 LiveKit Agent 语音线路统一执行，客户端只检查连接与媒体设备。">
         <article className="card diagnostics">
           <div className="checks">
             <Check label="本地服务" ok={diagnostics.server} detail={diagnostics.server ? "正常" : "不可用"} />
-            <Check
-              label="AI 模型"
-              ok={diagnostics.modelConfigured}
-              warn={!diagnostics.modelConfigured && diagnostics.managementReachable && !diagnostics.managementLoggedIn}
-              detail={modelDetail(diagnostics)}
-            />
-            <Check label="语音转写" ok={diagnostics.transcriptionReady} detail={transcriptionDetail(diagnostics)} />
+            <Check label="管理端" ok={diagnostics.managementReachable} detail={diagnostics.managementReachable ? "可连接；语音线路由管理端统一维护" : "不可达，请检查网络或管理端服务"} />
             <Check label="网络" ok={networkStatus(network) === "ok"} warn={networkStatus(network) === "warn"} detail={describeNetwork(network)} />
             <Check label="播报引擎" ok={diagnostics.stageConnected} detail={diagnostics.stageConnected ? "主工作台播放控制器在线" : "请保持主工作台打开"} />
             {virtualMode ? (
@@ -272,27 +232,3 @@ export default function SettingsPage() {
 
 function SettingSection({ number, title, detail, children, id }: { number: string; title: string; detail: string; children: React.ReactNode; id?: string }) { return <div className="settingsSection" id={id}><div className="sectionIntro"><span>{number}</span><div><h2>{title}</h2><p>{detail}</p></div></div>{children}</div>; }
 function Check({ label, ok, warn, detail }: { label: string; ok: boolean; warn?: boolean; detail: string }) { return <div className="check"><i className={ok ? "ok" : warn ? "warn" : ""}>{ok ? "✓" : "!"}</i><div><strong>{label}</strong><span>{detail}</span></div></div>; }
-function modelDetail(diagnostics: Diagnostics) {
-  if (diagnostics.modelConfigured) {
-    if (diagnostics.modelSource === "management") return "已从管理端同步";
-    if (diagnostics.modelSource === "environment") return "已使用本机环境变量";
-    return "已配置";
-  }
-  if (!diagnostics.managementReachable) return "管理端不可达，无法同步 AI 模型";
-  if (!diagnostics.managementLoggedIn) return "请先登录客户端，以同步管理端已配置的 AI 模型";
-  return "管理端尚未下发可用的 AI 模型，请到管理后台检查";
-}
-function transcriptionDetail(diagnostics: Diagnostics) {
-  if (diagnostics.transcriptionReady) {
-    if (diagnostics.transcriptionSource === "aliyun") return "阿里云一句话识别已配置";
-    if (diagnostics.transcriptionSource === "volcengine") return "豆包极速识别已配置";
-    if (diagnostics.transcriptionSource === "management") return "已从管理端同步转写配置";
-    if (diagnostics.transcriptionSource === "whisper-cpp") return "本机 whisper.cpp 已就绪";
-    return "转写已就绪";
-  }
-  if (!diagnostics.managementLoggedIn && diagnostics.managementReachable) {
-    return "未登录时无法同步管理端转写；也可使用本机已配置线路";
-  }
-  if (diagnostics.transcriptionConfigured) return "管理端转写暂不可用";
-  return "请在管理后台配置语音或转写服务";
-}

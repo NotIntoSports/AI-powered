@@ -4,6 +4,7 @@ import { emitPipelineEvent } from "../diagnostics/pipeline-log.ts";
 import { setRtcNetwork } from "./network-quality.ts";
 import { subtitleSink } from "../../lib/subtitles/sink.ts";
 import type { SubtitleProvider, SubtitleTransport } from "../../lib/subtitles/transport.ts";
+import type { AgentCommand, AgentCommandResult } from "../../lib/agent-command/contract.ts";
 
 export type MeetingProcess = { pid: number; name: string; title: string };
 export type DesktopBridge = {
@@ -74,6 +75,7 @@ type ActiveSession = {
   handle: BridgeSessionHandle;
   events: BridgeSessionEvents;
   cleanup: () => Promise<void>;
+  transport: SubtitleTransport;
 };
 let active: ActiveSession | null = null;
 let starting = false;
@@ -118,6 +120,16 @@ export async function startBridgeSession(
     const activeProvider: SubtitleProvider = "livekit";
     const language = token.language || "zh";
     const roomId = token.roomId || sessionId;
+    const localSession = await fetch("/api/session", { cache: "no-store" })
+      .then((response) => response.ok ? response.json() : null)
+      .catch(() => null) as { assistantRole?: string; roleName?: string; transcript?: Array<{ role?: string; text?: string }>; resumeIds?: string[] } | null;
+    const sessionContext = {
+      v: 1 as const,
+      role: String(localSession?.assistantRole || "assistant"),
+      topic: String(localSession?.roleName || ""),
+      history: (localSession?.transcript || []).slice(-20).map((item) => ({ role: String(item.role || "user"), text: String(item.text || "").slice(0, 4000) })),
+      resumeIds: (localSession?.resumeIds || []).slice(0, 20).map(String)
+    };
     void emitPipelineEvent({
       event: "bridge.token-received",
       traceId: roomId,
@@ -165,6 +177,7 @@ export async function startBridgeSession(
           roomId,
           userId: token.userId || userId,
           url: token.url,
+          sessionContext,
           onConnectionStateChange: (state, reason) => events.onTransportState(state, reason)
         });
       } catch (error) {
@@ -218,6 +231,7 @@ export async function startBridgeSession(
       active = {
         handle,
         events,
+        transport,
         cleanup: async () => {
           window.clearInterval(statsTimer);
           removePcm?.();
@@ -258,6 +272,11 @@ export async function startBridgeSession(
   } finally {
     starting = false;
   }
+}
+
+export async function sendAgentCommand(command: AgentCommand): Promise<AgentCommandResult> {
+  if (!active?.transport.sendAgentCommand) throw new Error("LIVEKIT_NOT_CONNECTED");
+  return active.transport.sendAgentCommand(command);
 }
 
 export async function stopBridgeSession(): Promise<void> {

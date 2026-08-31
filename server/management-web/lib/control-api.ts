@@ -82,6 +82,7 @@ export type CatalogEntry = {
   baseUrl: string;
   capability: string;
   enabled: boolean;
+  runtimeVerified: boolean;
   label: string;
   displayName?: string;
 };
@@ -90,6 +91,26 @@ export type CatalogSyncResult = {
   providers: number;
   models: number;
   classified: number;
+};
+
+export type VoiceRoute = {
+  id: string;
+  name: string;
+  mode: "cascaded" | "e2e" | string;
+  asrProviderId: string;
+  asrModelId: string;
+  llmProviderId: string;
+  llmModelId: string;
+  ttsProviderId: string;
+  ttsModelId: string;
+  voiceId: string;
+  e2eProviderId: string;
+  e2eModelId: string;
+  active: boolean;
+  ready: boolean;
+  status: string;
+  configVersion: number;
+  updatedAt: string;
 };
 
 export type OfficialCatalogSyncResult = {

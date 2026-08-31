@@ -2,7 +2,6 @@ import type { OutputMode } from "./output-mode";
 
 export type InterviewReadinessInput = {
   outputMode?: OutputMode;
-  modelConfigured: boolean;
   stageConnected: boolean;
   mediaReady: boolean;
   speechReady: boolean;
@@ -21,7 +20,6 @@ export type InterviewReadinessItem = {
 };
 
 const labels: Record<keyof Omit<InterviewReadinessInput, "outputMode">, string> = {
-  modelConfigured: "AI 模型已配置",
   stageConnected: "播报引擎在线",
   mediaReady: "助手画面已加载",
   speechReady: "中文语音可播放",
@@ -35,7 +33,6 @@ const labels: Record<keyof Omit<InterviewReadinessInput, "outputMode">, string> 
 const itemIds = Object.keys(labels) as Array<keyof Omit<InterviewReadinessInput, "outputMode">>;
 
 const virtualRequiredIds = new Set<keyof Omit<InterviewReadinessInput, "outputMode">>([
-  "modelConfigured",
   "stageConnected",
   "speechReady",
   "obsConnected",
@@ -49,7 +46,7 @@ export function isReadinessItemRequired(
   id: keyof Omit<InterviewReadinessInput, "outputMode">,
   mode: OutputMode = "real"
 ): boolean {
-  if (mode === "real") return id === "modelConfigured";
+  if (mode === "real") return false;
   return virtualRequiredIds.has(id);
 }
 

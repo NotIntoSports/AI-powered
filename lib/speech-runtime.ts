@@ -6,7 +6,6 @@ import { isCosyVoiceSpeakerId } from "./aliyun-cosyvoice";
 import {
 	fetchDesktopControlJson,
 	fetchDesktopControlResult,
-  getClientPipeline,
   localSettingsDirectory,
   unprotectLocalSecret
 } from "./runtime-config";
@@ -351,25 +350,17 @@ export async function getSpeechRuntimeConfig(): Promise<SpeechRuntimeConfig> {
   const aliyunEnv = fromAliyunEnv();
   const volcengineEnv = fromVolcengineEnv();
   const local = stored && !stored.disabled ? fromStoredSpeech(stored) : null;
-  const pipeline = await getClientPipeline();
-  const pipelineVoice = pipeline?.mode === "cascaded" ? (pipeline.voice || "").trim() : "";
-
-  const withPipelineVoice = (config: SpeechRuntimeConfig): SpeechRuntimeConfig => {
-    if (!pipelineVoice || config.provider !== "aliyun") return config;
-    return withAvailability({ ...config, speakerId: pipelineVoice });
-  };
-
   if (management?.available && preferred === "auto") {
-    return withPipelineVoice(withAvailability({
+    return withAvailability({
       ...management,
       speakerId: pickBoundSpeakerId(management.speakerId, stored?.speakerId) || management.speakerId || stored?.speakerId || management.speakerId
-    }));
+    });
   }
   if (preferred === "aliyun") {
-    if (management?.provider === "aliyun" && management.available) return withPipelineVoice(management);
-    if (local?.provider === "aliyun" && local.available) return withPipelineVoice(local);
-    if (aliyunEnv.available) return withPipelineVoice(aliyunEnv);
-    if (aliyunEnv.appId) return withPipelineVoice(aliyunEnv);
+    if (management?.provider === "aliyun" && management.available) return management;
+    if (local?.provider === "aliyun" && local.available) return local;
+    if (aliyunEnv.available) return aliyunEnv;
+    if (aliyunEnv.appId) return aliyunEnv;
   }
   if (preferred === "volcengine") {
     if (management?.provider === "volcengine" && management.available) {
@@ -382,19 +373,19 @@ export async function getSpeechRuntimeConfig(): Promise<SpeechRuntimeConfig> {
     if (volcengineEnv.available) return volcengineEnv;
   }
   if (preferred !== "volcengine") {
-    if (aliyunEnv.available) return withPipelineVoice(aliyunEnv);
-    if (local?.provider === "aliyun" && local.available) return withPipelineVoice(local);
+    if (aliyunEnv.available) return aliyunEnv;
+    if (local?.provider === "aliyun" && local.available) return local;
   }
   if (preferred !== "aliyun" && management?.available) {
-    return withPipelineVoice(withAvailability({
+    return withAvailability({
       ...management,
       speakerId: management.speakerId || stored?.speakerId || ""
-    }));
+    });
   }
   if (preferred !== "aliyun" && local?.available) return local;
   if (preferred !== "aliyun" && volcengineEnv.available) return volcengineEnv;
-  if (aliyunEnv.appId) return withPipelineVoice(aliyunEnv);
-  if (management) return withPipelineVoice(management);
+  if (aliyunEnv.appId) return aliyunEnv;
+  if (management) return management;
   return emptySpeech(stored ? "settings" : "none");
 }
 

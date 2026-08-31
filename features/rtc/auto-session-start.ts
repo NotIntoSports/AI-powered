@@ -2,8 +2,6 @@ export type AutoSessionStartInput = {
   bridgeState: "off" | "waiting" | "captured" | "backoff" | "needs-manual" | "starting";
   bridgeSessionKey?: string;
   sessionStatus: "idle" | "running" | "finished";
-  modelConfigured: boolean;
-  stageConnected: boolean;
   assistantRole?: string;
   pending: boolean;
   attemptedSessionKey?: string;
@@ -24,12 +22,6 @@ export function decideAutoSessionStart(input: AutoSessionStartInput): AutoSessio
   }
   if (!input.assistantRole) {
     return { shouldStart: false, message: "请选择助手角色" };
-  }
-  if (!input.modelConfigured) {
-    return { shouldStart: false, message: "AI 模型未就绪，暂不能自动开始" };
-  }
-  if (!input.stageConnected) {
-    return { shouldStart: false, message: "播报引擎未在线，暂不能实时播报" };
   }
   if (input.pending) {
     return { shouldStart: false, message: "正在自动开始互动" };

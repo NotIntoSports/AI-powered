@@ -45,14 +45,16 @@ test("workspace keeps heavy meeting access off the main page but embeds the auto
   const snapshot = await readFile(new URL("../../features/readiness/readiness-snapshot.ts", import.meta.url), "utf8");
   const intervention = await readFile(new URL("../../features/intervention/intervention-controls.tsx", import.meta.url), "utf8");
   const monitor = await readFile(new URL("../../features/audio/remote-monitor.ts", import.meta.url), "utf8");
+  const adapter = await readFile(new URL("../../desktop/rtc/livekit-adapter.ts", import.meta.url), "utf8");
 
   assert.doesNotMatch(page, /MeetingAccessCard/);
   assert.doesNotMatch(page, /RtcBridgeControl/);
   assert.match(page, /MeetingBridgeCard/);
   assert.doesNotMatch(page, /readinessBanner/);
   assert.match(page, /IntegrationAlerts missing=\{readiness\.missing\}/);
-  assert.match(page, /虚拟声卡可选/);
-  assert.match(page, /attachRemoteMonitor/);
+  assert.doesNotMatch(page, /attachRemoteMonitor|\/api\/transcribe/);
+  assert.match(adapter, /loadLocalAiMonitorEnabled/);
+  assert.match(adapter, /setSinkId/);
   const alerts = await readFile(new URL("../../features/meeting/integration-alerts.tsx", import.meta.url), "utf8");
   assert.match(alerts, /workspaceToasts/);
   assert.match(alerts, /workspaceToastClose/);

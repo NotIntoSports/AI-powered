@@ -7,6 +7,9 @@ import { mapLiveKitDataPacket, mapLiveKitSegment } from "../../lib/subtitles/map
 import type { SubtitleSink } from "../../lib/subtitles/sink.ts";
 import type { SubtitleConnectConfig, SubtitleTransport } from "../../lib/subtitles/transport.ts";
 import { summarizeRtcStats, type RtcNetworkStats } from "../../lib/webrtc-stats.ts";
+import { loadVirtualAudioRoute, resolveStoredRouteAgainstDevices } from "../../features/audio/virtual-audio-route.ts";
+import { loadLocalAiMonitorEnabled } from "../../features/audio/local-ai-monitor.ts";
+import { AGENT_COMMAND_RESULT_TOPIC, AGENT_COMMAND_TOPIC, decodeAgentCommandResult, encodeAgentCommand, type AgentCommand, type AgentCommandResult } from "../../lib/agent-command/contract.ts";
 
 type StatsCapableTrack = {
   getRTCStatsReport?: () => Promise<RTCStatsReport | undefined>;
@@ -30,6 +33,8 @@ export class LiveKitRtcAdapter implements SubtitleTransport {
   private readonly sink: SubtitleSink;
   private room: Room | null = null;
   private sessionId = "";
+  private remoteAudio: HTMLAudioElement[] = [];
+  private pendingCommands = new Map<string, { resolve: (result: AgentCommandResult) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
 
   constructor(sink: SubtitleSink) {
     this.sink = sink;
@@ -53,7 +58,36 @@ export class LiveKitRtcAdapter implements SubtitleTransport {
       console.log(`[livekit] reconnected roomId=${this.sessionId}`);
       config.onConnectionStateChange?.("connected");
     });
+    room.on(RoomEvent.TrackSubscribed, (remoteTrack) => {
+      if (remoteTrack.kind !== Track.Kind.Audio) return;
+      void (async () => {
+        const route = loadVirtualAudioRoute();
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const resolved = route ? resolveStoredRouteAgainstDevices(route, devices.map((device) => ({ kind: device.kind as "audioinput" | "audiooutput", label: device.label, deviceId: device.deviceId }))) : null;
+        if (!resolved?.outputDeviceId) throw new Error("VIRTUAL_AUDIO_ROUTE_NOT_READY");
+        const virtual = remoteTrack.attach() as HTMLAudioElement & { setSinkId?: (deviceId: string) => Promise<void> };
+        if (!virtual.setSinkId) throw new Error("SET_SINK_ID_UNSUPPORTED");
+        await virtual.setSinkId(resolved.outputDeviceId);
+        await virtual.play();
+        this.remoteAudio.push(virtual);
+        if (loadLocalAiMonitorEnabled()) {
+          const monitor = remoteTrack.attach() as HTMLAudioElement;
+          await monitor.play();
+          this.remoteAudio.push(monitor);
+        }
+      })().catch((error) => console.error(`[livekit] agent audio output failed code=${error instanceof Error ? error.message : String(error)}`));
+    });
     room.on(RoomEvent.DataReceived, (payload, _participant, _kind, topic) => {
+      if (topic === AGENT_COMMAND_RESULT_TOPIC) {
+        const result = decodeAgentCommandResult(payload);
+        const pending = result ? this.pendingCommands.get(result.commandId) : undefined;
+        if (result && pending) {
+          clearTimeout(pending.timer);
+          this.pendingCommands.delete(result.commandId);
+          result.ok ? pending.resolve(result) : pending.reject(new Error(result.error || "AGENT_COMMAND_FAILED"));
+        }
+        return;
+      }
       if (topic === AGENT_RESPONSE_DATA_TOPIC) {
         const mapped = mapAgentResponseDataPacket(payload, this.sessionId);
         if (mapped) {
@@ -119,6 +153,13 @@ export class LiveKitRtcAdapter implements SubtitleTransport {
       throw error;
     }
     console.log(`[livekit] room connected after=${Date.now() - connectStartedAt}ms state=${room.state}`);
+    const encodedContext = new TextEncoder().encode(JSON.stringify(config.sessionContext));
+    const contextPayload = new Uint8Array(new ArrayBuffer(encodedContext.byteLength));
+    contextPayload.set(encodedContext);
+    await room.localParticipant.publishData(
+      contextPayload,
+      { reliable: true, topic: "session.context.v1" }
+    );
     const mediaTrack = config.track as MediaStreamTrack;
     try {
       await room.localParticipant.publishTrack(mediaTrack, {
@@ -152,9 +193,22 @@ export class LiveKitRtcAdapter implements SubtitleTransport {
     return summarizeRtcStats(reports);
   }
 
+  async sendAgentCommand(command: AgentCommand): Promise<AgentCommandResult> {
+    if (!this.room) throw new Error("LIVEKIT_NOT_CONNECTED");
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { this.pendingCommands.delete(command.id); reject(new Error("AGENT_COMMAND_TIMEOUT")); }, 60_000);
+      this.pendingCommands.set(command.id, { resolve, reject, timer });
+      this.room!.localParticipant.publishData(encodeAgentCommand(command), { reliable: true, topic: AGENT_COMMAND_TOPIC })
+        .catch((error) => { clearTimeout(timer); this.pendingCommands.delete(command.id); reject(error); });
+    });
+  }
+
   async disconnect(): Promise<void> {
     const room = this.room;
     this.room = null;
+    for (const pending of this.pendingCommands.values()) { clearTimeout(pending.timer); pending.reject(new Error("LIVEKIT_DISCONNECTED")); }
+    this.pendingCommands.clear();
+    for (const audio of this.remoteAudio.splice(0)) { audio.pause(); audio.remove(); }
     await room?.disconnect();
   }
 }

@@ -25,3 +25,19 @@ test("LiveKit connection lifecycle is propagated through the transport contract"
   assert.match(controller, /onTransportState/);
   assert.doesNotMatch(session, /@volcengine\/rtc/);
 });
+
+test("desktop sends versioned session context to the Agent without model configuration", async () => {
+  const [contract, adapter, session] = await Promise.all([
+    readFile(new URL("../../lib/subtitles/transport.ts", import.meta.url), "utf8"),
+    readFile(new URL("../../desktop/rtc/livekit-adapter.ts", import.meta.url), "utf8"),
+    readFile(new URL("../../features/rtc/bridge-session.ts", import.meta.url), "utf8")
+  ]);
+  assert.match(contract, /sessionContext/);
+  assert.match(adapter, /session\.context\.v1/);
+  assert.match(adapter, /publishData/);
+  assert.match(adapter, /TrackSubscribed/);
+  assert.match(adapter, /setSinkId/);
+  assert.match(adapter, /loadVirtualAudioRoute/);
+  assert.match(session, /\/api\/session/);
+  assert.doesNotMatch(contract, /apiKey|baseUrl|providerId|modelId/);
+});

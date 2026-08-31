@@ -1,6 +1,5 @@
 /**
- * Infer which speech line (阿里云 / 豆包) a pipeline catalog selection maps to.
- * Used when saving「互动管线」so「语音线路」activeProvider follows the pick.
+ * Infer which speech line (阿里云 / 豆包) a catalog selection maps to.
  */
 
 export type SpeechLineProvider = "aliyun" | "volcengine";

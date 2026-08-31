@@ -88,6 +88,20 @@ func NewRouter(dependencies Dependencies) http.Handler {
 			if dependencies.SettingsAdmin != nil {
 				adminSettings := newAdminSettingsHandler(dependencies.SettingsAdmin)
 				r.Route("/settings", func(r chi.Router) {
+					if voiceAdmin, ok := dependencies.SettingsAdmin.(voiceRoutesAdmin); ok {
+						voiceRoutes := voiceRoutesHandler{admin: voiceAdmin}
+						r.Route("/voice-routes", func(r chi.Router) {
+							r.Get("/", voiceRoutes.list)
+							r.Post("/", voiceRoutes.create)
+							r.Route("/{id}", func(r chi.Router) {
+								r.Get("/", voiceRoutes.get)
+								r.Put("/", voiceRoutes.update)
+								r.Delete("/", voiceRoutes.delete)
+								r.Post("/test", voiceRoutes.test)
+								r.Post("/activate", voiceRoutes.activate)
+							})
+						})
+					}
 					r.Get("/ai", adminSettings.getAI)
 					r.Put("/ai", adminSettings.putAI)
 					r.Post("/ai/test", adminSettings.testAI)
@@ -133,8 +147,6 @@ func NewRouter(dependencies Dependencies) http.Handler {
 					r.Post("/speech/preview", adminSettings.previewSpeech)
 					r.Post("/speech/asr-test", adminSettings.testSpeechASR)
 					r.Get("/speech/voices", adminSettings.listSpeechVoices)
-					r.Get("/pipeline", adminSettings.getPipeline)
-					r.Put("/pipeline", adminSettings.putPipeline)
 					r.Get("/roles", adminSettings.getRoles)
 					r.Put("/roles", adminSettings.putRoles)
 				})
@@ -172,11 +184,8 @@ func NewRouter(dependencies Dependencies) http.Handler {
 			}
 			if dependencies.SettingsAdmin != nil {
 				clientSettings := newAdminSettingsHandler(dependencies.SettingsAdmin)
-				r.Get("/settings/ai", clientSettings.getClientAI)
-				r.Get("/settings/asr", clientSettings.getClientASR)
 				r.Get("/settings/speech", clientSettings.getClientSpeech)
 				r.Patch("/settings/speech", clientSettings.patchClientSpeech)
-				r.Get("/settings/pipeline", clientSettings.getClientPipeline)
 				r.Post("/rtc/token", clientSettings.issueRTC)
 				r.Get("/settings/roles", clientSettings.getClientRoles)
 			}
@@ -189,13 +198,12 @@ func NewRouter(dependencies Dependencies) http.Handler {
 	}
 
 	if dependencies.SettingsAdmin != nil && strings.TrimSpace(dependencies.AgentInternalToken) != "" {
-		agentSettings := newAdminSettingsHandler(dependencies.SettingsAdmin)
 		r.Route("/api/v1/agent", func(r chi.Router) {
 			r.Use(noStore)
 			r.Use(requireAgentToken(dependencies.AgentInternalToken))
-			r.Get("/settings/speech", agentSettings.getAgentSpeech)
-			r.Get("/settings/pipeline", agentSettings.getAgentPipeline)
-			r.Get("/settings/ai", agentSettings.getAgentAI)
+			if voiceAdmin, ok := dependencies.SettingsAdmin.(voiceRoutesAdmin); ok {
+				r.Get("/settings/voice-route", voiceRoutesHandler{admin: voiceAdmin}.agent)
+			}
 		})
 	}
 

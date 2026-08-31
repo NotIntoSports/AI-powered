@@ -237,40 +237,6 @@ func (handler *adminSettingsHandler) putRoles(w http.ResponseWriter, request *ht
 	writeJSON(w, http.StatusOK, profiles)
 }
 
-func (handler *adminSettingsHandler) getClientAI(w http.ResponseWriter, request *http.Request) {
-	authenticated, ok := request.Context().Value(authenticatedSessionKey{}).(AuthenticatedSession)
-	if !ok {
-		writeSessionError(w, request)
-		return
-	}
-	if authenticated.Session.Purpose != sessions.PurposeDesktop {
-		writeAPIError(w, request, http.StatusForbidden, "FORBIDDEN", "desktop session is required")
-		return
-	}
-	clientAI, err := handler.admin.GetClientAI(request.Context())
-	if !writeSettingsError(w, request, err) {
-		return
-	}
-	writeJSON(w, http.StatusOK, clientAI)
-}
-
-func (handler *adminSettingsHandler) getClientASR(w http.ResponseWriter, request *http.Request) {
-	authenticated, ok := request.Context().Value(authenticatedSessionKey{}).(AuthenticatedSession)
-	if !ok {
-		writeSessionError(w, request)
-		return
-	}
-	if authenticated.Session.Purpose != sessions.PurposeDesktop {
-		writeAPIError(w, request, http.StatusForbidden, "FORBIDDEN", "desktop session is required")
-		return
-	}
-	clientASR, err := handler.admin.GetClientASR(request.Context())
-	if !writeSettingsError(w, request, err) {
-		return
-	}
-	writeJSON(w, http.StatusOK, clientASR)
-}
-
 func (handler *adminSettingsHandler) putAI(w http.ResponseWriter, request *http.Request) {
 	actor, ok := requestActor(w, request)
 	if !ok {
@@ -498,47 +464,6 @@ func (handler *adminSettingsHandler) getSpeech(w http.ResponseWriter, request *h
 		return
 	}
 	public, err := handler.admin.GetSpeech(request.Context())
-	if !writeSettingsError(w, request, err) {
-		return
-	}
-	writeJSON(w, http.StatusOK, public)
-}
-
-func (handler *adminSettingsHandler) getAgentSpeech(w http.ResponseWriter, request *http.Request) {
-	public, err := handler.admin.GetAgentSpeech(request.Context())
-	if !writeSettingsError(w, request, err) {
-		return
-	}
-	writeJSON(w, http.StatusOK, public)
-}
-
-func (handler *adminSettingsHandler) getAgentPipeline(w http.ResponseWriter, request *http.Request) {
-	public, err := handler.admin.GetAgentPipeline(request.Context())
-	if !writeSettingsError(w, request, err) {
-		return
-	}
-	writeJSON(w, http.StatusOK, public)
-}
-
-func (handler *adminSettingsHandler) getAgentAI(w http.ResponseWriter, request *http.Request) {
-	public, err := handler.admin.GetAgentAI(request.Context())
-	if !writeSettingsError(w, request, err) {
-		return
-	}
-	writeJSON(w, http.StatusOK, public)
-}
-
-func (handler *adminSettingsHandler) getClientPipeline(w http.ResponseWriter, request *http.Request) {
-	authenticated, ok := request.Context().Value(authenticatedSessionKey{}).(AuthenticatedSession)
-	if !ok {
-		writeSessionError(w, request)
-		return
-	}
-	if authenticated.Session.Purpose != sessions.PurposeDesktop {
-		writeAPIError(w, request, http.StatusForbidden, "FORBIDDEN", "desktop session is required")
-		return
-	}
-	public, err := handler.admin.GetClientPipeline(request.Context())
 	if !writeSettingsError(w, request, err) {
 		return
 	}

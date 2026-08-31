@@ -10,16 +10,10 @@ import {
   resetSession,
   setInterviewReport
 } from "../../../lib/interview";
-import { generateInterviewReport, generateRoleResponse } from "../../../lib/llm";
 import { assistantRoleSchema } from "../../../lib/assistant-role";
 import { getRoleProfile } from "../../../lib/role-profiles";
-import { buildKnowledgeQuery, searchResumeKnowledge } from "../../../lib/knowledge";
-import {
-  getModelRuntimeConfig,
-  isModelRuntimeConfigured
-} from "../../../lib/runtime-config";
-import { probeConfiguredModel } from "../../../lib/model-probe";
 import { formatPipelineLog } from "../../../lib/pipeline-diagnostics";
+import { modelReportSchema } from "../../../lib/interview-report";
 
 const actionSchema = z.discriminatedUnion("action", [
   z.object({
@@ -57,38 +51,11 @@ const actionSchema = z.discriminatedUnion("action", [
     answer: z.string().trim().min(1).max(4000)
   }),
   z.object({ action: z.literal("finish") }),
-  z.object({ action: z.literal("generateReport") })
+  z.object({ action: z.literal("generateReport") }),
+  z.object({ action: z.literal("agentRetryResult"), question: z.string().trim().min(1).max(4000), expectedRevision: z.number().int().nonnegative() }),
+  z.object({ action: z.literal("agentCorrectionResult"), answer: z.string().trim().min(1).max(4000), question: z.string().trim().min(1).max(4000), expectedRevision: z.number().int().nonnegative() }),
+  z.object({ action: z.literal("agentReportResult"), report: modelReportSchema })
 ]);
-
-function lastInterviewerText(transcript: { role: string; text: string }[]) {
-  for (let index = transcript.length - 1; index >= 0; index -= 1) {
-    if (transcript[index].role === "interviewer") {
-      return transcript[index].text;
-    }
-  }
-  return "";
-}
-
-async function knowledgeContextFor(
-  resumeIds: string[] | undefined,
-  transcript: { role: string; text: string }[],
-  answer: string
-) {
-  const ids = Array.isArray(resumeIds) ? resumeIds.map((id) => id.trim()).filter(Boolean) : [];
-  if (ids.length === 0) {
-    return "";
-  }
-  return searchResumeKnowledge(ids, buildKnowledgeQuery(lastInterviewerText(transcript), answer));
-}
-
-function lastCandidateText(transcript: { role: string; text: string }[]) {
-  for (let index = transcript.length - 1; index >= 0; index -= 1) {
-    if (transcript[index].role === "candidate") {
-      return transcript[index].text;
-    }
-  }
-  return "";
-}
 
 export async function GET() {
   return NextResponse.json(await getSession(), {
@@ -117,35 +84,6 @@ export async function POST(request: Request) {
           { status: 409 }
         );
       }
-      const runtime = await getModelRuntimeConfig();
-      if (!isModelRuntimeConfigured(runtime)) {
-        return NextResponse.json(
-          {
-            code: "MODEL_NOT_CONFIGURED",
-            message: "请先配置远程模型密钥，或启用本机无密钥模型"
-          },
-          { status: 503 }
-        );
-      }
-      const probe = await probeConfiguredModel();
-      if (!probe.reachable) {
-        return NextResponse.json(
-          {
-            code: "MODEL_UNREACHABLE",
-            message: `模型服务不可用：${probe.message}`
-          },
-          { status: 503 }
-        );
-      }
-      if (!probe.modelFound) {
-        return NextResponse.json(
-          {
-            code: "MODEL_NOT_FOUND",
-            message: probe.message
-          },
-          { status: 409 }
-        );
-      }
       const roleProfile = await getRoleProfile(parsed.data.assistantRole);
       const started = await resetSession({ ...parsed.data, roleProfile });
       pipelineTraceId = started.sessionId;
@@ -163,88 +101,27 @@ export async function POST(request: Request) {
     if (parsed.data.action === "finish") {
       return NextResponse.json(await finishSession());
     }
-    if (parsed.data.action === "retryQuestion") {
+    if (parsed.data.action === "agentRetryResult") {
       const session = await getSession();
       const lastItem = session.transcript.at(-1);
-      if (
-        session.status !== "running" ||
-        session.revision !== parsed.data.expectedRevision ||
-        lastItem?.role !== "interviewer" ||
-        !session.transcript.slice(0, -1).some((item) => item.role === "candidate")
-      ) {
-        return NextResponse.json(
-          { code: "NO_RETRYABLE_QUESTION", message: "当前没有可重新生成的追问" },
-          { status: 409 }
-        );
-      }
-      const question = await generateRoleResponse({
-        assistantRole: session.assistantRole,
-        roleInstructions: session.roleProfile.instructions,
-        roleName: session.roleName,
-        jobDescription: session.jobDescription,
-        interviewFocus: session.interviewFocus,
-        transcript: session.transcript.slice(0, -1),
-        knowledgeContext: await knowledgeContextFor(
-          session.resumeIds,
-          session.transcript.slice(0, -1),
-          lastCandidateText(session.transcript.slice(0, -1))
-        )
-      });
-      return NextResponse.json(await replaceLastInterviewerQuestion({
-        question,
-        expectedRevision: parsed.data.expectedRevision,
-        expectedQuestionAt: lastItem.at
-      }));
+      if (!lastItem || lastItem.role !== "interviewer") throw new Error("NO_RETRYABLE_QUESTION");
+      return NextResponse.json(await replaceLastInterviewerQuestion({ question: parsed.data.question, expectedRevision: parsed.data.expectedRevision, expectedQuestionAt: lastItem.at }));
     }
-    if (parsed.data.action === "correctLastAnswer") {
+    if (parsed.data.action === "agentCorrectionResult") {
       const session = await getSession();
-      const currentQuestion = session.transcript.at(-1);
-      const currentAnswer = session.transcript.at(-2);
-      if (
-        session.status !== "running" ||
-        currentAnswer?.role !== "candidate" ||
-        currentQuestion?.role !== "interviewer"
-      ) {
-        return NextResponse.json(
-          { code: "NO_CORRECTABLE_ANSWER", message: "当前没有可修正的最近回答" },
-          { status: 409 }
-        );
-      }
-      const correctedTranscript = [
-        ...session.transcript.slice(0, -2),
-        { ...currentAnswer, text: parsed.data.answer }
-      ];
-      const question = await generateRoleResponse({
-        assistantRole: session.assistantRole,
-        roleInstructions: session.roleProfile.instructions,
-        roleName: session.roleName,
-        jobDescription: session.jobDescription,
-        interviewFocus: session.interviewFocus,
-        transcript: correctedTranscript,
-        knowledgeContext: await knowledgeContextFor(session.resumeIds, correctedTranscript, parsed.data.answer)
-      });
-      return NextResponse.json(await replaceLastExchange({
-        answer: parsed.data.answer,
-        question,
-        expectedAnswerAt: currentAnswer.at,
-        expectedQuestionAt: currentQuestion.at
-      }));
+      const question = session.transcript.at(-1);
+      const answer = session.transcript.at(-2);
+      if (!question || question.role !== "interviewer" || !answer || answer.role !== "candidate") throw new Error("NO_CORRECTABLE_ANSWER");
+      return NextResponse.json(await replaceLastExchange({ answer: parsed.data.answer, question: parsed.data.question, expectedAnswerAt: answer.at, expectedQuestionAt: question.at }));
     }
-    if (parsed.data.action === "generateReport") {
-      const session = await getSession();
-      if (session.status !== "finished") {
-        return NextResponse.json(
-          { code: "SESSION_RUNNING", message: "请先结束互动，再生成纪要" },
-          { status: 409 }
-        );
-      }
-      const report = await generateInterviewReport({
-        roleName: session.roleName,
-        jobDescription: session.jobDescription,
-        interviewFocus: session.interviewFocus,
-        transcript: session.transcript
-      });
-      return NextResponse.json(await setInterviewReport(report));
+    if (parsed.data.action === "agentReportResult") {
+      return NextResponse.json(await setInterviewReport({ ...parsed.data.report, generatedAt: new Date().toISOString(), humanReviewRequired: true }));
+    }
+    if (["retryQuestion", "correctLastAnswer", "generateReport", "answer"].includes(parsed.data.action)) {
+      return NextResponse.json(
+        { code: "AGENT_ACTION_REQUIRED", message: "该操作必须由 LiveKit Agent 执行" },
+        { status: 409 }
+      );
     }
 
     if (parsed.data.action === "e2e_turn") {
@@ -271,66 +148,7 @@ export async function POST(request: Request) {
       return NextResponse.json(updated);
     }
 
-    if (parsed.data.action !== "answer") {
-      return NextResponse.json(
-        { code: "INVALID_INPUT", message: "不支持的操作" },
-        { status: 422 }
-      );
-    }
-
-    const session = await getSession();
-    pipelineTraceId = session.sessionId;
-    if (
-      session.status !== "running" ||
-      session.revision !== parsed.data.expectedRevision ||
-      session.transcript.at(-1)?.role !== "interviewer"
-    ) {
-      console.warn(
-        `[session] answer rejected code=SESSION_CHANGED sessionId=${session.sessionId} status=${session.status} ` +
-          `revision=${session.revision} expected=${parsed.data.expectedRevision}`
-      );
-      return NextResponse.json(
-        { code: "SESSION_CHANGED", message: "对话轮次已变化，请刷新后重试" },
-        { status: 409 }
-      );
-    }
-    const transcriptWithAnswer = [
-      ...session.transcript,
-      {
-        role: "candidate" as const,
-        text: parsed.data.answer,
-        at: new Date().toISOString()
-      }
-    ];
-    const aiStartedAt = Date.now();
-    console.log(formatPipelineLog({
-      event: "ai.requested",
-      traceId: session.sessionId,
-      fields: { revision: session.revision, textLength: parsed.data.answer.length }
-    }));
-    const question = await generateRoleResponse({
-      assistantRole: session.assistantRole,
-      roleInstructions: session.roleProfile.instructions,
-      roleName: session.roleName,
-      jobDescription: session.jobDescription,
-      interviewFocus: session.interviewFocus,
-      transcript: transcriptWithAnswer,
-      knowledgeContext: await knowledgeContextFor(session.resumeIds, session.transcript, parsed.data.answer)
-    });
-    const updated = await appendAnswerAndQuestion({
-      answer: parsed.data.answer,
-      question,
-      expectedRevision: parsed.data.expectedRevision
-    });
-    console.log(
-      `[session] answer ok sessionId=${session.sessionId} revision=${session.revision} elapsedMs=${Date.now() - startedAt}`
-    );
-    console.log(formatPipelineLog({
-      event: "ai.succeeded",
-      traceId: session.sessionId,
-      fields: { revision: updated.revision, durationMs: Date.now() - aiStartedAt, textLength: question.length }
-    }));
-    return NextResponse.json(updated);
+    return NextResponse.json({ code: "INVALID_INPUT", message: "不支持的操作" }, { status: 422 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "UNKNOWN";
     if (parsed.data.action === "answer") {

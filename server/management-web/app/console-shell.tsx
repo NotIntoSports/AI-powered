@@ -12,7 +12,6 @@ const links = [
   { href: "/settings/ai", label: "模型管理" },
   { href: "/settings/rtc", label: "RTC 配置" },
   { href: "/settings/speech", label: "语音" },
-  { href: "/settings/pipeline", label: "语音管线" },
   { href: "/settings/storage", label: "对象存储" },
   { href: "/settings/roles", label: "角色话术" },
   { href: "/resumes", label: "资料" }

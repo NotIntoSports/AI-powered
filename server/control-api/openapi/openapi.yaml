@@ -514,6 +514,75 @@ paths:
           $ref: '#/components/responses/Unauthenticated'
         '403':
           $ref: '#/components/responses/Forbidden'
+  /api/v1/admin/settings/voice-routes:
+    get:
+      operationId: listVoiceRoutes
+      summary: List saved LiveKit Agent voice routes without secrets.
+      security: [{cookieAuth: []}]
+      responses:
+        '200':
+          description: Saved voice routes.
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: '#/components/schemas/VoiceRoute'}}
+        '401': {$ref: '#/components/responses/Unauthenticated'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+    post:
+      operationId: createVoiceRoute
+      summary: Create a validated inactive voice route.
+      security: [{cookieAuth: []}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/VoiceRouteInput'}}}
+      responses:
+        '201': {description: Created voice route, content: {application/json: {schema: {$ref: '#/components/schemas/VoiceRoute'}}}}
+        '422': {$ref: '#/components/responses/InvalidInputUnprocessable'}
+  /api/v1/admin/settings/voice-routes/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+    get:
+      operationId: getVoiceRoute
+      security: [{cookieAuth: []}]
+      responses:
+        '200': {description: Voice route, content: {application/json: {schema: {$ref: '#/components/schemas/VoiceRoute'}}}}
+    put:
+      operationId: updateVoiceRoute
+      security: [{cookieAuth: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/VoiceRouteInput'}}}}
+      responses:
+        '200': {description: Updated voice route, content: {application/json: {schema: {$ref: '#/components/schemas/VoiceRoute'}}}}
+    delete:
+      operationId: deleteVoiceRoute
+      summary: Delete an inactive voice route.
+      security: [{cookieAuth: []}]
+      responses:
+        '204': {description: Deleted.}
+  /api/v1/admin/settings/voice-routes/{id}/activate:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+    post:
+      operationId: activateVoiceRoute
+      summary: Atomically activate one ready route for new rooms.
+      security: [{cookieAuth: []}]
+      responses:
+        '200': {description: Activated voice route, content: {application/json: {schema: {$ref: '#/components/schemas/VoiceRoute'}}}}
+        '409': {description: Route models or credentials are not ready.}
+  /api/v1/admin/settings/voice-routes/{id}/test:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+    post:
+      operationId: testVoiceRoute
+      security: [{cookieAuth: []}]
+      responses:
+        '200': {description: Route readiness result.}
+  /api/v1/agent/settings/voice-route:
+    get:
+      operationId: getAgentVoiceRoute
+      summary: Return one active route snapshot with decrypted runtime credentials to the internal Agent only.
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Agent-only voice route snapshot.}
+        '409': {description: VOICE_ROUTE_NOT_READY.}
   /api/v1/admin/settings/speech:
     get:
       operationId: getAdminSpeechSettings
@@ -750,48 +819,6 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/UserNotFound'
-  /api/v1/client/settings/ai:
-    get:
-      operationId: getClientAISettings
-      summary: Return decrypted AI runtime settings for a desktop session. The key is not stored on the client disk.
-      security:
-        - bearerAuth: []
-      responses:
-        '200':
-          description: Desktop runtime AI settings, including the API key for in-memory use.
-          headers:
-            Cache-Control:
-              schema: {type: string, const: no-store}
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/ClientAISettings'}
-        '401':
-          $ref: '#/components/responses/Unauthenticated'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '503':
-          $ref: '#/components/responses/SettingsUnavailable'
-  /api/v1/client/settings/asr:
-    get:
-      operationId: getClientASRSettings
-      summary: Return decrypted speech transcription settings for a desktop session. The key is not stored on the client disk.
-      security:
-        - bearerAuth: []
-      responses:
-        '200':
-          description: Desktop runtime ASR settings, including the API key for in-memory use.
-          headers:
-            Cache-Control:
-              schema: {type: string, const: no-store}
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/ClientASRSettings'}
-        '401':
-          $ref: '#/components/responses/Unauthenticated'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '503':
-          $ref: '#/components/responses/SettingsUnavailable'
   /api/v1/client/settings/speech:
     get:
       operationId: getClientSpeechSettings
@@ -1657,6 +1684,35 @@ components:
             accessKeyId: {type: string, format: password}
             accessKeySecret: {type: string, format: password}
             aliyunToken: {type: string, format: password}
+    VoiceRouteInput:
+      type: object
+      additionalProperties: false
+      required: [name, mode]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 100}
+        mode: {type: string, enum: [cascaded, e2e]}
+        asrProviderId: {type: string}
+        asrModelId: {type: string}
+        llmProviderId: {type: string}
+        llmModelId: {type: string}
+        ttsProviderId: {type: string}
+        ttsModelId: {type: string}
+        voiceId: {type: string}
+        e2eProviderId: {type: string}
+        e2eModelId: {type: string}
+    VoiceRoute:
+      allOf:
+        - {$ref: '#/components/schemas/VoiceRouteInput'}
+        - type: object
+          required: [id, active, ready, status, configVersion, updatedAt]
+          properties:
+            id: {type: string}
+            active: {type: boolean}
+            ready: {type: boolean}
+            status: {type: string}
+            configVersion: {type: integer, minimum: 1}
+            updatedAt: {type: string, format: date-time}
+            updatedByUsername: {type: string}
     VoiceAllocation:
       type: object
       required: [status]

@@ -522,105 +522,22 @@ func TestClientRTCTokenIssuesLiveKitConnectionWithURL(t *testing.T) {
 	}
 }
 
-func TestClientAISettingsReturnsRuntimeKeyForDesktop(t *testing.T) {
-	router := NewRouter(Dependencies{
-		Authentication: &fakeAuthentication{
-			authenticate: func(rawToken, purpose string) (AuthenticatedSession, error) {
-				if rawToken != "desktop-token" || purpose != sessions.PurposeDesktop {
-					return AuthenticatedSession{}, ErrUnauthenticated
-				}
-				return AuthenticatedSession{
-					User:     users.User{ID: "op", Username: "admin", Role: users.RoleOperator, Status: users.StatusActive},
-					Session:  sessions.Session{ID: "session-desktop", UserID: "op", Purpose: sessions.PurposeDesktop},
-					RawToken: rawToken,
-				}, nil
-			},
-		},
-		SettingsAdmin: &fakeSettingsAdmin{clientAI: settings.ClientAI{
-			PublicAI: settings.PublicAI{
-				Configured: true,
-				Available:  true,
-				BaseURL:    "https://api.openai.com/v1",
-				Model:      "gpt-4o-mini",
-			},
-			APIKey: "sk-client-runtime",
-		}},
-	})
-	response := performRequest(t, router, http.MethodGet, "/api/v1/client/settings/ai", "", map[string]string{
-		"Authorization": "Bearer desktop-token",
-	})
-	if response.Code != http.StatusOK {
-		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
-	}
-	var body settings.ClientAI
-	decodeJSON(t, response, &body)
-	if body.APIKey != "sk-client-runtime" || body.Model != "gpt-4o-mini" || !body.Available {
-		t.Fatalf("client AI=%#v", body)
-	}
-}
-
-func TestClientAISettingsRejectsBrowserSession(t *testing.T) {
+func TestClientRuntimeModelSettingsAreNotExposed(t *testing.T) {
 	router := NewRouter(Dependencies{
 		Authentication: adminBrowserAuth(),
-		SettingsAdmin: &fakeSettingsAdmin{clientAI: settings.ClientAI{
-			APIKey: "sk-should-not-leak",
-		}},
-	})
-	response := performAdminCookieRequest(t, router, http.MethodGet, "/api/v1/client/settings/ai", "")
-	assertAPIError(t, response, http.StatusForbidden, "FORBIDDEN")
-	if strings.Contains(response.Body.String(), "sk-should-not-leak") {
-		t.Fatal("browser session received client AI key")
-	}
-}
-
-func TestClientASRSettingsReturnsRuntimeKeyForDesktop(t *testing.T) {
-	router := NewRouter(Dependencies{
-		Authentication: &fakeAuthentication{
-			authenticate: func(rawToken, purpose string) (AuthenticatedSession, error) {
-				if rawToken != "desktop-token" || purpose != sessions.PurposeDesktop {
-					return AuthenticatedSession{}, ErrUnauthenticated
-				}
-				return AuthenticatedSession{
-					User:     users.User{ID: "op", Username: "admin", Role: users.RoleOperator, Status: users.StatusActive},
-					Session:  sessions.Session{ID: "session-desktop", UserID: "op", Purpose: sessions.PurposeDesktop},
-					RawToken: rawToken,
-				}, nil
-			},
+		SettingsAdmin: &fakeSettingsAdmin{
+			clientAI:  settings.ClientAI{APIKey: "sk-ai-must-not-leak"},
+			clientASR: settings.ClientASR{APIKey: "sk-asr-must-not-leak"},
 		},
-		SettingsAdmin: &fakeSettingsAdmin{clientASR: settings.ClientASR{
-			Configured: true,
-			Available:  true,
-			BaseURL:    "https://speech.example.com/v1",
-			Model:      "whisper-1",
-			Language:   "zh",
-			APIKey:     "sk-asr-runtime",
-			Source:     "asr",
-		}},
 	})
-	response := performRequest(t, router, http.MethodGet, "/api/v1/client/settings/asr", "", map[string]string{
-		"Authorization": "Bearer desktop-token",
-	})
-	if response.Code != http.StatusOK {
-		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
-	}
-	var body settings.ClientASR
-	decodeJSON(t, response, &body)
-	if body.APIKey != "sk-asr-runtime" || body.BaseURL != "https://speech.example.com/v1" || !body.Available {
-		t.Fatalf("client ASR=%#v", body)
-	}
-}
-
-func TestClientASRSettingsRejectsBrowserSession(t *testing.T) {
-	router := NewRouter(Dependencies{
-		Authentication: adminBrowserAuth(),
-		SettingsAdmin: &fakeSettingsAdmin{clientASR: settings.ClientASR{
-			APIKey: "sk-asr-should-not-leak",
-		}},
-	})
-	response := performAdminCookieRequest(t, router, http.MethodGet, "/api/v1/client/settings/asr", "")
-	assertAPIError(t, response, http.StatusForbidden, "FORBIDDEN")
-	if strings.Contains(response.Body.String(), "sk-asr-should-not-leak") {
-		t.Fatal("browser session received client ASR key")
+	for _, path := range []string{"/api/v1/client/settings/ai", "/api/v1/client/settings/asr", "/api/v1/client/settings/pipeline"} {
+		response := performAdminCookieRequest(t, router, http.MethodGet, path, "")
+		if response.Code != http.StatusNotFound {
+			t.Fatalf("path=%s status=%d body=%s", path, response.Code, response.Body.String())
+		}
+		if strings.Contains(response.Body.String(), "must-not-leak") {
+			t.Fatalf("path=%s leaked runtime credentials", path)
+		}
 	}
 }
 

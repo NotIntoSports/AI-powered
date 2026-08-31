@@ -6,18 +6,14 @@
 
 - `/`：虚拟助手工作台；
 - `/stage`：给 OBS 采集的助手舞台；
-- Windows 内置中文 SAPI 生成本地语音，浏览器 Web Speech 作为兜底，不产生语音合成费用；
 - 支持上传自己的 JPEG、PNG、WebP、MP4 或 WebM 助手出镜素材；
 - 支持上传多份 PDF/Word 参考资料（可拖入文件夹），本场可勾选多份参与追问参考；
-- OpenAI-compatible 文本模型只负责根据对方回答生成追问；
-- 已问问题会进入提示词并在本地做近重复检测；重复时最多重试模型一次，
-  仍重复则使用不同角度的本地兜底问题。
+- 追问、转写和播报由 LiveKit Agent 按启用语音线路执行，不在 Windows 客户端直连模型。
 - OBS Virtual Camera 将舞台作为摄像头提供给腾讯会议、飞书、钉钉、Zoom、Teams 等软件。
 - Windows 客户端内置官方 OBS 32.2.1，并由 Electron 主进程通过 OBS WebSocket 一键创建场景、浏览器源并启停虚拟摄像头。
-- 控制台提供服务、模型、舞台、系统语音和画面素材五项自动自检。
-- 可从任意会议窗口或整个屏幕采集系统音频，分段转写为对方回答。
+- 会议系统音频经桌面桥接进入 LiveKit，由 Agent 转写并回复。
 - Windows 客户端通过统一字幕接口显示实时字幕；**实时会议字幕 / RTC 仅走自建 LiveKit**（火山 RTC 已下线）。
-- AI、ASR、TTS、管线模式（级联 / E2E）由管理端下发；客户端登录后消费 `GET /api/v1/client/settings/pipeline` 等接口，不再依赖本机手填主模型密钥作为主路径。
+- AI、ASR、TTS 由管理端「语音线路」统一配置，**LiveKit Agent 是唯一执行端**；客户端只传房间音频和版本化会话上下文，不再拉取模型密钥或本地跑 ASR/LLM/TTS。
 - 按住说话可暂停 AI，并由 OBS 将本机默认麦克风切入同一虚拟麦克风线路。
 
 Windows 客户端安装、接线、OBS/VB-CABLE 与已知限制见下方「OBS 设置」「Windows 快速启动」章节。
@@ -25,9 +21,10 @@ Windows 客户端安装、接线、OBS/VB-CABLE 与已知限制见下方「OBS �
 独立的管理 API 在 [server/control-api](server/control-api/README.md)：与本客户端分离，没有公开注册入口。管理员控制台在 [server/management-web](server/management-web/README.md)（本地 `http://127.0.0.1:3001`），用于：
 
 - 多条 OpenAI 兼容 **AI 线路**（增删改查、设默认、发现/启用模型）；
-- **模型目录**同步与分类（`llm|asr|tts|e2e|unknown`）；
-- **RTC / LiveKit** 连接与互动管线绑定（`cascaded` / `e2e`）；
-- **语音**（阿里云 NLS/CosyVoice 与豆包线路、系统音色试听）；
+- **模型目录**同步与分类（`llm|asr|tts|e2e|unknown`）；Token Plan 项须官方支持且本人验证成功后才能进入语音线路；
+- **RTC / LiveKit** 连接（URL、密钥、字幕语言、Agent 状态），不再绑定互动管线；
+- **语音线路**（可命名的级联 ASR+LLM+TTS 或端到端 Realtime，同一时间只启用一条）；
+- **语音凭据**（阿里云 NLS/CosyVoice 与豆包、系统音色试听）；
 - 账户、资料、对象存储、角色话术。
 
 自建 LiveKit + Agent 默认不随基础 compose 启动；需要字幕时在 `server/deploy`（或开发用 `server/control-api`）执行 `docker compose --profile livekit up -d`，再用 `npm run test:livekit-smoke` / `npm run test:livekit-load` 做 1 路和 10 路纯音频检查。
@@ -36,7 +33,7 @@ Windows 客户端安装、接线、OBS/VB-CABLE 与已知限制见下方「OBS �
 
 ```powershell
 Copy-Item .env.example .env.local
-# 桌面会话连管理端后，模型/语音/管线以管理端为准；本机 .env.local 仅作未登录回退
+# 桌面会话连管理端后，语音线路由 LiveKit Agent 读取；本机 .env.local 不作为生产模型主路径
 npm install
 npm run dev
 ```
@@ -52,31 +49,12 @@ npm run dev
 
 ## 对方语音转写
 
-工作台点击“开始听取对方”，选择会议窗口或整个屏幕，并勾选共享系统音频。
-应用每 10 秒上传一个独立片段，转写文本会追加到对方回答框，人工确认后再生成追问。
+会议音频由桌面桥接发布到 LiveKit 房间，**LiveKit Agent** 按当前启用的语音线路执行转写与回复：
 
-支持两种后端：
+- 级联线路：房间 PCM → ASR → 带会话上下文的 LLM → TTS → 再发布回房间；
+- 端到端线路：房间 PCM 进入 Realtime WebSocket（含阿里云 Qwen Audio Realtime），返回音频与字幕。
 
-- `TRANSCRIPTION_PROVIDER=openai`：调用 OpenAI-compatible `/audio/transcriptions`；
-- `TRANSCRIPTION_PROVIDER=whisper-cpp`：调用本机 `whisper-server /inference`，无按分钟费用。
-
-远程转写地址必须使用 HTTPS，本机 `localhost`/`127.0.0.1` 才允许 HTTP。转写地址与
-模型地址不同时必须配置 `TRANSCRIPTION_API_KEY`，系统不会把模型密钥转发给另一个服务；
-两者 Base URL 完全一致时才允许复用同一密钥。
-
-使用本地方案时，`whisper-server` 需要以 `--convert` 启动以接收浏览器 WebM/Opus，
-并要求系统可以调用 FFmpeg。浏览器建议使用最新版 Edge 或 Chrome。
-
-Windows 可直接自动安装和启动：
-
-```powershell
-npm run setup:whisper
-npm run start:whisper
-```
-
-安装脚本会从 whisper.cpp 最新官方 Release 下载 CPU x64 版本，下载并校验多语言
-`base` 模型，在缺少 FFmpeg 时调用 winget 安装，并自动把 `.env.local` 切换为
-`TRANSCRIPTION_PROVIDER=whisper-cpp`。
+客户端不再调用 `/api/transcribe`，也不再本机配置 Whisper / 模型密钥。字幕与回复走 LiveKit 数据通道；重试、修正、人工说话和纪要走 `agent.command.v1`。
 
 ## OBS 设置
 

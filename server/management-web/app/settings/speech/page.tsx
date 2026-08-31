@@ -16,9 +16,10 @@ import { COSYVOICE_VOICES, findCosyVoiceVoice } from "../../../lib/cosyvoice-voi
 import { VOLCENGINE_ASR_RESOURCES } from "../../../lib/volcengine-asr-resource-catalog";
 import { VOLCENGINE_TTS_RESOURCES } from "../../../lib/volcengine-tts-resource-catalog";
 import { ConfigStatus, SecretField } from "../config-status";
+import { VoiceRoutesPanel } from "./voice-routes-panel";
 
-type SpeechProvider = "volcengine" | "aliyun";
-type SectionId = "active" | "aliyun" | "tts" | "asr" | "volcengine";
+type SectionId = "aliyun" | "tts" | "asr" | "volcengine";
+type SpeechProvider = "aliyun" | "volcengine";
 
 type SectionFeedback = { ok?: string; error?: string };
 
@@ -36,8 +37,6 @@ function genderLabel(gender: string) {
 export default function SpeechSettingsPage() {
   const { me, error, setError } = useAdminSession();
   const [config, setConfig] = useState<PublicSpeechSettings | null>(null);
-  const [activeProvider, setActiveProvider] = useState<SpeechProvider>("aliyun");
-  const [savedActiveProvider, setSavedActiveProvider] = useState<SpeechProvider>("aliyun");
   const [appId, setAppId] = useState("");
   const [speakerId, setSpeakerId] = useState("");
   const [ttsResourceId, setTtsResourceId] = useState("seed-icl-2.0");
@@ -84,12 +83,8 @@ export default function SpeechSettingsPage() {
     [asrModelName]
   );
 
-  function apply(data: PublicSpeechSettings, preserveActiveDraft = false) {
+  function apply(data: PublicSpeechSettings) {
     setConfig(data);
-    if (data.activeProvider === "aliyun" || data.activeProvider === "volcengine") {
-      setSavedActiveProvider(data.activeProvider);
-      if (!preserveActiveDraft) setActiveProvider(data.activeProvider);
-    }
     setAppId(data.appId || "");
     setSpeakerId(data.speakerId || "");
     if (data.ttsResourceId) setTtsResourceId(data.ttsResourceId);
@@ -248,41 +243,12 @@ export default function SpeechSettingsPage() {
         setSectionFeedback(section, { error: message });
         return false;
       }
-      apply(result.body as PublicSpeechSettings, section !== "active");
+      apply(result.body as PublicSpeechSettings);
       clearSecrets();
       setSectionFeedback(section, { ok: successMessage });
       setEditing(null);
       snapshotRef.current = null;
       return true;
-    } finally {
-      setBusySection(null);
-    }
-  }
-
-  async function saveActive() {
-    setBusySection("active");
-    setSectionFeedback("active", {});
-    setError("");
-    try {
-      const result = await requestJSON("/api/v1/admin/settings/speech", {
-        method: "PUT",
-        body: JSON.stringify({ activeProvider })
-      });
-      if (!result.response.ok) {
-        setSectionFeedback("active", {
-          error: displayError(parseAPIError(result.body, "保存客户端线路失败"))
-        });
-        return;
-      }
-      const saved = result.body as PublicSpeechSettings;
-      setConfig(saved);
-      if (saved.activeProvider === "aliyun" || saved.activeProvider === "volcengine") {
-        setActiveProvider(saved.activeProvider);
-        setSavedActiveProvider(saved.activeProvider);
-      }
-      setSectionFeedback("active", {
-        ok: activeProvider === "aliyun" ? "Windows 客户端线路已切换为阿里云。" : "Windows 客户端线路已切换为豆包。"
-      });
     } finally {
       setBusySection(null);
     }
@@ -444,16 +410,6 @@ export default function SpeechSettingsPage() {
   }
 
   const agentReady = Boolean(config?.agentConsumer && config.aliyunAvailable);
-  const currentLabel =
-    activeProvider === "aliyun"
-      ? config?.aliyunAvailable
-        ? "客户端线路 · 阿里云已连通"
-        : "客户端线路 · 阿里云未就绪"
-      : config?.volcengineAvailable
-        ? "客户端线路 · 豆包已连通"
-        : "客户端线路 · 豆包未就绪";
-  const routeDirty = activeProvider !== savedActiveProvider;
-
   function Feedback({ section }: { section: SectionId }) {
     const item = feedback[section];
     if (!item?.ok && !item?.error) return null;
@@ -506,6 +462,8 @@ export default function SpeechSettingsPage() {
     <ConsoleShell me={me}>
       {error ? <p className="error">{error}</p> : null}
 
+      <VoiceRoutesPanel />
+
       <section className="card">
         <div className="card-head">
           <h2>LiveKit Agent 语音摘要</h2>
@@ -531,26 +489,6 @@ export default function SpeechSettingsPage() {
             <strong>豆包语音</strong>
             <span>{config?.volcengineAvailable ? "已连通" : "未配置或未连通"}</span>
           </div>
-        </div>
-        <Feedback section="active" />
-        <fieldset className="config-fieldset">
-          <label>
-            Windows 客户端语音线路
-            <select
-              value={activeProvider}
-              onChange={(event) => setActiveProvider(event.target.value as SpeechProvider)}
-            >
-              <option value="aliyun">阿里云智能语音</option>
-              <option value="volcengine">豆包语音（声音复刻）</option>
-            </select>
-          </label>
-          <p className="muted">只影响后续读取配置的新 Windows 客户端会话，不会修改 LiveKit Agent 互动管线。</p>
-          <p className="muted">{currentLabel}</p>
-        </fieldset>
-        <div className="row section-actions">
-          <button type="button" disabled={!routeDirty || busySection !== null} onClick={() => void saveActive()}>
-            {busySection === "active" ? "保存中…" : "保存客户端线路"}
-          </button>
         </div>
       </section>
 
@@ -857,7 +795,7 @@ export default function SpeechSettingsPage() {
           <span>豆包语音（声音复刻）</span>
           <ConfigStatus
             ready={Boolean(config?.volcengineAvailable)}
-            readyText={config?.ttsAvailable && activeProvider === "volcengine" ? "已连通 · 可复刻" : "鉴权可用"}
+            readyText={config?.ttsAvailable ? "已连通 · 可复刻" : "鉴权可用"}
             waitText="未连通"
           />
         </summary>

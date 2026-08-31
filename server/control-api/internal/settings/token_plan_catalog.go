@@ -18,6 +18,7 @@ import (
 )
 
 const TokenPlanPersonalCatalogURL = "https://help.aliyun.com/zh/model-studio/token-plan-personal-overview"
+const TokenPlanPersonalBaseURL = "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
 
 var (
 	tokenPlanModelPattern   = regexp.MustCompile(`(?i)\b(?:qwen[\w.-]+|wan[\w.-]+|deepseek[\w.-]+|glm-[\w.-]+|happyhorse-[\w.-]+)\b`)
@@ -152,7 +153,7 @@ func (s *Store) RecordOfficialTokenPlanCatalogFailure(ctx context.Context, warni
 }
 
 func IsTokenPlanPersonalBaseURL(baseURL string) bool {
-	return strings.EqualFold(strings.TrimRight(strings.TrimSpace(baseURL), "/"), "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1")
+	return strings.EqualFold(strings.TrimRight(strings.TrimSpace(baseURL), "/"), TokenPlanPersonalBaseURL)
 }
 
 func (s *Store) ReplaceOfficialTokenPlanCatalog(ctx context.Context, models []OfficialTokenPlanModel, sourceUpdated, hash string, syncedAt time.Time) error {

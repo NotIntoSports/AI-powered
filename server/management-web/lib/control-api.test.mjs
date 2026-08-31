@@ -122,23 +122,26 @@ test("sessions page separates online browser and desktop lines", () => {
   assert.doesNotMatch(page, /最近 15 分钟没有 API 活动会显示为离线/);
 });
 
-test("RTC pipeline save does not synchronize the client speech line", () => {
-  const page = readFileSync(join(root, "..", "app", "settings", "rtc", "page.tsx"), "utf8");
-  assert.doesNotMatch(page, /syncSpeechLine/);
-  assert.doesNotMatch(page, /requestJSON\("\/api\/v1\/admin\/settings\/speech"/);
-  assert.doesNotMatch(page, /管线已保存，但同步语音线路失败/);
-  assert.doesNotMatch(page, /保存仍会按厂商同步语音线路/);
-  assert.doesNotMatch(page, /保存后会同步「语音」页的当前线路/);
-  assert.match(page, /只管理 LiveKit Agent 使用的 ASR \/ LLM \/ TTS 或端对端模型/);
-  assert.match(page, /保存不会修改 Windows 客户端语音线路/);
-  assert.match(page, /已进行中的会话不会热切/);
+test("speech page owns saved voice routes and RTC page only owns LiveKit", () => {
+  const speech = readFileSync(join(root, "..", "app", "settings", "speech", "page.tsx"), "utf8");
+  const rtc = readFileSync(join(root, "..", "app", "settings", "rtc", "page.tsx"), "utf8");
+  const shell = readFileSync(join(root, "..", "app", "console-shell.tsx"), "utf8");
+  assert.match(speech, /VoiceRoutesPanel/);
+  assert.doesNotMatch(speech, /Windows 客户端语音线路/);
+  assert.doesNotMatch(rtc, /互动管线/);
+  assert.doesNotMatch(rtc, /pipelineMode|asrProviderId|e2eProviderId/);
+  assert.doesNotMatch(shell, /\/settings\/pipeline/);
 });
 
-test("Windows client speech route stays independently selectable and saves explicitly", () => {
-  const page = readFileSync(join(root, "..", "app", "settings", "speech", "page.tsx"), "utf8");
-  assert.match(page, /Windows 客户端语音线路/);
-  assert.match(page, /const routeDirty = activeProvider !== savedActiveProvider/);
-  assert.match(page, /disabled={!routeDirty \|\| busySection !== null}/);
-  assert.match(page, /保存客户端线路/);
-  assert.doesNotMatch(page, /<fieldset className="config-fieldset" disabled={editing !== "active"}>/);
+test("voice route manager supports route lifecycle and capability-specific model fields", () => {
+  const panel = readFileSync(join(root, "..", "app", "settings", "speech", "voice-routes-panel.tsx"), "utf8");
+  assert.match(panel, /voice-routes/);
+  assert.match(panel, /"activate" \| "test" \| "delete"/);
+  assert.match(panel, /ASR/);
+  assert.match(panel, /LLM/);
+  assert.match(panel, /TTS/);
+  assert.match(panel, /Realtime \/ E2E/);
+  assert.match(panel, /音色.*<select/s);
+  assert.doesNotMatch(panel, /音色<input/);
+  assert.match(panel, /model\.runtimeVerified/);
 });

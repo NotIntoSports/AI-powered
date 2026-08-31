@@ -14,17 +14,25 @@ import (
 )
 
 type CatalogEntry struct {
-	ID           string     `json:"id"`
-	ProviderID   string     `json:"providerId"`
-	ProviderName string     `json:"providerName"`
-	ModelID      string     `json:"modelId"`
-	BaseURL      string     `json:"baseUrl"`
-	Capability   string     `json:"capability"`
-	Enabled      bool       `json:"enabled"`
-	Label        string     `json:"label"`
-	DisplayName  string     `json:"displayName,omitempty"`
-	ClassifiedBy string     `json:"classifiedBy,omitempty"`
-	ClassifiedAt *time.Time `json:"classifiedAt,omitempty"`
+	ID              string     `json:"id"`
+	ProviderID      string     `json:"providerId"`
+	ProviderName    string     `json:"providerName"`
+	ModelID         string     `json:"modelId"`
+	BaseURL         string     `json:"baseUrl"`
+	Capability      string     `json:"capability"`
+	Enabled         bool       `json:"enabled"`
+	Label           string     `json:"label"`
+	DisplayName     string     `json:"displayName,omitempty"`
+	RuntimeVerified bool       `json:"runtimeVerified"`
+	ClassifiedBy    string     `json:"classifiedBy,omitempty"`
+	ClassifiedAt    *time.Time `json:"classifiedAt,omitempty"`
+}
+
+func catalogRuntimeVerified(baseURL string, official bool, verificationStatus string) bool {
+	if !IsTokenPlanPersonalBaseURL(baseURL) {
+		return true
+	}
+	return official && verificationStatus == "success"
 }
 
 type CatalogSyncResult struct {
@@ -135,9 +143,12 @@ func (s *Store) ListCatalog(ctx context.Context, capability, query string) ([]Ca
 		select
 			dm.id, coalesce(dm.provider_id, ''), coalesce(p.name, dm.provider_id, ''),
 			dm.model_id, dm.base_url, coalesce(dm.capability, 'unknown'), dm.enabled,
-			coalesce(dm.display_name, ''), coalesce(dm.classified_by, ''), dm.classified_at
+			coalesce(dm.display_name, ''), coalesce(dm.classified_by, ''), dm.classified_at,
+			(tpo.model_id is not null), coalesce(tps.verification_status, 'untested')
 		from discovered_models as dm
 		left join ai_provider_configs as p on p.id = dm.provider_id
+		left join token_plan_official_models as tpo on tpo.model_id = dm.model_id
+		left join token_plan_model_status as tps on tps.provider_id = dm.provider_id and tps.model_id = dm.model_id
 		where ($1 = '' or dm.capability = $1)
 		  and (
 			$2 = '' or
@@ -156,13 +167,17 @@ func (s *Store) ListCatalog(ctx context.Context, capability, query string) ([]Ca
 	for rows.Next() {
 		var e CatalogEntry
 		var classifiedAt *time.Time
+		var official bool
+		var verificationStatus string
 		if err := rows.Scan(
 			&e.ID, &e.ProviderID, &e.ProviderName, &e.ModelID, &e.BaseURL,
 			&e.Capability, &e.Enabled, &e.DisplayName, &e.ClassifiedBy, &classifiedAt,
+			&official, &verificationStatus,
 		); err != nil {
 			return nil, ErrStore
 		}
 		e.ClassifiedAt = classifiedAt
+		e.RuntimeVerified = catalogRuntimeVerified(e.BaseURL, official, verificationStatus)
 		if e.ProviderName == "" {
 			e.ProviderName = e.ProviderID
 		}

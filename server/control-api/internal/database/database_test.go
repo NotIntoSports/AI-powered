@@ -173,7 +173,7 @@ func TestMigrateCreatesIdentityTables(t *testing.T) {
 		t.Fatalf("current schema = %q, want %q", currentSchema, testPool.schema)
 	}
 
-	for _, table := range []string{"users", "user_sessions", "devices", "audit_logs", "ai_provider_configs", "rtc_configs"} {
+	for _, table := range []string{"users", "user_sessions", "devices", "audit_logs", "ai_provider_configs", "rtc_configs", "voice_routes"} {
 		var exists bool
 		err := testPool.QueryRow(context.Background(), `select to_regclass($1 || '.' || $2) is not null`, testPool.schema, table).Scan(&exists)
 		if err != nil || !exists {

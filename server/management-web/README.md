@@ -14,18 +14,17 @@ via `INITIAL_ADMIN_*`. Change the password after first login.
 | Overview | `/overview` | Online accounts / current session lines |
 | Users | `/users` | Create, disable, reset password, revoke sessions, voice bind visibility |
 | Models | `/settings/ai` | **Multiple** OpenAI-compatible AI lines (CRUD, activate default, discover models, enable/disable) |
-| RTC | `/settings/rtc` | **LiveKit only** (火山 RTC removed). Connection + interactive pipeline binding: `cascaded` (ASR+LLM+TTS) or `e2e`, with searchable catalog comboboxes and TTS voice preview |
-| Speech | `/settings/speech` | Active provider `aliyun` or `volcengine` (豆包); Alibaba CosyVoice/NLS presets + preview; ASR/TTS params |
-| Pipeline | `/settings/pipeline` | High-level mode / cascaded TTS provider / E2E provider toggles (complements RTC page binding) |
+| RTC | `/settings/rtc` | **LiveKit only** (火山 RTC removed). URL, API Key/Secret, subtitle language, enable flag, connection test, Agent status |
+| Speech | `/settings/speech` | **Voice routes** (create/edit/copy/test/activate one cascaded or e2e route) plus Alibaba/豆包 credentials and CosyVoice preview |
 | Storage | `/settings/storage` | Tencent COS for resumes |
 | Roles | `/settings/roles` | Locked role prompts (HR / assistant / interviewer / candidate) |
 | Materials | `/resumes` | Upload / index / download reference docs |
 
-Desktop clients consume encrypted-at-rest settings after login:
+Desktop clients no longer receive model keys or pipeline endpoints. After login they:
 
-- `GET /api/v1/client/settings/pipeline` — mode + bound models (no silent E2E→cascaded fallback)
-- `GET /api/v1/client/settings/ai` / `asr` / `speech`
-- `POST /api/v1/client/rtc/token` — LiveKit JWT only
+- join LiveKit with `POST /api/v1/client/rtc/token` (LiveKit JWT only);
+- send versioned session context and `agent.command.v1` over data channels;
+- keep `/api/v1/client/settings/speech` only for cloned-voice allocation, not session ASR/TTS.
 
 ## Run locally
 

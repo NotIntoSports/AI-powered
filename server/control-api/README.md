@@ -47,16 +47,19 @@ empty knowledge until the index is ready.
 - **AI providers**: multiple OpenAI-compatible lines under
   `/api/v1/admin/settings/ai/providers` (CRUD, activate, per-line discover/models).
 - **Model catalog**: `/api/v1/admin/settings/catalog` sync + classify
-  (`llm|asr|tts|e2e|unknown`); used by the RTC binding UI.
+  (`llm|asr|tts|e2e|unknown`). Token Plan items are selectable only when
+  officially listed and user-verified.
 - **RTC**: LiveKit only (火山 RTC columns dropped in migration
-  `00013_drop_volcengine_rtc`). Token issue is LiveKit JWT.
-- **Interactive pipeline**: admin `/settings/pipeline` + RTC page binding;
-  clients/agents read `/api/v1/client/settings/pipeline` and
-  `/api/v1/agent/settings/*` (agent calls need `AGENT_INTERNAL_TOKEN`).
-- **Speech**: Alibaba NLS/CosyVoice and 豆包; preview via
+  `00013_drop_volcengine_rtc`). Token issue is LiveKit JWT. The RTC page no
+  longer binds ASR/LLM/TTS models.
+- **Voice routes**: admin CRUD/activate/test under
+  `/api/v1/admin/settings/voice-routes`; the Agent reads the active snapshot
+  from `GET /api/v1/agent/settings/voice-route` (`AGENT_INTERNAL_TOKEN`).
+  One active route at a time; switching affects new rooms only.
+- **Speech credentials**: Alibaba NLS/CosyVoice and 豆包; preview via
   `POST /api/v1/admin/settings/speech/preview`.
-- Migrations of note: `00014_ai_providers_multi`, `00015_model_catalog`
-  (after `00013_drop_volcengine_rtc`).
+- Migrations of note: `00014_ai_providers_multi`, `00015_model_catalog`,
+  `00016_token_plan_personal_catalog`, `00017_voice_routes`.
 
 Optional LiveKit SFU + subtitle/E2E agent (compose profile `livekit`):
 
@@ -66,10 +69,10 @@ npm run test:livekit-smoke
 npm run test:livekit-load
 ```
 
-`livekit-agent` loads speech/pipeline/AI from this API when
-`CONTROL_API_ORIGIN` + `AGENT_INTERNAL_TOKEN` are set. Cascaded mode needs
-Alibaba NLS env (or equivalent from agent settings). Do not run local
-Whisper/FunASR on the 4C8G host.
+`livekit-agent` loads the active voice-route snapshot from this API when
+`CONTROL_API_ORIGIN` + `AGENT_INTERNAL_TOKEN` are set. Cascaded mode uses
+the route's ASR/LLM/TTS endpoints (NLS credentials ride along when the
+provider is `speech:aliyun`). Do not run local Whisper/FunASR on the 4C8G host.
 
 The API process is `control-api`. `control-api-admin` is a one-shot bootstrap
 profile and is not started by `docker compose up -d`.

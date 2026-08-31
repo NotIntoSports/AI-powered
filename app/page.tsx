@@ -3,22 +3,9 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import type { InterviewSession } from "../lib/interview";
 import { assistantRoleIds, builtInRoleProfiles, transcriptSpeakerLabel, type AssistantRole } from "../lib/assistant-role";
-import {
-  advanceEchoGuard,
-  armEchoGuard as createEchoGuard,
-  idleEchoGuard,
-  type EchoGuardState
-} from "../features/audio/echo-guard";
-import { canAutoSubmitTranscription } from "../features/audio/transcription-turn";
-import type { MicVAD } from "@ricky0123/vad-web/dist/real-time-vad";
-import {
-  loadRemoteMonitorEnabled,
-  subscribeRemoteMonitor
-} from "../features/audio/remote-monitor";
-import { useWorkspaceTts } from "../features/audio/workspace-tts";
 import { InterventionControls } from "../features/intervention/intervention-controls";
 import { MeetingBridgeCard } from "../features/rtc/meeting-bridge-card";
-import { useAutoAnswerSubmit } from "../features/rtc/auto-answer-submit";
+import { sendAgentCommand } from "../features/rtc/bridge-session";
 import { useAgentE2eTurn } from "../features/rtc/agent-e2e-turn";
 import {
   getAutoBridgeStatus,
@@ -39,7 +26,6 @@ import { setManagementNetwork } from "../features/rtc/network-quality";
 
 type Diagnostics = {
   server: boolean;
-  modelConfigured: boolean;
   stageConnected: boolean;
   ttsSupported: boolean;
   voiceCount: number;
@@ -49,13 +35,7 @@ type Diagnostics = {
   ttsError: string;
   lastSpeechAt: number;
   mediaReady: boolean;
-  transcriptionConfigured: boolean;
-  transcriptionReady: boolean;
-  transcriptionSource: "aliyun" | "volcengine" | "management" | "environment" | "whisper-cpp" | "none";
 };
-
-// 采集开启后超过该时长仍无任何语音片段时，提示用户检查共享音频/对方是否说话。
-const CAPTURE_SILENCE_WARN_MS = 45_000;
 
 const emptySession: InterviewSession = {
   sessionId: "",
@@ -101,7 +81,6 @@ export default function ConsolePage() {
   const [busy, setBusy] = useState(false);
   const [diagnostics, setDiagnostics] = useState<Diagnostics>({
     server: false,
-    modelConfigured: false,
     stageConnected: false,
     ttsSupported: false,
     voiceCount: 0,
@@ -110,31 +89,10 @@ export default function ConsolePage() {
     ttsState: "idle",
     ttsError: "",
     lastSpeechAt: 0,
-    mediaReady: false,
-    transcriptionConfigured: false,
-    transcriptionReady: false,
-    transcriptionSource: "none"
+    mediaReady: false
   });
-  const captureActiveRef = useRef(false);
-  const captureStreamRef = useRef<MediaStream | null>(null);
-  const monitorAudioRef = useRef<HTMLAudioElement | null>(null);
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const vadRef = useRef<MicVAD | null>(null);
-  const vadSpeechRevisionRef = useRef(0);
-  const vadCommandRef = useRef<Promise<void>>(Promise.resolve());
-  const echoGuardRef = useRef<EchoGuardState>(idleEchoGuard);
-  const echoGuardTimerRef = useRef<number | null>(null);
-  const automaticFollowupRef = useRef(false);
-  const stageConnectedRef = useRef(false);
   const sessionRef = useRef(emptySession);
-  const segmentTimerRef = useRef<number | null>(null);
-  const uploadQueueRef = useRef<Promise<void>>(Promise.resolve());
-  const lastCaptureActivityRef = useRef(0);
-  const [capturingAudio, setCapturingAudio] = useState(false);
-  const [pendingTranscriptions, setPendingTranscriptions] = useState(0);
-  const [audioSource, setAudioSource] = useState("");
   const [automaticFollowup, setAutomaticFollowup] = useState(true);
-  const [pipelineMode, setPipelineMode] = useState<"cascaded" | "e2e">("cascaded");
   const [autoBridgeStatus, setAutoBridgeStatus] = useState<AutoBridgeStatus>(getAutoBridgeStatus);
   const [autoStartPending, setAutoStartPending] = useState(false);
   const [autoStartError, setAutoStartError] = useState("");
@@ -143,18 +101,13 @@ export default function ConsolePage() {
   const [subtitleLines, setSubtitleLines] = useState<SubtitleLine[]>([]);
   const [answerPending, setAnswerPending] = useState(false);
   const [pendingFinalText, setPendingFinalText] = useState("");
-  const [echoGuardActive, setEchoGuardActive] = useState(false);
-  const [candidateSpeaking, setCandidateSpeaking] = useState(false);
-  const [captureSilent, setCaptureSilent] = useState(false);
   const [error, setError] = useState("");
   const [outputMode, setOutputMode] = useState<OutputMode>("real");
   const [uploadOpen, setUploadOpen] = useState(false);
   const autoStartAttemptedRef = useRef("");
   const [snapshotReadiness, setSnapshotReadiness] = useState(() => getSnapshotReadiness({}));
-  useWorkspaceTts({ session, sessionLoaded });
   const readiness = getInterviewReadiness({
     outputMode,
-    modelConfigured: diagnostics.modelConfigured,
     stageConnected: diagnostics.stageConnected,
     mediaReady: diagnostics.mediaReady,
     ...snapshotReadiness
@@ -166,12 +119,6 @@ export default function ConsolePage() {
       .then(setSession)
       .catch(() => setError("无法读取当前互动会话"))
       .finally(() => setSessionLoaded(true));
-    void fetch("/api/settings/pipeline", { cache: "no-store" })
-      .then((response) => response.json())
-      .then((data) => {
-        if (data?.mode === "e2e") setPipelineMode("e2e");
-      })
-      .catch(() => undefined);
     setSnapshotReadiness(getSnapshotReadiness(loadReadinessSnapshot()));
     setOutputMode(loadOutputMode());
     return subscribeOutputMode(() => setOutputMode(loadOutputMode()));
@@ -194,17 +141,11 @@ export default function ConsolePage() {
   }, [session]);
 
   useEffect(() => {
-    automaticFollowupRef.current = automaticFollowup;
-  }, [automaticFollowup]);
-
-  useEffect(() => {
     if (!sessionLoaded) return;
     const decision = decideAutoSessionStart({
       bridgeState: autoBridgeStatus.state,
       bridgeSessionKey: autoBridgeStatus.sessionKey,
       sessionStatus: session.status,
-      modelConfigured: diagnostics.modelConfigured,
-      stageConnected: diagnostics.stageConnected,
       assistantRole,
       pending: autoStartPending,
       attemptedSessionKey: autoStartAttemptedRef.current
@@ -238,8 +179,6 @@ export default function ConsolePage() {
     autoStartRetry,
     candidateName,
     consentConfirmed,
-    diagnostics.modelConfigured,
-    diagnostics.stageConnected,
     interviewFocus,
     jobDescription,
     resumeIds,
@@ -249,143 +188,10 @@ export default function ConsolePage() {
     sessionLoaded
   ]);
 
-  // 采集开启后长时间没有任何语音片段（未触发 VAD/未产生转写）时提示静默，避免采集失败无感知。
-  useEffect(() => {
-    if (!capturingAudio) {
-      setCaptureSilent(false);
-      return;
-    }
-    const timer = window.setInterval(() => {
-      const lastActivity = lastCaptureActivityRef.current;
-      setCaptureSilent(lastActivity > 0 && Date.now() - lastActivity > CAPTURE_SILENCE_WARN_MS);
-    }, 5_000);
-    return () => window.clearInterval(timer);
-  }, [capturingAudio]);
-
-  // 采集状态接入 stage-status 上报，舞台/服务端可看到“未采集/采集中/静默”等静默失败。
-  // 采集期间每 5 秒心跳保活，服务端 8 秒未刷新视为过期。
-  useEffect(() => {
-    const report = () => {
-      const captureState = capturingAudio ? (captureSilent ? "silent" : "capturing") : "off";
-      void fetch("/api/stage-status", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          captureState,
-          captureSource: capturingAudio ? audioSource : ""
-        })
-      }).catch(() => undefined);
-    };
-    report();
-    if (!capturingAudio) return;
-    const timer = window.setInterval(report, 5_000);
-    return () => window.clearInterval(timer);
-  }, [capturingAudio, captureSilent, audioSource]);
-
-  useEffect(() => {
-    stageConnectedRef.current = diagnostics.stageConnected;
-  }, [diagnostics.stageConnected]);
-
-  useEffect(() => {
-    function applyMonitor() {
-      const audio = monitorAudioRef.current;
-      if (!audio) return;
-      audio.muted = !loadRemoteMonitorEnabled();
-      if (!audio.muted && audio.paused) {
-        void audio.play().catch(() => undefined);
-      }
-    }
-    applyMonitor();
-    return subscribeRemoteMonitor(applyMonitor);
-  }, []);
-
-  function attachRemoteMonitor(stream: MediaStream) {
-    stopRemoteMonitor();
-    const audioTracks = stream.getAudioTracks();
-    if (!audioTracks.length) return;
-    const audio = new Audio();
-    audio.srcObject = new MediaStream(audioTracks);
-    audio.autoplay = true;
-    audio.muted = !loadRemoteMonitorEnabled();
-    monitorAudioRef.current = audio;
-    if (!audio.muted) {
-      void audio.play().catch(() => undefined);
-    }
-  }
-
-  function stopRemoteMonitor() {
-    const audio = monitorAudioRef.current;
-    monitorAudioRef.current = null;
-    if (!audio) return;
-    audio.pause();
-    audio.srcObject = null;
-  }
-
-  function queueVadCommand(command: "pause" | "start") {
-    const vad = vadRef.current;
-    if (!vad) return;
-    vadCommandRef.current = vadCommandRef.current
-      .catch(() => undefined)
-      .then(async () => {
-        if (vadRef.current !== vad) return;
-        await vad[command]();
-      })
-      .catch((cause) => {
-        setError(cause instanceof Error ? cause.message : "自动收音状态切换失败");
-      });
-  }
-
-  function releaseEchoGuard() {
-    if (echoGuardTimerRef.current !== null) {
-      window.clearTimeout(echoGuardTimerRef.current);
-      echoGuardTimerRef.current = null;
-    }
-    if (echoGuardRef.current.phase === "idle") return;
-    echoGuardRef.current = idleEchoGuard;
-    setEchoGuardActive(false);
-    setCandidateSpeaking(false);
-    if (captureActiveRef.current) queueVadCommand("start");
-  }
-
-  function armEchoGuard(nextSession: InterviewSession) {
-    if (
-      !automaticFollowupRef.current ||
-      !captureActiveRef.current ||
-      !stageConnectedRef.current ||
-      !vadRef.current ||
-      nextSession.revision <= sessionRef.current.revision ||
-      !nextSession.speakingText
-    ) return;
-
-    const transition = createEchoGuard(Date.now());
-    echoGuardRef.current = transition.state;
-    setEchoGuardActive(true);
-    setCandidateSpeaking(false);
-    if (transition.command) queueVadCommand(transition.command);
-    if (echoGuardTimerRef.current !== null) {
-      window.clearTimeout(echoGuardTimerRef.current);
-    }
-    echoGuardTimerRef.current = window.setTimeout(releaseEchoGuard, 30_000);
-  }
-
   function applySessionResult(nextSession: InterviewSession) {
-    armEchoGuard(nextSession);
     sessionRef.current = nextSession;
     setSession(nextSession);
   }
-
-  useEffect(() => {
-    const transition = advanceEchoGuard(
-      echoGuardRef.current,
-      diagnostics.ttsState,
-      Date.now()
-    );
-    if (transition.command === "start") {
-      releaseEchoGuard();
-    } else {
-      echoGuardRef.current = transition.state;
-    }
-  }, [diagnostics.ttsState, diagnostics.lastSpeechAt]);
 
   useEffect(() => {
     let active = true;
@@ -400,7 +206,6 @@ export default function ConsolePage() {
         if (!active) return;
         setDiagnostics({
           server: healthResponse.ok && health.status === "ok",
-          modelConfigured: Boolean(health.modelConfigured),
           stageConnected: Boolean(stage.connected),
           ttsSupported: Boolean(stage.ttsSupported),
           voiceCount: Number(stage.voiceCount || 0),
@@ -411,10 +216,7 @@ export default function ConsolePage() {
             : "idle",
           ttsError: String(stage.ttsError || ""),
           lastSpeechAt: Number(stage.lastSpeechAt || 0),
-          mediaReady: Boolean(stage.mediaReady),
-          transcriptionConfigured: Boolean(health.transcriptionConfigured),
-          transcriptionReady: Boolean(health.transcriptionReady),
-          transcriptionSource: health.transcriptionSource === "aliyun" || health.transcriptionSource === "volcengine" || health.transcriptionSource === "management" || health.transcriptionSource === "environment" || health.transcriptionSource === "whisper-cpp" ? health.transcriptionSource : "none"
+          mediaReady: Boolean(stage.mediaReady)
         });
         setManagementNetwork({
           reachable: Boolean(health.managementReachable),
@@ -435,8 +237,6 @@ export default function ConsolePage() {
     };
   }, []);
 
-  useEffect(() => () => stopAudioCapture(), []);
-
   async function act(payload: object) {
     setBusy(true);
     setError("");
@@ -451,32 +251,8 @@ export default function ConsolePage() {
     }
   }
 
-  // 字幕 final 行自动作为对方回答提交（取代已移除的手动转写输入框）。
-  useAutoAnswerSubmit({
-    enabled: automaticFollowup && pipelineMode !== "e2e",
-    processing: busy || answerPending,
-    aiSpeaking: diagnostics.ttsState === "speaking",
-    getGate: () => ({
-      sessionStatus: sessionRef.current.status,
-      currentRevision: sessionRef.current.revision,
-      lastTranscriptRole: sessionRef.current.transcript.at(-1)?.role
-    }),
-    onAnswer: (text) => {
-      setAnswerPending(true);
-      setPendingFinalText(text);
-      void act({ action: "answer", answer: text, expectedRevision: sessionRef.current.revision })
-        .finally(() => {
-          setAnswerPending(false);
-          setPendingFinalText("");
-        });
-    },
-    onBlocked: (message) => {
-      if (sessionRef.current.status === "running") setError(message);
-    }
-  });
-
   useAgentE2eTurn({
-    enabled: automaticFollowup && pipelineMode === "e2e",
+    enabled: automaticFollowup,
     processing: busy || answerPending,
     aiSpeaking: diagnostics.ttsState === "speaking",
     getExpectedRevision: () => sessionRef.current.revision,
@@ -502,8 +278,26 @@ export default function ConsolePage() {
     event.preventDefault();
     const value = manualText.trim();
     if (!value) return;
-    setManualText("");
-    void act({ action: "say", text: value });
+    setBusy(true); setError("");
+    void sendAgentCommand({ id: crypto.randomUUID(), action: "say", text: value, expectedRevision: sessionRef.current.revision, context: agentCommandContext() })
+      .then(() => act({ action: "say", text: value }))
+      .then(() => setManualText(""))
+      .catch((cause) => setError(cause instanceof Error ? cause.message : "Agent 播报失败"))
+      .finally(() => setBusy(false));
+  }
+
+  function agentCommandContext() {
+    const current = sessionRef.current;
+    return { v: 1 as const, role: current.assistantRole, topic: current.roleName, history: current.transcript.slice(-20).map((item) => ({ role: item.role, text: item.text })), resumeIds: current.resumeIds || [] };
+  }
+
+  function retryLastQuestion() {
+    const revision = sessionRef.current.revision;
+    setBusy(true); setError("");
+    void sendAgentCommand({ id: crypto.randomUUID(), action: "retry", expectedRevision: revision, context: agentCommandContext() })
+      .then((result) => act({ action: "agentRetryResult", question: String(result.result.question || ""), expectedRevision: revision }))
+      .catch((cause) => setError(cause instanceof Error ? cause.message : "Agent 重试失败"))
+      .finally(() => setBusy(false));
   }
 
   function correctLastAnswer() {
@@ -519,223 +313,18 @@ export default function ConsolePage() {
       currentAnswer.text
     );
     if (corrected === null || !corrected.trim() || corrected.trim() === currentAnswer.text) return;
-    void act({ action: "correctLastAnswer", answer: corrected.trim() });
-  }
-
-  async function startAudioCapture() {
-    setError("");
-    if (!navigator.mediaDevices?.getDisplayMedia || !window.MediaRecorder) {
-      setError("当前浏览器不支持系统音频采集，请使用最新版 Edge 或 Chrome");
-      return;
-    }
-    try {
-      const options = {
-        video: true,
-        audio: true,
-        systemAudio: "include",
-        selfBrowserSurface: "exclude"
-      } as DisplayMediaStreamOptions;
-      const stream = await navigator.mediaDevices.getDisplayMedia(options);
-      const audioTrack = stream.getAudioTracks()[0];
-      if (!audioTrack) {
-        stream.getTracks().forEach((track) => track.stop());
-        throw new Error("没有采集到音频。请选择整个屏幕或会议窗口，并勾选“共享系统音频”");
-      }
-      captureStreamRef.current = stream;
-      captureActiveRef.current = true;
-      lastCaptureActivityRef.current = Date.now();
-      setCapturingAudio(true);
-      setAudioSource(audioTrack.label || "系统音频");
-      attachRemoteMonitor(stream);
-      stream.getVideoTracks()[0]?.addEventListener("ended", stopAudioCapture, { once: true });
-      if (automaticFollowup) {
-        await startVoiceActivityDetection(stream);
-      } else {
-        recordAudioSegment(stream);
-      }
-    } catch (cause) {
-      if (cause instanceof DOMException && cause.name === "NotAllowedError") {
-        setError("已取消音频共享");
-      } else {
-        setError(cause instanceof Error ? cause.message : "无法开始音频采集");
-      }
-      stopAudioCapture();
-    }
-  }
-
-  async function startVoiceActivityDetection(stream: MediaStream) {
-    const [{ MicVAD }, { encodeWAV }] = await Promise.all([
-      import("@ricky0123/vad-web/dist/real-time-vad"),
-      import("@ricky0123/vad-web/dist/utils")
-    ]);
-    const vad = await MicVAD.new({
-      model: "v5",
-      startOnLoad: false,
-      baseAssetPath: "/vendor/vad/",
-      onnxWASMBasePath: "/vendor/vad/",
-      redemptionMs: 2_500,
-      minSpeechMs: 900,
-      preSpeechPadMs: 350,
-      getStream: async () => new MediaStream(stream.getAudioTracks()),
-      pauseStream: async () => undefined,
-      resumeStream: async () => new MediaStream(stream.getAudioTracks()),
-      onSpeechStart: () => {
-        vadSpeechRevisionRef.current = sessionRef.current.revision;
-        lastCaptureActivityRef.current = Date.now();
-        setCandidateSpeaking(true);
-      },
-      onVADMisfire: () => {
-        vadSpeechRevisionRef.current = 0;
-        setCandidateSpeaking(false);
-      },
-      onSpeechEnd: (audio) => {
-        setCandidateSpeaking(false);
-        const wav = encodeWAV(audio);
-        const capturedRevision = vadSpeechRevisionRef.current || sessionRef.current.revision;
-        vadSpeechRevisionRef.current = 0;
-        queueTranscription(
-          new Blob([wav], { type: "audio/wav" }),
-          "audio/wav",
-          true,
-          capturedRevision
-        );
-      }
-    });
-    vadRef.current = vad;
-    await vad.start();
-  }
-
-  function recordAudioSegment(source: MediaStream) {
-    if (!captureActiveRef.current) return;
-    const audioStream = new MediaStream(source.getAudioTracks());
-    const mimeType = [
-      "audio/webm;codecs=opus",
-      "audio/webm",
-      "audio/mp4"
-    ].find((type) => MediaRecorder.isTypeSupported(type));
-    if (!mimeType) {
-      setError("当前浏览器没有可用的音频录制格式");
-      stopAudioCapture();
-      return;
-    }
-
-    const chunks: Blob[] = [];
-    const recorder = new MediaRecorder(audioStream, {
-      mimeType,
-      audioBitsPerSecond: 64_000
-    });
-    recorderRef.current = recorder;
-    recorder.ondataavailable = (event) => {
-      if (event.data.size > 0) chunks.push(event.data);
-    };
-    recorder.onerror = () => {
-      setError("系统音频录制中断");
-      stopAudioCapture();
-    };
-    recorder.onstop = () => {
-      if (segmentTimerRef.current !== null) {
-        window.clearTimeout(segmentTimerRef.current);
-        segmentTimerRef.current = null;
-      }
-      const blob = new Blob(chunks, { type: mimeType });
-      if (blob.size > 512) queueTranscription(blob, mimeType);
-      if (captureActiveRef.current) recordAudioSegment(source);
-    };
-    recorder.start();
-    segmentTimerRef.current = window.setTimeout(() => {
-      if (recorder.state === "recording") recorder.stop();
-    }, 10_000);
-  }
-
-  function queueTranscription(
-    blob: Blob,
-    mimeType: string,
-    submitAutomatically = false,
-    capturedRevision = sessionRef.current.revision
-  ) {
-    setPendingTranscriptions((count) => count + 1);
-    lastCaptureActivityRef.current = Date.now();
-    uploadQueueRef.current = uploadQueueRef.current
-      .then(async () => {
-        const extension = mimeType.includes("mp4") ? "mp4" : "webm";
-        const form = new FormData();
-        form.append("audio", new File([blob], `meeting-${Date.now()}.${extension}`, { type: mimeType }));
-        const response = await fetch("/api/transcribe", { method: "POST", body: form });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.message || "语音转写失败");
-        const text = String(data.text || "").trim();
-        if (text) {
-          if (submitAutomatically) {
-            const current = sessionRef.current;
-            if (!canAutoSubmitTranscription({
-              sessionStatus: current.status,
-              currentRevision: current.revision,
-              capturedRevision,
-              lastTranscriptRole: current.transcript.at(-1)?.role
-            })) {
-              if (current.status === "running") {
-                setError("检测到对话轮次已变化，这段转写未自动提交，请稍后重试。");
-              }
-              return;
-            }
-            setBusy(true);
-            try {
-              applySessionResult(await sessionAction({
-                action: "answer",
-                answer: text,
-                expectedRevision: capturedRevision
-              }));
-            } catch (cause) {
-              throw cause;
-            } finally {
-              setBusy(false);
-            }
-          }
-        }
-      })
-      .catch((cause) => {
-        setError(cause instanceof Error ? cause.message : "语音转写失败");
-      })
-      .finally(() => {
-        setPendingTranscriptions((count) => Math.max(0, count - 1));
-      });
-  }
-
-  function stopAudioCapture() {
-    captureActiveRef.current = false;
-    lastCaptureActivityRef.current = 0;
-    setCaptureSilent(false);
-    if (segmentTimerRef.current !== null) {
-      window.clearTimeout(segmentTimerRef.current);
-      segmentTimerRef.current = null;
-    }
-    const recorder = recorderRef.current;
-    if (recorder?.state === "recording") recorder.stop();
-    recorderRef.current = null;
-    const vad = vadRef.current;
-    vadRef.current = null;
-    if (echoGuardTimerRef.current !== null) {
-      window.clearTimeout(echoGuardTimerRef.current);
-      echoGuardTimerRef.current = null;
-    }
-    echoGuardRef.current = idleEchoGuard;
-    setEchoGuardActive(false);
-    if (vad) void vad.destroy();
-    stopRemoteMonitor();
-    captureStreamRef.current?.getTracks().forEach((track) => track.stop());
-    captureStreamRef.current = null;
-    setCapturingAudio(false);
-    setAudioSource("");
-    setCandidateSpeaking(false);
-    vadSpeechRevisionRef.current = 0;
+    const revision = sessionRef.current.revision;
+    setBusy(true); setError("");
+    void sendAgentCommand({ id: crypto.randomUUID(), action: "correct", answer: corrected.trim(), expectedRevision: revision, context: agentCommandContext() })
+      .then((result) => act({ action: "agentCorrectionResult", answer: corrected.trim(), question: String(result.result.question || ""), expectedRevision: revision }))
+      .catch((cause) => setError(cause instanceof Error ? cause.message : "Agent 修正失败"))
+      .finally(() => setBusy(false));
   }
 
   const autoStartDecision = decideAutoSessionStart({
     bridgeState: autoBridgeStatus.state,
     bridgeSessionKey: autoBridgeStatus.sessionKey,
     sessionStatus: session.status,
-    modelConfigured: diagnostics.modelConfigured,
-    stageConnected: diagnostics.stageConnected,
     assistantRole,
     pending: autoStartPending,
     attemptedSessionKey: autoStartAttemptedRef.current
@@ -838,13 +427,7 @@ export default function ConsolePage() {
             <span>AI 开场时告知对方本次互动由 AI 协助、会保存记录并由人工复核。</span>
           </label>
           {readiness.ready ? <button disabled={busy || session.status === "running" || !assistantRole} onClick={async () => { if (await act({ action: "start", candidateName, assistantRole, roleName, jobDescription, interviewFocus, consentConfirmed, resumeIds: resumeIds.length ? resumeIds : undefined })) setConsentConfirmed(false); }}>{session.status === "running" ? "当前互动进行中" : assistantRole ? "开始新互动" : "请选择助手角色"}</button> : <a className="buttonLink primary" href="/settings">前往设置完成检测</a>}
-          {diagnostics.modelConfigured && session.status !== "running" && (
-            <p className="muted">
-              {outputMode === "virtual"
-                ? "虚拟摄像头相关检测通过后才能开始；开始时还会用 GET /models 做一次无推理连接检查，不产生模型调用费用。"
-                : "AI 模型已配置后即可开始；虚拟声卡可选。开始时还会用 GET /models 做一次无推理连接检查，不产生模型调用费用。"}
-            </p>
-          )}
+          {session.status !== "running" && <p className="muted">新会话将使用管理端当前启用的语音方案线路；线路无效时 LiveKit Agent 会明确拒绝启动。</p>}
           <p className={autoStartError ? "error" : "muted"} aria-live="polite">
             自动对话：{autoStartPending ? "正在开始并准备开场播报…" : autoStartError || autoStartDecision.message}
           </p>
@@ -880,10 +463,7 @@ export default function ConsolePage() {
                   session.transcript.at(-1)?.role !== "interviewer" ||
                   !session.transcript.some((item) => item.role === "candidate")
                 }
-                onClick={() => act({
-                  action: "retryQuestion",
-                  expectedRevision: sessionRef.current.revision
-                })}
+                onClick={retryLastQuestion}
               >
                 重生成本题
               </button>

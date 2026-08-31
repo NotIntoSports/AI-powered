@@ -6,7 +6,6 @@ const { getInterviewReadiness, isReadinessItemRequired } = readinessSource;
 const { parseOutputMode, DEFAULT_OUTPUT_MODE } = outputModeSource;
 
 const allReady = {
-  modelConfigured: true,
   stageConnected: true,
   mediaReady: true,
   speechReady: true,
@@ -21,14 +20,13 @@ assert.equal(DEFAULT_OUTPUT_MODE, "real");
 assert.equal(parseOutputMode(null), "real");
 assert.equal(parseOutputMode("virtual"), "virtual");
 assert.equal(parseOutputMode("unknown"), "real");
-assert.equal(isReadinessItemRequired("modelConfigured", "real"), true);
+assert.equal(isReadinessItemRequired("stageConnected", "real"), false);
 assert.equal(isReadinessItemRequired("virtualCameraActive", "real"), false);
 assert.equal(isReadinessItemRequired("mediaReady", "virtual"), false);
 assert.equal(isReadinessItemRequired("virtualCameraActive", "virtual"), true);
 
 assert.equal(getInterviewReadiness(allReady).ready, true);
 assert.deepEqual(getInterviewReadiness(allReady).missing, []);
-assert.equal(getInterviewReadiness({ ...allReady, modelConfigured: false }).ready, false);
 assert.deepEqual(getInterviewReadiness({ ...allReady, stageConnected: false }).missing, []);
 assert.equal(getInterviewReadiness({ ...allReady, virtualCameraActive: false }).ready, true);
 
