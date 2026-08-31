@@ -128,5 +128,17 @@ test("RTC pipeline save does not synchronize the client speech line", () => {
   assert.doesNotMatch(page, /requestJSON\("\/api\/v1\/admin\/settings\/speech"/);
   assert.doesNotMatch(page, /管线已保存，但同步语音线路失败/);
   assert.doesNotMatch(page, /保存仍会按厂商同步语音线路/);
-  assert.match(page, /保存互动管线不会修改「语音」页的客户端线路/);
+  assert.doesNotMatch(page, /保存后会同步「语音」页的当前线路/);
+  assert.match(page, /只管理 LiveKit Agent 使用的 ASR \/ LLM \/ TTS 或端对端模型/);
+  assert.match(page, /保存不会修改 Windows 客户端语音线路/);
+  assert.match(page, /已进行中的会话不会热切/);
+});
+
+test("Windows client speech route stays independently selectable and saves explicitly", () => {
+  const page = readFileSync(join(root, "..", "app", "settings", "speech", "page.tsx"), "utf8");
+  assert.match(page, /Windows 客户端语音线路/);
+  assert.match(page, /const routeDirty = activeProvider !== savedActiveProvider/);
+  assert.match(page, /disabled={!routeDirty \|\| busySection !== null}/);
+  assert.match(page, /保存客户端线路/);
+  assert.doesNotMatch(page, /<fieldset className="config-fieldset" disabled={editing !== "active"}>/);
 });

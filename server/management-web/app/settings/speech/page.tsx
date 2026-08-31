@@ -37,6 +37,7 @@ export default function SpeechSettingsPage() {
   const { me, error, setError } = useAdminSession();
   const [config, setConfig] = useState<PublicSpeechSettings | null>(null);
   const [activeProvider, setActiveProvider] = useState<SpeechProvider>("aliyun");
+  const [savedActiveProvider, setSavedActiveProvider] = useState<SpeechProvider>("aliyun");
   const [appId, setAppId] = useState("");
   const [speakerId, setSpeakerId] = useState("");
   const [ttsResourceId, setTtsResourceId] = useState("seed-icl-2.0");
@@ -83,10 +84,11 @@ export default function SpeechSettingsPage() {
     [asrModelName]
   );
 
-  function apply(data: PublicSpeechSettings) {
+  function apply(data: PublicSpeechSettings, preserveActiveDraft = false) {
     setConfig(data);
     if (data.activeProvider === "aliyun" || data.activeProvider === "volcengine") {
-      setActiveProvider(data.activeProvider);
+      setSavedActiveProvider(data.activeProvider);
+      if (!preserveActiveDraft) setActiveProvider(data.activeProvider);
     }
     setAppId(data.appId || "");
     setSpeakerId(data.speakerId || "");
@@ -143,7 +145,6 @@ export default function SpeechSettingsPage() {
 
   function beginEdit(section: SectionId) {
     snapshotRef.current = {
-      activeProvider,
       appId,
       speakerId,
       ttsResourceId,
@@ -186,7 +187,6 @@ export default function SpeechSettingsPage() {
   function cancelEdit() {
     const snap = snapshotRef.current;
     if (snap) {
-      setActiveProvider(snap.activeProvider as SpeechProvider);
       setAppId(String(snap.appId || ""));
       setSpeakerId(String(snap.speakerId || ""));
       setTtsResourceId(String(snap.ttsResourceId || "seed-icl-2.0"));
@@ -248,7 +248,7 @@ export default function SpeechSettingsPage() {
         setSectionFeedback(section, { error: message });
         return false;
       }
-      apply(result.body as PublicSpeechSettings);
+      apply(result.body as PublicSpeechSettings, section !== "active");
       clearSecrets();
       setSectionFeedback(section, { ok: successMessage });
       setEditing(null);
@@ -260,11 +260,32 @@ export default function SpeechSettingsPage() {
   }
 
   async function saveActive() {
-    await putSpeech(
-      { activeProvider },
-      "active",
-      activeProvider === "aliyun" ? "当前线路已切换为阿里云。" : "当前线路已切换为豆包。"
-    );
+    setBusySection("active");
+    setSectionFeedback("active", {});
+    setError("");
+    try {
+      const result = await requestJSON("/api/v1/admin/settings/speech", {
+        method: "PUT",
+        body: JSON.stringify({ activeProvider })
+      });
+      if (!result.response.ok) {
+        setSectionFeedback("active", {
+          error: displayError(parseAPIError(result.body, "保存客户端线路失败"))
+        });
+        return;
+      }
+      const saved = result.body as PublicSpeechSettings;
+      setConfig(saved);
+      if (saved.activeProvider === "aliyun" || saved.activeProvider === "volcengine") {
+        setActiveProvider(saved.activeProvider);
+        setSavedActiveProvider(saved.activeProvider);
+      }
+      setSectionFeedback("active", {
+        ok: activeProvider === "aliyun" ? "Windows 客户端线路已切换为阿里云。" : "Windows 客户端线路已切换为豆包。"
+      });
+    } finally {
+      setBusySection(null);
+    }
   }
 
   async function saveAliyun() {
@@ -431,6 +452,7 @@ export default function SpeechSettingsPage() {
       : config?.volcengineAvailable
         ? "客户端线路 · 豆包已连通"
         : "客户端线路 · 豆包未就绪";
+  const routeDirty = activeProvider !== savedActiveProvider;
 
   function Feedback({ section }: { section: SectionId }) {
     const item = feedback[section];
@@ -511,9 +533,9 @@ export default function SpeechSettingsPage() {
           </div>
         </div>
         <Feedback section="active" />
-        <fieldset className="config-fieldset" disabled={editing !== "active"}>
+        <fieldset className="config-fieldset">
           <label>
-            客户端当前线路
+            Windows 客户端语音线路
             <select
               value={activeProvider}
               onChange={(event) => setActiveProvider(event.target.value as SpeechProvider)}
@@ -522,9 +544,14 @@ export default function SpeechSettingsPage() {
               <option value="volcengine">豆包语音（声音复刻）</option>
             </select>
           </label>
+          <p className="muted">只影响后续读取配置的新 Windows 客户端会话，不会修改 LiveKit Agent 互动管线。</p>
           <p className="muted">{currentLabel}</p>
         </fieldset>
-        <SectionActions section="active" onSave={saveActive} />
+        <div className="row section-actions">
+          <button type="button" disabled={!routeDirty || busySection !== null} onClick={() => void saveActive()}>
+            {busySection === "active" ? "保存中…" : "保存客户端线路"}
+          </button>
+        </div>
       </section>
 
       <details className="card config-details" open>

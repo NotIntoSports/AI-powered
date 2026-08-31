@@ -356,7 +356,7 @@ export default function RTCSettingsPage() {
         </summary>
         <div className="stack">
           <p className="muted">
-            从模型目录选择 ASR / LLM / TTS，或改用端对端模型。保存后会同步「语音」页的当前线路；进行中的客户端会话不会热切。
+            只管理 LiveKit Agent 使用的 ASR / LLM / TTS 或端对端模型。保存不会修改 Windows 客户端语音线路；已进行中的会话不会热切。
           </p>
           <Feedback section="pipeline" />
           <fieldset className="config-fieldset" disabled={readOnly("pipeline")}>
@@ -430,7 +430,7 @@ export default function RTCSettingsPage() {
                   />
                 </label>
                 <p className="muted">
-                  端对端模型使用会话内置语音，无独立官方音色目录。保存互动管线不会修改「语音」页的客户端线路。桌面端若尚未接入 Realtime/Omni，会返回 E2E_NOT_IMPLEMENTED，不会静默退回级联。
+                  端对端模型使用会话内置语音，无独立官方音色目录。桌面端若尚未接入 Realtime/Omni，会返回 E2E_NOT_IMPLEMENTED，不会静默退回级联。
                 </p>
               </div>
             )}
