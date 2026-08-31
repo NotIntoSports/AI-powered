@@ -44,11 +44,27 @@ export class LiveKitRtcAdapter implements SubtitleTransport {
     if (!config.url) throw new Error("LIVEKIT_URL_MISSING");
     this.sessionId = config.sessionId;
     console.log(`[livekit] connecting url=${config.url} roomId=${config.roomId} userId=${config.userId} tokenPresent=${Boolean(config.token)}`);
-    const room = new Room();
+    // LiveKit server 1.9.6 serves ws://host:7880/rtc (v0). livekit-client 2.21 defaults to
+    // /rtc/v1 (singlePeerConnection); that path 404s here, and CSP used to hide the 404 so
+    // the SDK never fell back. Pin dual-PC / v0 signaling to match the deployed SFU.
+    const room = new Room({ singlePeerConnection: false });
     this.room = room;
+    const emitAgentPresence = () => {
+      let present = false;
+      for (const participant of room.remoteParticipants.values()) {
+        if (participant.isAgent) {
+          present = true;
+          break;
+        }
+      }
+      config.onAgentPresence?.(present);
+    };
+    room.on(RoomEvent.ParticipantConnected, emitAgentPresence);
+    room.on(RoomEvent.ParticipantDisconnected, emitAgentPresence);
     room.on(RoomEvent.Disconnected, (reason) => {
       console.warn(`[livekit] disconnected reason=${String(reason)} roomId=${this.sessionId}`);
       config.onConnectionStateChange?.("disconnected", String(reason));
+      config.onAgentPresence?.(false);
     });
     room.on(RoomEvent.Reconnecting, () => {
       console.warn(`[livekit] reconnecting roomId=${this.sessionId}`);
@@ -153,6 +169,7 @@ export class LiveKitRtcAdapter implements SubtitleTransport {
       throw error;
     }
     console.log(`[livekit] room connected after=${Date.now() - connectStartedAt}ms state=${room.state}`);
+    emitAgentPresence();
     const encodedContext = new TextEncoder().encode(JSON.stringify(config.sessionContext));
     const contextPayload = new Uint8Array(new ArrayBuffer(encodedContext.byteLength));
     contextPayload.set(encodedContext);

@@ -409,7 +409,7 @@ export default function SpeechSettingsPage() {
     }
   }
 
-  const agentReady = Boolean(config?.agentConsumer && config.aliyunAvailable);
+  const credentialsReady = Boolean(config?.aliyunAvailable || config?.volcengineAvailable);
   function Feedback({ section }: { section: SectionId }) {
     const item = feedback[section];
     if (!item?.ok && !item?.error) return null;
@@ -466,28 +466,28 @@ export default function SpeechSettingsPage() {
 
       <section className="card">
         <div className="card-head">
-          <h2>LiveKit Agent 语音摘要</h2>
+          <h2>语音凭据连通状态</h2>
           <ConfigStatus
-            ready={agentReady}
-            readyText="Agent 消费端 · 阿里云 NLS 已连通"
-            waitText="Agent 消费端尚未就绪"
+            ready={credentialsReady}
+            readyText="凭据可用"
+            waitText="凭据未就绪"
           />
         </div>
         <p className="muted">
-          LiveKit Agent 从本页读取阿里云 NLS 凭据与 ASR 参数；这里仅展示 Agent 消费状态，不会自动切换客户端线路。Windows 客户端只使用下方「当前线路」选择豆包或阿里云。
+          这里只检查阿里云 NLS / 豆包 Key 是否连通，不会切换会议线路。会议用哪条请到上方「语音线路管理」启用。阿里云出现在这里只表示凭据可用，不表示当前会议在走阿里云。
         </p>
         <div className="status-grid">
           <div className={`status-chip ${config?.agentConsumer ? "ready" : ""}`}>
-            <strong>Agent 消费</strong>
-            <span>{config?.agentConsumer ? "已启用 speech_configs" : "未启用"}</span>
+            <strong>Agent 读取</strong>
+            <span>{config?.agentConsumer ? "可读取凭据表" : "未接入"}</span>
           </div>
           <div className={`status-chip ${config?.aliyunAvailable ? "ready" : ""}`}>
             <strong>阿里云 NLS</strong>
-            <span>{config?.aliyunAvailable ? "已连通" : "未配置或未连通"}</span>
+            <span>{config?.aliyunAvailable ? "凭据已配置" : "凭据未配置"}</span>
           </div>
           <div className={`status-chip ${config?.volcengineAvailable ? "ready" : ""}`}>
             <strong>豆包语音</strong>
-            <span>{config?.volcengineAvailable ? "已连通" : "未配置或未连通"}</span>
+            <span>{config?.volcengineAvailable ? "凭据已配置" : "凭据未配置"}</span>
           </div>
         </div>
       </section>

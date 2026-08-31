@@ -64,6 +64,7 @@ $mwFiles = @(
     "app/settings/speech/voice-routes-panel.tsx",
     "app/settings/rtc/page.tsx",
     "app/overview/page.tsx",
+    "app/sessions/page.tsx",
     "app/use-admin-session.ts",
     "app/clear-session/route.ts",
     "middleware.ts",
@@ -82,8 +83,10 @@ foreach ($f in $mwFiles) {
 Write-Host "  删除 models/page.tsx..."
 Run-SSH "rm -f $ServerBase/management-web/app/settings/models/page.tsx"
 
-Write-Host "=== [2.5/4] 同步 deploy/nginx.conf（HTTP-only，避免缺 TLS 卷导致 nginx 起不来）===" -ForegroundColor Cyan
+Write-Host "=== [2.5/4] 同步 deploy/nginx.conf 与 LiveKit 配置 ===" -ForegroundColor Cyan
 Run-SCP "$LocalRoot/server/deploy/nginx.conf" "$ServerBase/deploy/nginx.conf"
+Run-SCP "$LocalRoot/server/deploy/compose.yaml" "$ServerBase/deploy/compose.yaml"
+Run-SCP "$LocalRoot/server/deploy/livekit.yaml" "$ServerBase/deploy/livekit.yaml"
 
 Write-Host "=== [3/4] 在服务器上构建并重启 ===" -ForegroundColor Cyan
 $revision = (git -C $LocalRoot rev-parse --short HEAD).Trim()

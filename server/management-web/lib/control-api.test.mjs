@@ -114,12 +114,20 @@ test("resume admin page can view, reindex, and delete uploaded files", () => {
 
 test("sessions page separates online browser and desktop lines", () => {
   const page = readFileSync(join(root, "..", "app", "sessions", "page.tsx"), "utf8");
+  const shell = readFileSync(join(root, "..", "app", "console-shell.tsx"), "utf8");
+  const overview = readFileSync(join(root, "..", "app", "overview", "page.tsx"), "utf8");
+  assert.match(page, /<h2>在线会话<\/h2>/);
   assert.match(page, /管理后台在线/);
   assert.match(page, /Windows 客户端在线/);
   assert.match(page, /line\.online/);
   assert.match(page, /line\.purpose === "browser"/);
   assert.match(page, /line\.purpose === "desktop"/);
   assert.doesNotMatch(page, /最近 15 分钟没有 API 活动会显示为离线/);
+  assert.doesNotMatch(page, /当前线路/);
+  assert.match(shell, /在线会话/);
+  assert.doesNotMatch(shell, /当前线路/);
+  assert.match(overview, /<h2>在线会话<\/h2>/);
+  assert.doesNotMatch(overview, /当前线路/);
 });
 
 test("speech page owns saved voice routes and RTC page only owns LiveKit", () => {
@@ -127,7 +135,11 @@ test("speech page owns saved voice routes and RTC page only owns LiveKit", () =>
   const rtc = readFileSync(join(root, "..", "app", "settings", "rtc", "page.tsx"), "utf8");
   const shell = readFileSync(join(root, "..", "app", "console-shell.tsx"), "utf8");
   assert.match(speech, /VoiceRoutesPanel/);
+  assert.match(speech, /语音凭据连通状态/);
+  assert.match(speech, /不会切换会议线路/);
   assert.doesNotMatch(speech, /Windows 客户端语音线路/);
+  assert.doesNotMatch(speech, /下方「当前线路」/);
+  assert.doesNotMatch(speech, /LiveKit Agent 语音摘要/);
   assert.doesNotMatch(rtc, /互动管线/);
   assert.doesNotMatch(rtc, /pipelineMode|asrProviderId|e2eProviderId/);
   assert.doesNotMatch(shell, /\/settings\/pipeline/);
@@ -144,4 +156,7 @@ test("voice route manager supports route lifecycle and capability-specific model
   assert.match(panel, /音色.*<select/s);
   assert.doesNotMatch(panel, /音色<input/);
   assert.match(panel, /model\.runtimeVerified/);
+  assert.match(panel, /只在这里点「启用」/);
+  assert.match(panel, /当前会议使用/);
+  assert.match(panel, /尚未启用任何线路，Agent 无法开会/);
 });

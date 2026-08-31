@@ -30,6 +30,7 @@ export type BridgeSessionEvents = {
   onLevel(peak: number): void;
   onProcessExited(): void;
   onTransportState(state: "reconnecting" | "connected" | "disconnected", reason?: string): void;
+  onAgentPresence?(present: boolean): void;
 };
 export type BridgeSessionHandle = { owner: BridgeSessionOwner; roomId: string; provider: SubtitleProvider };
 
@@ -133,7 +134,7 @@ export async function startBridgeSession(
     void emitPipelineEvent({
       event: "bridge.token-received",
       traceId: roomId,
-      fields: { httpStatus: tokenResponse.status, provider: activeProvider, status: tokenResponse.ok ? "ok" : "failed" }
+      fields: { httpStatus: tokenResponse.status, provider: activeProvider, status: tokenResponse.ok ? "ok" : "failed", livekitUrl: token.url }
     });
     const pcm = createPcmTrack(loadRemoteMonitorEnabled());
     let debugTrack: MediaStreamTrack | null = null;
@@ -178,7 +179,8 @@ export async function startBridgeSession(
           userId: token.userId || userId,
           url: token.url,
           sessionContext,
-          onConnectionStateChange: (state, reason) => events.onTransportState(state, reason)
+          onConnectionStateChange: (state, reason) => events.onTransportState(state, reason),
+          onAgentPresence: (present) => events.onAgentPresence?.(present)
         });
       } catch (error) {
         console.error(`[bridge] transport connect failed after=${Date.now() - connectStartedAt}ms`, error);

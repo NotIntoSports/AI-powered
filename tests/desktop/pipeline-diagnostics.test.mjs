@@ -36,6 +36,15 @@ test("pipeline diagnostics keep bounded correlation metadata without speech or c
   );
 });
 
+test("pipeline diagnostics keep livekitUrl for connection correlation", () => {
+  const normalized = normalizePipelineEvent({
+    event: "bridge.token-received",
+    traceId: "meet_123",
+    fields: { httpStatus: 200, provider: "livekit", status: "ok", livekitUrl: "ws://175.27.132.61:7880" }
+  });
+  assert.equal(normalized?.fields.livekitUrl, "ws://175.27.132.61:7880");
+});
+
 test("pipeline diagnostics reject malformed events and unbounded metadata", () => {
   assert.equal(normalizePipelineEvent({ event: "INVALID EVENT", fields: {} }), null);
   assert.equal(normalizePipelineEvent({ event: "tts.requested", fields: { detail: "x".repeat(200) } }), null);

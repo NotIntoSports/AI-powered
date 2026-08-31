@@ -27,6 +27,7 @@ import {
 } from "./auto-bridge-store.ts";
 import {
   getAutoBridgeStatus,
+  requestAutoBridgeRestart,
   subscribeAutoBridgeStatus
 } from "./auto-bridge-controller.tsx";
 
@@ -98,14 +99,31 @@ export function RtcBridgeControl() {
   }
 
   async function stop() {
+    const handle = getBridgeSessionHandle();
+    if (handle?.owner === "auto") {
+      saveAutoBridgeEnabled(false);
+      setAutoEnabled(false);
+    }
     await stopBridgeSession();
     setRunning(false);
     setStatus("字幕和会议进程捕获已停止。");
   }
 
+  const autoSessionActive = autoEnabled && (autoStatus.state === "captured" || autoStatus.state === "starting" || autoStatus.state === "agent-missing");
+  const headerReady = running || autoStatus.state === "captured";
+  const headerLabel = running
+    ? `${providerLabel(provider)} 运行中`
+    : autoStatus.state === "starting"
+      ? "正在自动建立…"
+      : autoStatus.state === "captured"
+        ? "LiveKit 自动运行中"
+        : autoStatus.state === "agent-missing"
+          ? "Agent 未接入"
+          : "未启动";
+
   return (
     <article className="card" id="settings-rtc-bridge">
-      <div className="cardHeading"><h2>会议音频桥接</h2><span className={running ? "ready" : ""}>{running ? `${providerLabel(provider)} 运行中` : "未启动"}</span></div>
+      <div className="cardHeading"><h2>会议音频桥接</h2><span className={headerReady ? "ready" : ""}>{headerLabel}</span></div>
       <label>会议软件进程
         <select value={pid} disabled={running} onChange={(event) => setPid(Number(event.target.value))}>
           <option value={0}>请选择</option>
@@ -146,8 +164,16 @@ export function RtcBridgeControl() {
         <p className="muted">自动状态：{autoStatus.text}</p>
       ) : null}
       <div className="obsActions">
-        <button disabled={running || !pid} onClick={() => void start()}>启动实时字幕</button>
-        <button className="secondary" disabled={!running} onClick={() => void stop()}>停止字幕</button>
+        <button disabled={running || autoSessionActive || !pid} onClick={() => void start()}>启动实时字幕</button>
+        <button className="secondary" disabled={!running && !autoSessionActive} onClick={() => void stop()}>停止字幕</button>
+        <button
+          className="secondary"
+          disabled={!autoSessionActive}
+          onClick={() => {
+            setStatus("正在重新建立 LiveKit 房间…");
+            requestAutoBridgeRestart();
+          }}
+        >重新桥接</button>
         <button className="ghost" disabled={running} onClick={() => void refresh()}>刷新进程</button>
       </div>
       <p>{status}</p>

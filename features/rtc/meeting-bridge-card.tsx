@@ -10,7 +10,7 @@ import {
   MEETING_EXECUTABLE_NAMES,
   MEETING_SOFTWARE_LABELS
 } from "./auto-bridge-store";
-import { getAutoBridgeStatus, subscribeAutoBridgeStatus } from "./auto-bridge-controller";
+import { getAutoBridgeStatus, requestAutoBridgeRestart, subscribeAutoBridgeStatus } from "./auto-bridge-controller";
 import { getVirtualAudioSetupStatus, subscribeVirtualAudioSetup } from "../audio/virtual-audio-auto-setup";
 import { getSnapshotReadiness, loadReadinessSnapshot } from "../readiness/readiness-snapshot";
 import { RtcBridgeControl } from "./rtc-bridge-control";
@@ -190,6 +190,9 @@ export function MeetingBridgeCard() {
       ) : null}
       {autoStatus.state === "needs-manual" || audioNeedsAttention ? (
         <button className="secondary" type="button" onClick={() => setManualOpen(true)}>在工作台手动处理</button>
+      ) : null}
+      {autoStatus.state === "agent-missing" ? (
+        <button className="secondary" type="button" onClick={requestAutoBridgeRestart}>重新桥接</button>
       ) : null}
       {!manualOpen && autoStatus.state !== "needs-manual" ? (
         <button className="ghost" type="button" onClick={() => setManualOpen(true)}>手动桥接</button>

@@ -1,5 +1,5 @@
 export type AutoSessionStartInput = {
-  bridgeState: "off" | "waiting" | "captured" | "backoff" | "needs-manual" | "starting";
+  bridgeState: "off" | "waiting" | "captured" | "backoff" | "needs-manual" | "starting" | "agent-missing";
   bridgeSessionKey?: string;
   sessionStatus: "idle" | "running" | "finished";
   assistantRole?: string;

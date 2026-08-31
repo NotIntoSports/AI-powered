@@ -12,7 +12,7 @@ export default function SessionsPage() {
   async function load() {
     const result = await requestJSON("/api/v1/admin/sessions");
     if (!result.response.ok) {
-      setError(displayError(parseAPIError(result.body, "无法加载当前线路")));
+      setError(displayError(parseAPIError(result.body, "无法加载在线会话")));
       return;
     }
     setLines(Array.isArray(result.body) ? (result.body as SessionLine[]) : []);
@@ -63,7 +63,7 @@ export default function SessionsPage() {
     <ConsoleShell me={me}>
       {error ? <p className="error">{error}</p> : null}
       <section className="card">
-        <h2>当前线路</h2>
+        <h2>在线会话</h2>
         <p className="muted">
           只显示最近 15 分钟有 API 活动的在线会话，并将管理后台与 Windows 客户端分开列出。
         </p>

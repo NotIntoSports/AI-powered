@@ -23,6 +23,7 @@ export type SubtitleConnectConfig = {
     state: "reconnecting" | "connected" | "disconnected",
     reason?: string
   ) => void;
+  onAgentPresence?: (present: boolean) => void;
 };
 
 export type SubtitleTransport = {

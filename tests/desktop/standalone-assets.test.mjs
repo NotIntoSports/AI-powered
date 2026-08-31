@@ -6,6 +6,7 @@ test("Next config enables standalone output", async () => {
   const config = await readFile(new URL("../../next.config.mjs", import.meta.url), "utf8");
   assert.match(config, /output:\s*["']standalone["']/);
   assert.match(config, /outputFileTracingRoot/);
+  assert.match(config, /connect-src 'self' ws: wss: http:\/\/127\.0\.0\.1:\* http:\/\/localhost:\* http: https:/);
 });
 
 test("desktop runtime script copies server, static assets, and public files", async () => {

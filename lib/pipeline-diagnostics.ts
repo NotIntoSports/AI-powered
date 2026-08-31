@@ -15,6 +15,7 @@ const allowedFields = new Set([
   "expectedRevision",
   "final",
   "httpStatus",
+  "livekitUrl",
   "mode",
   "owner",
   "packetLossPct",

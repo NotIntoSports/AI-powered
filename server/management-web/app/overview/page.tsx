@@ -72,7 +72,7 @@ export default function OverviewPage() {
           <b>{onlineUsers}/{users.length}</b>
         </article>
         <article className="stat">
-          <span className="muted">当前线路</span>
+          <span className="muted">在线会话</span>
           <b>{onlineLines}/{lines.length}</b>
         </article>
         <article className="stat">
@@ -114,7 +114,7 @@ export default function OverviewPage() {
       </section>
 
       <section className="card">
-        <h2>当前线路</h2>
+        <h2>在线会话</h2>
         <p className="muted">仅显示最近 15 分钟有活动的管理后台和 Windows 客户端会话。</p>
         <table>
           <thead>
@@ -127,7 +127,7 @@ export default function OverviewPage() {
           </thead>
           <tbody>
             {lines.length === 0 ? (
-              <tr><td colSpan={4} className="muted">当前没有活动线路</td></tr>
+              <tr><td colSpan={4} className="muted">当前没有在线会话</td></tr>
             ) : lines.map((line) => (
               <tr key={line.id}>
                 <td>{line.username}</td>

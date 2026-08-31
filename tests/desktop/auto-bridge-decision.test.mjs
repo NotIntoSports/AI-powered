@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -135,4 +136,10 @@ test("needs-manual persists while the same failed meeting stays open", () => {
   const gone = decideAutoBridge([], { ...base, machine, enabled: true, software: "wemeetapp.exe" });
   assert.equal(gone.action, "waiting");
   assert.equal(gone.machine.failedPid, null);
+});
+
+test("controller backoff copy keeps the last failure instead of a generic wait", () => {
+  const source = readFileSync(new URL("../../features/rtc/auto-bridge-controller.tsx", import.meta.url), "utf8");
+  assert.match(source, /lastFailureText/);
+  assert.match(source, /10秒后重试/);
 });

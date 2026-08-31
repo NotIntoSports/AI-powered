@@ -17,8 +17,10 @@ test("starts once when the LiveKit bridge is ready", () => {
   assert.equal(decideAutoSessionStart({ ...ready, bridgeSessionKey: "meet_2", attemptedSessionKey: "meet_1" }).shouldStart, true);
 });
 
-test("does not auto start without a stable bridge key", () => {
-  assert.equal(decideAutoSessionStart({ ...ready, bridgeSessionKey: undefined }).shouldStart, false);
+test("does not auto start when Agent is missing from the room", () => {
+  const decision = decideAutoSessionStart({ ...ready, bridgeState: "agent-missing" });
+  assert.equal(decision.shouldStart, false);
+  assert.match(decision.message, /等待会议音频桥接/);
 });
 
 test("does not restart a running session", () => {

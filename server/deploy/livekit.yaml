@@ -6,7 +6,7 @@ rtc:
   udp_port: 7882
   use_external_ip: true
 turn:
-  enabled: true
+  enabled: false
   udp_port: 443
 room:
   auto_create: true
@@ -14,5 +14,5 @@ room:
 logging:
   level: info
 keys:
-  # Replace before production. `docker compose --profile livekit` dev command uses LiveKit --dev keys instead.
+  # Keys match LiveKit --dev defaults used by rtc_configs and livekit-agent.
   devkey: secret

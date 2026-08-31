@@ -17,7 +17,7 @@ from e2e_model import AudioTurnBuffer, E2EConfig, E2EModelError, call_e2e
 from voice_route import VoiceRouteError, VoiceRouteRuntime, parse_voice_route
 from session_context import SessionContextError, parse_session_context
 from agent_command import AgentCommandError, command_requirements, execute_agent_command, parse_agent_command, result_packet
-from qwen_realtime import QwenRealtimeError, QwenRealtimeSession, run_text_turn
+from openai_realtime import RealtimeError, RealtimeSession, realtime_error_code, run_text_turn
 
 COMMAND_TOPIC = "agent.command.v1"
 COMMAND_RESULT_TOPIC = "agent.command.result.v1"
@@ -277,13 +277,13 @@ async def e2e_track(room: rtc.Room, track: rtc.Track, config: E2EConfig) -> None
         buffer.reset()
 
 
-async def qwen_realtime_track(room: rtc.Room, track: rtc.Track, config: E2EConfig, voice_id: str, session_context: dict) -> None:
+async def realtime_track(room: rtc.Room, track: rtc.Track, config: E2EConfig, voice_id: str, session_context: dict) -> None:
     audio_stream = rtc.AudioStream(track, sample_rate=SAMPLE_RATE, num_channels=1, frame_size_ms=20)
     output = AgentAudioTrack(room, sample_rate=24000)
     instructions = f"角色：{session_context.get('role', 'assistant')}。主题：{session_context.get('topic', '')}。使用中文简洁自然回复。"
     await output.start()
     try:
-        async with QwenRealtimeSession(config.base_url, config.model, config.api_key, voice_id, instructions) as realtime:
+        async with RealtimeSession(config.base_url, config.model, config.api_key, voice_id, instructions) as realtime:
             candidate_text = ""
             reply_text = ""
             utterance_id = str(uuid.uuid4())
@@ -311,8 +311,13 @@ async def qwen_realtime_track(room: rtc.Room, track: rtc.Track, config: E2EConfi
             async with asyncio.TaskGroup() as group:
                 group.create_task(send_audio())
                 group.create_task(receive_events())
-    except QwenRealtimeError as exc:
-        logger.error(json.dumps({"event": "realtime_failed", "model": config.model, "errorType": type(exc).__name__, "code": str(exc)[:80]}))
+    except Exception as exc:
+        logger.error(json.dumps({
+            "event": "realtime_failed",
+            "model": config.model,
+            "errorType": type(exc).__name__,
+            "code": realtime_error_code(exc),
+        }))
     finally:
         await output.close()
 
@@ -412,7 +417,7 @@ async def entrypoint(ctx: JobContext) -> None:
 
             result = await execute_agent_command(command, session_context, generate, speak)
             await ctx.room.local_participant.publish_data(result_packet(command.command_id, command.action, result), topic=COMMAND_RESULT_TOPIC)
-        except (AgentCommandError, VoiceRouteError, CascadeModelError, QwenRealtimeError) as exc:
+        except (AgentCommandError, VoiceRouteError, CascadeModelError, RealtimeError) as exc:
             command_id = getattr(locals().get("command"), "command_id", "unknown")
             action = getattr(locals().get("command"), "action", "retry")
             await ctx.room.local_participant.publish_data(result_packet(command_id, action, {}, str(exc)[:80]), topic=COMMAND_RESULT_TOPIC)
@@ -439,7 +444,12 @@ async def entrypoint(ctx: JobContext) -> None:
     try:
         nls_config, e2e_config, route = load_agent_runtime()
     except (RuntimeError, VoiceRouteError) as exc:
-        logger.error(json.dumps({"event": "VOICE_ROUTE_NOT_READY", "room": ctx.room.name, "errorType": type(exc).__name__}))
+        logger.error(json.dumps({
+            "event": "VOICE_ROUTE_NOT_READY",
+            "room": ctx.room.name,
+            "errorType": type(exc).__name__,
+            "code": str(exc)[:80],
+        }))
         await wait_for_shutdown(ctx)
         return
     route_state["id"] = route.route_id
@@ -473,6 +483,7 @@ async def entrypoint(ctx: JobContext) -> None:
                         "provider": "e2e" if e2e_mode else "aliyun_nls",
                         "room": ctx.room.name,
                         "errorType": type(error).__name__,
+                        "code": str(error)[:80],
                     }
                 )
             )
@@ -491,7 +502,7 @@ async def entrypoint(ctx: JobContext) -> None:
         )
         if e2e_mode and e2e_config is not None:
             if "realtime" in e2e_config.model.lower():
-                task = asyncio.create_task(qwen_realtime_track(ctx.room, track, e2e_config, route.voice_id, session_context))
+                task = asyncio.create_task(realtime_track(ctx.room, track, e2e_config, route.voice_id, session_context))
             else:
                 task = asyncio.create_task(e2e_track(ctx.room, track, e2e_config))
         elif nls_config is not None and token_provider is not None:

@@ -32,7 +32,7 @@ export async function POST(request: Request) {
   });
   const body = await response.json().catch(() => null);
   if (response.ok) {
-    console.log(`[rtc-token] path=control-api status=${response.status} provider=${body?.provider || "livekit"} roomId=${body?.roomId || ""}`);
+    console.log(`[rtc-token] path=control-api status=${response.status} provider=${body?.provider || "livekit"} roomId=${body?.roomId || ""} url=${body?.url || ""}`);
     return NextResponse.json(body, { headers: { "Cache-Control": "no-store" } });
   }
   console.warn(`[rtc-token] path=control-api status=${response.status} code=${body?.code || "unknown"}`);

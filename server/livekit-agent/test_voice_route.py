@@ -20,6 +20,12 @@ class VoiceRouteTests(unittest.TestCase):
         with self.assertRaisesRegex(VoiceRouteError, "VOICE_ROUTE_NOT_READY"):
             parse_voice_route({"id": "route-1", "mode": "cascaded", "active": True, "ready": True, "asr": {}})
 
+    def test_agent_logs_underlying_load_error_code(self):
+        from pathlib import Path
+        source = Path(__file__).with_name("agent.py").read_text(encoding="utf-8")
+        self.assertIn('"code": str(exc)[:80]', source)
+        self.assertIn("VOICE_ROUTE_NOT_READY", source)
+
 
 if __name__ == "__main__":
     unittest.main()

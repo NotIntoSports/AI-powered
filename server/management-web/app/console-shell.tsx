@@ -8,7 +8,7 @@ import { requestJSON, type PublicUser } from "../lib/control-api";
 const links = [
   { href: "/overview", label: "概览" },
   { href: "/users", label: "账户" },
-  { href: "/sessions", label: "当前线路" },
+  { href: "/sessions", label: "在线会话" },
   { href: "/settings/ai", label: "模型管理" },
   { href: "/settings/rtc", label: "RTC 配置" },
   { href: "/settings/speech", label: "语音" },

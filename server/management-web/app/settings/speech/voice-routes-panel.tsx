@@ -8,6 +8,9 @@ const emptyDraft: Draft = { name: "", mode: "cascaded", asrProviderId: "", asrMo
 
 function refValue(providerId: string, modelId: string) { return providerId && modelId ? `${providerId}::${modelId}` : ""; }
 function parseRef(value: string) { const at = value.indexOf("::"); return at > 0 ? { providerId: value.slice(0, at), modelId: value.slice(at + 2) } : { providerId: "", modelId: "" }; }
+function pipelineLabel(route: VoiceRoute) {
+  return route.mode === "e2e" ? `端到端 · ${route.e2eModelId}` : `级联 · ${route.asrModelId} → ${route.llmModelId} → ${route.ttsModelId}`;
+}
 
 export function VoiceRoutesPanel() {
   const [routes, setRoutes] = useState<VoiceRoute[]>([]);
@@ -71,9 +74,12 @@ export function VoiceRoutesPanel() {
     } finally { setBusy(""); }
   }
 
+  const active = routes.find((route) => route.active);
+
   return <section className="card stack">
-    <div className="card-head"><div><h2>语音线路管理</h2><p className="muted">LiveKit Agent 每个新会话读取当前启用线路；进行中的会话不热切。</p></div><button type="button" onClick={() => edit()}>新建线路</button></div>
+    <div className="card-head"><div><h2>语音线路管理</h2><p className="muted">会议走哪条链路只在这里点「启用」；同一时间只能启用一条。LiveKit Agent 每个新会话读取当前启用线路，进行中的会话不热切。下方凭据区只填 Key，不会切换线路。</p></div><button type="button" onClick={() => edit()}>新建线路</button></div>
     {error ? <p className="error">{error}</p> : null}{notice ? <p className="ok">{notice}</p> : null}
+    {active ? <div className="status-chip ready"><strong>当前会议使用</strong><span>{active.name} · {pipelineLabel(active)}</span></div> : <p className="error">尚未启用任何线路，Agent 无法开会。</p>}
     {editingId ? <div className="config-fieldset stack">
       <label>线路名称<input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} maxLength={100} /></label>
       <label>线路模式<select value={draft.mode} onChange={(event) => setDraft({ ...draft, mode: event.target.value as "cascaded" | "e2e" })}><option value="cascaded">级联 ASR + LLM + TTS</option><option value="e2e">端到端 Realtime</option></select></label>
@@ -91,7 +97,7 @@ export function VoiceRoutesPanel() {
       <div className="row"><button type="button" disabled={Boolean(busy)} onClick={() => void save()}>{busy ? "保存中…" : "保存线路"}</button><button className="secondary" type="button" disabled={Boolean(busy)} onClick={() => setEditingId(null)}>取消</button></div>
     </div> : null}
     <div className="stack">{routes.length === 0 ? <p className="muted">还没有语音线路。</p> : routes.map((route) => <div className="status-chip" key={route.id}>
-      <div className="card-head"><div><strong>{route.name}</strong><span>{route.mode === "e2e" ? `端到端 · ${route.e2eModelId}` : `级联 · ${route.asrModelId} → ${route.llmModelId} → ${route.ttsModelId}`}</span></div><span className={route.active ? "online" : route.ready ? "muted" : "error"}>{route.active ? "当前启用" : route.ready ? "可启用" : "模型未就绪"}</span></div>
+      <div className="card-head"><div><strong>{route.name}</strong><span>{pipelineLabel(route)}</span></div><span className={route.active ? "online" : route.ready ? "muted" : "error"}>{route.active ? "当前启用" : route.ready ? "可启用" : "模型未就绪"}</span></div>
       <div className="row"><button className="secondary" type="button" onClick={() => edit(route)}>编辑</button><button className="secondary" type="button" onClick={() => edit(route, true)}>复制</button><button className="secondary" type="button" disabled={Boolean(busy)} onClick={() => void action(route, "test")}>测试</button>{!route.active ? <><button type="button" disabled={!route.ready || Boolean(busy)} onClick={() => void action(route, "activate")}>启用</button><button className="secondary" type="button" disabled={Boolean(busy)} onClick={() => void action(route, "delete")}>删除</button></> : null}</div>
     </div>)}</div>
   </section>;
