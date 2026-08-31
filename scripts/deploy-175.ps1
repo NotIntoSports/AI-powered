@@ -25,20 +25,27 @@ function Run-SCP($local, $remote) {
 
 Write-Host "=== [1/4] 同步 control-api 变更文件 ===" -ForegroundColor Cyan
 $caFiles = @(
-    "internal/database/migrations/00013_ai_providers_multi.sql",
-    "internal/database/migrations/00014_model_catalog.sql",
+    "internal/database/migrations/00014_ai_providers_multi.sql",
+    "internal/database/migrations/00015_model_catalog.sql",
+    "internal/database/migrations/00016_token_plan_personal_catalog.sql",
+    "internal/database/migrations/00017_voice_routes.sql",
+    "internal/database/migrations/00018_voice_routes_backfill.sql",
     "internal/settings/store.go",
     "internal/settings/service.go",
     "internal/settings/catalog.go",
     "internal/settings/catalog_test.go",
     "internal/settings/ai_providers.go",
     "internal/settings/ai_providers_service.go",
+    "internal/settings/token_plan_catalog.go",
+    "internal/settings/voice_routes.go",
+    "internal/settings/speech.go",
     "internal/settings/aliyun_nls.go",
     "internal/settings/aliyun_cosyvoice.go",
     "internal/httpapi/admin_settings.go",
     "internal/httpapi/admin_ai_providers.go",
     "internal/httpapi/admin_settings_test.go",
     "internal/httpapi/router.go",
+    "internal/httpapi/voice_routes.go",
     "go.mod",
     "go.sum",
     "openapi/openapi.yaml"
@@ -49,10 +56,11 @@ foreach ($f in $caFiles) {
 }
 
 Write-Host "=== [2/4] 同步 management-web 变更文件 ===" -ForegroundColor Cyan
-Run-SSH "mkdir -p $ServerBase/management-web/components"
+Run-SSH "mkdir -p $ServerBase/management-web/components $ServerBase/management-web/app/settings/speech $ServerBase/control-api/internal/database/migrations $ServerBase/control-api/internal/httpapi $ServerBase/control-api/internal/settings"
 $mwFiles = @(
     "app/settings/ai/page.tsx",
     "app/settings/speech/page.tsx",
+    "app/settings/speech/voice-routes-panel.tsx",
     "app/settings/rtc/page.tsx",
     "app/overview/page.tsx",
     "app/use-admin-session.ts",

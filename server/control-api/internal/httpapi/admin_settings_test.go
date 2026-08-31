@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -23,6 +25,18 @@ func TestWriteSettingsErrorDistinguishesStoreFailure(t *testing.T) {
 	}
 	if body := recorder.Body.String(); !strings.Contains(body, `"code":"SETTINGS_STORE_UNAVAILABLE"`) || !strings.Contains(body, "settings database unavailable") {
 		t.Fatalf("unexpected response body: %s", body)
+	}
+}
+
+func TestWriteSettingsErrorAcceptsWrappedStoreFailure(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/settings/speech", nil)
+	wrapped := fmt.Errorf("%w: %v", settings.ErrStore, errors.New("relation voice_routes does not exist"))
+	if writeSettingsError(recorder, request, wrapped) {
+		t.Fatal("expected wrapped store error to be written")
+	}
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d", recorder.Code)
 	}
 }
 

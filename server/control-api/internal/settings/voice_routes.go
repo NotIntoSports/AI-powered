@@ -97,7 +97,7 @@ func scanVoiceRoute(row pgx.Row) (VoiceRoute, error) {
 		return VoiceRoute{}, ErrNotConfigured
 	}
 	if err != nil {
-		return VoiceRoute{}, ErrStore
+		return VoiceRoute{}, wrapStore(err)
 	}
 	return route, nil
 }
@@ -107,7 +107,7 @@ const voiceRouteSelect = `select r.id,r.name,r.mode,r.asr_provider_id,r.asr_mode
 func (s *Service) ListVoiceRoutes(ctx context.Context) ([]VoiceRoute, error) {
 	rows, err := s.db.Query(ctx, voiceRouteSelect+` order by r.active desc, lower(r.name)`)
 	if err != nil {
-		return nil, ErrStore
+		return nil, wrapStore(err)
 	}
 	defer rows.Close()
 	routes := []VoiceRoute{}
@@ -120,7 +120,7 @@ func (s *Service) ListVoiceRoutes(ctx context.Context) ([]VoiceRoute, error) {
 		routes = append(routes, route)
 	}
 	if rows.Err() != nil {
-		return nil, ErrStore
+		return nil, wrapStore(rows.Err())
 	}
 	return routes, nil
 }

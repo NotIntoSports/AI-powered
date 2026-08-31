@@ -1,4 +1,17 @@
 -- +goose Up
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+CREATE TABLE IF NOT EXISTS discovered_models (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  model_id text NOT NULL,
+  base_url text NOT NULL,
+  enabled boolean NOT NULL DEFAULT false,
+  owned_by text NOT NULL DEFAULT '',
+  discovered_at timestamptz NOT NULL,
+  updated_at timestamptz NOT NULL,
+  UNIQUE (model_id, base_url)
+);
+
 ALTER TABLE discovered_models
   ADD COLUMN IF NOT EXISTS provider_id text NOT NULL DEFAULT '',
   ADD COLUMN IF NOT EXISTS capability text NOT NULL DEFAULT 'unknown',

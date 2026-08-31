@@ -28,11 +28,35 @@ type CatalogEntry struct {
 	ClassifiedAt    *time.Time `json:"classifiedAt,omitempty"`
 }
 
-func catalogRuntimeVerified(baseURL string, official bool, verificationStatus string) bool {
+func catalogRuntimeVerified(baseURL string, official bool, verificationStatus, protocol string) bool {
 	if !IsTokenPlanPersonalBaseURL(baseURL) {
 		return true
 	}
-	return official && verificationStatus == "success"
+	if !official {
+		return false
+	}
+	if tokenPlanDedicatedProtocol(protocol) {
+		return true
+	}
+	return verificationStatus == "success"
+}
+
+func tokenPlanDedicatedProtocol(protocol string) bool {
+	switch strings.TrimSpace(protocol) {
+	case "realtime", "asr", "tts":
+		return true
+	default:
+		return false
+	}
+}
+
+func catalogCapabilityForStore(capability string) string {
+	switch strings.TrimSpace(capability) {
+	case CapabilityLLM, CapabilityASR, CapabilityTTS, CapabilityE2E, CapabilityUnknown:
+		return strings.TrimSpace(capability)
+	default:
+		return CapabilityUnknown
+	}
 }
 
 type CatalogSyncResult struct {
@@ -122,13 +146,13 @@ func scanDiscoveredModels(rows pgx.Rows) ([]DiscoveredModel, error) {
 			&m.ID, &m.ProviderID, &m.ModelID, &m.BaseURL, &m.Enabled, &m.OwnedBy,
 			&m.Capability, &m.DisplayName, &m.ClassifiedBy, &classifiedAt, &m.DiscoveredAt, &m.UpdatedAt,
 		); err != nil {
-			return nil, ErrStore
+			return nil, wrapStore(err)
 		}
 		m.ClassifiedAt = classifiedAt
 		models = append(models, m)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, ErrStore
+		return nil, wrapStore(err)
 	}
 	if models == nil {
 		models = []DiscoveredModel{}
@@ -144,7 +168,7 @@ func (s *Store) ListCatalog(ctx context.Context, capability, query string) ([]Ca
 			dm.id, coalesce(dm.provider_id, ''), coalesce(p.name, dm.provider_id, ''),
 			dm.model_id, dm.base_url, coalesce(dm.capability, 'unknown'), dm.enabled,
 			coalesce(dm.display_name, ''), coalesce(dm.classified_by, ''), dm.classified_at,
-			(tpo.model_id is not null), coalesce(tps.verification_status, 'untested')
+			(tpo.model_id is not null), coalesce(tps.verification_status, 'untested'), coalesce(tpo.protocol, '')
 		from discovered_models as dm
 		left join ai_provider_configs as p on p.id = dm.provider_id
 		left join token_plan_official_models as tpo on tpo.model_id = dm.model_id
@@ -160,7 +184,7 @@ func (s *Store) ListCatalog(ctx context.Context, capability, query string) ([]Ca
 		order by coalesce(p.name, dm.provider_id), dm.model_id
 	`, capability, query)
 	if err != nil {
-		return nil, ErrStore
+		return nil, wrapStore(err)
 	}
 	defer rows.Close()
 	var entries []CatalogEntry
@@ -168,16 +192,16 @@ func (s *Store) ListCatalog(ctx context.Context, capability, query string) ([]Ca
 		var e CatalogEntry
 		var classifiedAt *time.Time
 		var official bool
-		var verificationStatus string
+		var verificationStatus, protocol string
 		if err := rows.Scan(
 			&e.ID, &e.ProviderID, &e.ProviderName, &e.ModelID, &e.BaseURL,
 			&e.Capability, &e.Enabled, &e.DisplayName, &e.ClassifiedBy, &classifiedAt,
-			&official, &verificationStatus,
+			&official, &verificationStatus, &protocol,
 		); err != nil {
-			return nil, ErrStore
+			return nil, wrapStore(err)
 		}
 		e.ClassifiedAt = classifiedAt
-		e.RuntimeVerified = catalogRuntimeVerified(e.BaseURL, official, verificationStatus)
+		e.RuntimeVerified = catalogRuntimeVerified(e.BaseURL, official, verificationStatus, protocol)
 		if e.ProviderName == "" {
 			e.ProviderName = e.ProviderID
 		}
@@ -185,7 +209,7 @@ func (s *Store) ListCatalog(ctx context.Context, capability, query string) ([]Ca
 		entries = append(entries, e)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, ErrStore
+		return nil, wrapStore(err)
 	}
 	if entries == nil {
 		entries = []CatalogEntry{}
@@ -232,7 +256,7 @@ func (s *Store) PatchCatalogModel(ctx context.Context, providerID, modelID strin
 		where provider_id = $5 and model_id = $6
 	`, capability, enabled, displayName, classifiedBy, providerID, modelID)
 	if err != nil {
-		return DiscoveredModel{}, ErrStore
+		return DiscoveredModel{}, wrapStore(err)
 	}
 	return s.GetCatalogModel(ctx, providerID, modelID)
 }
@@ -254,7 +278,7 @@ func (s *Store) GetCatalogModel(ctx context.Context, providerID, modelID string)
 		return DiscoveredModel{}, ErrNotConfigured
 	}
 	if err != nil {
-		return DiscoveredModel{}, ErrStore
+		return DiscoveredModel{}, wrapStore(err)
 	}
 	m.ClassifiedAt = classifiedAt
 	return m, nil
@@ -325,7 +349,7 @@ func (s *Store) UpsertSpeechCatalogModel(ctx context.Context, providerID, baseUR
 			updated_at = now()
 	`, modelID, baseURL, providerID, capability, displayName)
 	if err != nil {
-		return ErrStore
+		return wrapStore(err)
 	}
 	return nil
 }

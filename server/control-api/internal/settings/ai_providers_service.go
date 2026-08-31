@@ -304,6 +304,32 @@ func (s *Service) SetProviderModelEnabled(ctx context.Context, providerID, model
 	if err != nil {
 		return err
 	}
+	modelID = strings.TrimSpace(modelID)
+	err = store.SetModelEnabled(ctx, record.BaseURL, modelID, enabled)
+	if err == nil || !errors.Is(err, ErrInvalidInput) {
+		return err
+	}
+	official, lookErr := store.GetOfficialTokenPlanModel(ctx, modelID)
+	if lookErr != nil {
+		if errors.Is(lookErr, ErrNotConfigured) {
+			return ErrInvalidInput
+		}
+		return lookErr
+	}
+	capability := catalogCapabilityForStore(official.Capability)
+	if capability == CapabilityUnknown {
+		capability = catalogCapabilityForStore(ClassifyModelID(modelID))
+	}
+	if upsertErr := store.UpsertDiscoveredModels(ctx, record.BaseURL, []DiscoveredModel{{
+		ProviderID:   providerID,
+		ModelID:      modelID,
+		BaseURL:      record.BaseURL,
+		Enabled:      enabled,
+		Capability:   capability,
+		ClassifiedBy: "official",
+	}}); upsertErr != nil {
+		return upsertErr
+	}
 	return store.SetModelEnabled(ctx, record.BaseURL, modelID, enabled)
 }
 

@@ -4,6 +4,7 @@ package settings
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/url"
 	"strings"
 	"time"
@@ -197,6 +198,16 @@ type Store struct {
 
 func NewStore(db database.DBTX, box *secretbox.Box) *Store {
 	return &Store{db: db, box: box}
+}
+
+func wrapStore(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, ErrStore) {
+		return err
+	}
+	return fmt.Errorf("%w: %v", ErrStore, err)
 }
 
 func (s *Store) DecryptAPIKey(record AIRecord) (string, error) {
@@ -740,7 +751,7 @@ func (s *Store) ListDiscoveredModels(ctx context.Context, baseURL string) ([]Dis
 		order by model_id
 	`, baseURL)
 	if err != nil {
-		return nil, ErrStore
+		return nil, wrapStore(err)
 	}
 	defer rows.Close()
 	return scanDiscoveredModels(rows)
@@ -768,9 +779,9 @@ func (s *Store) UpsertDiscoveredModels(ctx context.Context, baseURL string, mode
 		}
 	}
 	for _, m := range models {
-		capability := strings.TrimSpace(m.Capability)
-		if capability == "" {
-			capability = ClassifyModelID(m.ModelID)
+		capability := catalogCapabilityForStore(m.Capability)
+		if capability == CapabilityUnknown && strings.TrimSpace(m.Capability) == "" {
+			capability = catalogCapabilityForStore(ClassifyModelID(m.ModelID))
 		}
 		classifiedBy := strings.TrimSpace(m.ClassifiedBy)
 		if classifiedBy == "" {
@@ -787,8 +798,8 @@ func (s *Store) UpsertDiscoveredModels(ctx context.Context, baseURL string, mode
 		_, err := s.db.Exec(ctx, `
 			insert into discovered_models (
 				model_id, base_url, provider_id, owned_by, capability, display_name,
-				classified_by, classified_at, discovered_at, updated_at
-			) values ($1, $2, $3, $4, $5, $6, $7, case when $5 = 'unknown' then null else now() end, now(), now())
+				classified_by, classified_at, enabled, discovered_at, updated_at
+			) values ($1, $2, $3, $4, $5, $6, $7, case when $5 = 'unknown' then null else now() end, $8, now(), now())
 			on conflict (provider_id, model_id) do update set
 				base_url = excluded.base_url,
 				owned_by = excluded.owned_by,
@@ -808,9 +819,9 @@ func (s *Store) UpsertDiscoveredModels(ctx context.Context, baseURL string, mode
 					else discovered_models.classified_at
 				end,
 				updated_at = now()
-		`, m.ModelID, baseURL, pid, m.OwnedBy, capability, strings.TrimSpace(m.DisplayName), classifiedBy)
+		`, m.ModelID, baseURL, pid, m.OwnedBy, capability, strings.TrimSpace(m.DisplayName), classifiedBy, m.Enabled)
 		if err != nil {
-			return ErrStore
+			return wrapStore(err)
 		}
 	}
 	return nil
@@ -823,7 +834,7 @@ func (s *Store) SetModelEnabled(ctx context.Context, baseURL, modelID string, en
 		where base_url = $2 and model_id = $3
 	`, enabled, baseURL, modelID)
 	if err != nil {
-		return ErrStore
+		return wrapStore(err)
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrInvalidInput
@@ -838,19 +849,19 @@ func (s *Store) GetEnabledModels(ctx context.Context, baseURL string) ([]string,
 		order by model_id
 	`, baseURL)
 	if err != nil {
-		return nil, ErrStore
+		return nil, wrapStore(err)
 	}
 	defer rows.Close()
 	var ids []string
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
-			return nil, ErrStore
+			return nil, wrapStore(err)
 		}
 		ids = append(ids, id)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, ErrStore
+		return nil, wrapStore(err)
 	}
 	if ids == nil {
 		ids = []string{}

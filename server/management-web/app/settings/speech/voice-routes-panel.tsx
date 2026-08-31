@@ -77,7 +77,12 @@ export function VoiceRoutesPanel() {
     {editingId ? <div className="config-fieldset stack">
       <label>线路名称<input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} maxLength={100} /></label>
       <label>线路模式<select value={draft.mode} onChange={(event) => setDraft({ ...draft, mode: event.target.value as "cascaded" | "e2e" })}><option value="cascaded">级联 ASR + LLM + TTS</option><option value="e2e">端到端 Realtime</option></select></label>
-      {draft.mode === "e2e" ? select("Realtime / E2E 模型", "e2e", options.e2e) : <>{select("ASR", "asr", options.asr)}{select("LLM", "llm", options.llm)}{select("TTS", "tts", options.tts)}</>}
+      {draft.mode === "e2e" ? (
+        <>
+          {select("Realtime / E2E 模型", "e2e", options.e2e)}
+          {options.e2e.length === 0 ? <p className="muted">没有可选项。请到「模型管理」启用官方 Realtime 模型（例如 qwen-audio-3.0-realtime-plus）。Realtime / ASR / TTS 不必做 Chat Completions 本人实测，启用后即可出现在此列表。</p> : null}
+        </>
+      ) : <>{select("ASR", "asr", options.asr)}{select("LLM", "llm", options.llm)}{select("TTS", "tts", options.tts)}</>}
       <label>音色<select value={draft.voiceId} onChange={(event) => setDraft({ ...draft, voiceId: event.target.value })}>
         <option value="">使用模型默认音色</option>
         {draft.voiceId && !voiceOptions.some((voice) => voice.modelId === draft.voiceId) ? <option value={draft.voiceId}>{draft.voiceId}（当前保存）</option> : null}

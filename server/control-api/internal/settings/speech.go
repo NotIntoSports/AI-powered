@@ -43,68 +43,68 @@ type SpeechRecord struct {
 	EncryptedAliyunAccessKeyID     []byte
 	EncryptedAliyunAccessKeySecret []byte
 	EncryptedAliyunToken           []byte
-	AliyunASRCustomizationID         string
-	AliyunASRVocabularyID            string
-	AliyunASREnableITN               bool
-	AliyunASREnablePunc              bool
-	AliyunASREnableDisfluency        bool
-	AliyunASREnableIntermediate      bool
-	AliyunASREnableSemanticBreak     bool
-	AliyunASRMaxSentenceSilence      int
-	AliyunASREnableVoiceDetection    bool
-	AliyunASRMaxStartSilence         *int
-	AliyunASRMaxEndSilence           *int
-	TTSVolume                        *int
-	TTSSpeechRate                    *int
-	TTSPitchRate                     *int
-	TTSSampleRate                    *int
-	ASREnableITN                     bool
-	ASREnablePunc                    bool
-	ASRModelName                     string
+	AliyunASRCustomizationID       string
+	AliyunASRVocabularyID          string
+	AliyunASREnableITN             bool
+	AliyunASREnablePunc            bool
+	AliyunASREnableDisfluency      bool
+	AliyunASREnableIntermediate    bool
+	AliyunASREnableSemanticBreak   bool
+	AliyunASRMaxSentenceSilence    int
+	AliyunASREnableVoiceDetection  bool
+	AliyunASRMaxStartSilence       *int
+	AliyunASRMaxEndSilence         *int
+	TTSVolume                      *int
+	TTSSpeechRate                  *int
+	TTSPitchRate                   *int
+	TTSSampleRate                  *int
+	ASREnableITN                   bool
+	ASREnablePunc                  bool
+	ASRModelName                   string
 }
 
 type SpeechInput struct {
-	AppID                      string
-	SpeakerID                  string
-	TTSResourceID              string
-	ASRResourceID              string
-	APIKey                     string
-	AccessToken                string
-	SecretKey                  string
-	ClearAPIKey                bool
-	ClearAccessToken           bool
-	ClearSecretKey             bool
-	Enabled                    *bool
-	ActiveProvider             string
-	AliyunAppKey               string
-	AliyunVoice                string
-	AliyunGateway              string
-	AliyunEnabled              *bool
-	AliyunAccessKeyID          string
-	AliyunAccessKeySecret      string
-	AliyunToken                string
-	ClearAliyunAccessKeyID     bool
-	ClearAliyunAccessKeySecret bool
-	ClearAliyunToken           bool
-	TestProvider               string
-	TTSVolume                  *int
-	TTSSpeechRate              *int
-	TTSPitchRate               *int
-	TTSSampleRate              *int
-	ASREnableITN               *bool
-	ASREnablePunc              *bool
-	ASRModelName               string
-	AliyunASRCustomizationID   string
-	AliyunASRVocabularyID      string
-	AliyunASREnableITN         *bool
-	AliyunASREnablePunc        *bool
-	AliyunASREnableDisfluency  *bool
-	AliyunASREnableIntermediate *bool
-	AliyunASREnableSemanticBreak *bool
-	AliyunASRMaxSentenceSilence *int
+	AppID                         string
+	SpeakerID                     string
+	TTSResourceID                 string
+	ASRResourceID                 string
+	APIKey                        string
+	AccessToken                   string
+	SecretKey                     string
+	ClearAPIKey                   bool
+	ClearAccessToken              bool
+	ClearSecretKey                bool
+	Enabled                       *bool
+	ActiveProvider                string
+	AliyunAppKey                  string
+	AliyunVoice                   string
+	AliyunGateway                 string
+	AliyunEnabled                 *bool
+	AliyunAccessKeyID             string
+	AliyunAccessKeySecret         string
+	AliyunToken                   string
+	ClearAliyunAccessKeyID        bool
+	ClearAliyunAccessKeySecret    bool
+	ClearAliyunToken              bool
+	TestProvider                  string
+	TTSVolume                     *int
+	TTSSpeechRate                 *int
+	TTSPitchRate                  *int
+	TTSSampleRate                 *int
+	ASREnableITN                  *bool
+	ASREnablePunc                 *bool
+	ASRModelName                  string
+	AliyunASRCustomizationID      string
+	AliyunASRVocabularyID         string
+	AliyunASREnableITN            *bool
+	AliyunASREnablePunc           *bool
+	AliyunASREnableDisfluency     *bool
+	AliyunASREnableIntermediate   *bool
+	AliyunASREnableSemanticBreak  *bool
+	AliyunASRMaxSentenceSilence   *int
 	AliyunASREnableVoiceDetection *bool
-	AliyunASRMaxStartSilence   *int
-	AliyunASRMaxEndSilence     *int
+	AliyunASRMaxStartSilence      *int
+	AliyunASRMaxEndSilence        *int
 }
 
 type PublicSpeech struct {
@@ -241,7 +241,7 @@ func (s *Store) GetSpeech(ctx context.Context) (SpeechRecord, error) {
 		return SpeechRecord{}, ErrNotConfigured
 	}
 	if err != nil {
-		return SpeechRecord{}, ErrStore
+		return SpeechRecord{}, wrapStore(err)
 	}
 	return record, nil
 }
@@ -741,47 +741,47 @@ func EmptyPublicSpeech() PublicSpeech {
 
 func normalizeSpeechInput(input SpeechInput) (SpeechInput, error) {
 	normalized := SpeechInput{
-		AppID:                      strings.TrimSpace(input.AppID),
-		SpeakerID:                  strings.TrimSpace(input.SpeakerID),
-		TTSResourceID:              strings.TrimSpace(input.TTSResourceID),
-		ASRResourceID:              strings.TrimSpace(input.ASRResourceID),
-		APIKey:                     strings.TrimSpace(input.APIKey),
-		AccessToken:                strings.TrimSpace(input.AccessToken),
-		SecretKey:                  strings.TrimSpace(input.SecretKey),
-		ClearAPIKey:                input.ClearAPIKey,
-		ClearAccessToken:           input.ClearAccessToken,
-		ClearSecretKey:             input.ClearSecretKey,
-		Enabled:                    input.Enabled,
-		ActiveProvider:             strings.TrimSpace(input.ActiveProvider),
-		AliyunAppKey:               strings.TrimSpace(input.AliyunAppKey),
-		AliyunVoice:                strings.TrimSpace(input.AliyunVoice),
-		AliyunGateway:              strings.TrimRight(strings.TrimSpace(input.AliyunGateway), "/"),
-		AliyunEnabled:              input.AliyunEnabled,
-		AliyunAccessKeyID:          strings.TrimSpace(input.AliyunAccessKeyID),
-		AliyunAccessKeySecret:      strings.TrimSpace(input.AliyunAccessKeySecret),
-		AliyunToken:                strings.TrimSpace(input.AliyunToken),
-		ClearAliyunAccessKeyID:     input.ClearAliyunAccessKeyID,
-		ClearAliyunAccessKeySecret: input.ClearAliyunAccessKeySecret,
-		ClearAliyunToken:           input.ClearAliyunToken,
-		TestProvider:               strings.TrimSpace(input.TestProvider),
-		TTSVolume:                  input.TTSVolume,
-		TTSSpeechRate:              input.TTSSpeechRate,
-		TTSPitchRate:               input.TTSPitchRate,
-		TTSSampleRate:              input.TTSSampleRate,
-		ASREnableITN:               input.ASREnableITN,
-		ASREnablePunc:              input.ASREnablePunc,
-		ASRModelName:               strings.TrimSpace(input.ASRModelName),
-		AliyunASRCustomizationID:   strings.TrimSpace(input.AliyunASRCustomizationID),
-		AliyunASRVocabularyID:      strings.TrimSpace(input.AliyunASRVocabularyID),
-		AliyunASREnableITN:         input.AliyunASREnableITN,
-		AliyunASREnablePunc:        input.AliyunASREnablePunc,
-		AliyunASREnableDisfluency:  input.AliyunASREnableDisfluency,
-		AliyunASREnableIntermediate: input.AliyunASREnableIntermediate,
-		AliyunASREnableSemanticBreak: input.AliyunASREnableSemanticBreak,
-		AliyunASRMaxSentenceSilence: input.AliyunASRMaxSentenceSilence,
+		AppID:                         strings.TrimSpace(input.AppID),
+		SpeakerID:                     strings.TrimSpace(input.SpeakerID),
+		TTSResourceID:                 strings.TrimSpace(input.TTSResourceID),
+		ASRResourceID:                 strings.TrimSpace(input.ASRResourceID),
+		APIKey:                        strings.TrimSpace(input.APIKey),
+		AccessToken:                   strings.TrimSpace(input.AccessToken),
+		SecretKey:                     strings.TrimSpace(input.SecretKey),
+		ClearAPIKey:                   input.ClearAPIKey,
+		ClearAccessToken:              input.ClearAccessToken,
+		ClearSecretKey:                input.ClearSecretKey,
+		Enabled:                       input.Enabled,
+		ActiveProvider:                strings.TrimSpace(input.ActiveProvider),
+		AliyunAppKey:                  strings.TrimSpace(input.AliyunAppKey),
+		AliyunVoice:                   strings.TrimSpace(input.AliyunVoice),
+		AliyunGateway:                 strings.TrimRight(strings.TrimSpace(input.AliyunGateway), "/"),
+		AliyunEnabled:                 input.AliyunEnabled,
+		AliyunAccessKeyID:             strings.TrimSpace(input.AliyunAccessKeyID),
+		AliyunAccessKeySecret:         strings.TrimSpace(input.AliyunAccessKeySecret),
+		AliyunToken:                   strings.TrimSpace(input.AliyunToken),
+		ClearAliyunAccessKeyID:        input.ClearAliyunAccessKeyID,
+		ClearAliyunAccessKeySecret:    input.ClearAliyunAccessKeySecret,
+		ClearAliyunToken:              input.ClearAliyunToken,
+		TestProvider:                  strings.TrimSpace(input.TestProvider),
+		TTSVolume:                     input.TTSVolume,
+		TTSSpeechRate:                 input.TTSSpeechRate,
+		TTSPitchRate:                  input.TTSPitchRate,
+		TTSSampleRate:                 input.TTSSampleRate,
+		ASREnableITN:                  input.ASREnableITN,
+		ASREnablePunc:                 input.ASREnablePunc,
+		ASRModelName:                  strings.TrimSpace(input.ASRModelName),
+		AliyunASRCustomizationID:      strings.TrimSpace(input.AliyunASRCustomizationID),
+		AliyunASRVocabularyID:         strings.TrimSpace(input.AliyunASRVocabularyID),
+		AliyunASREnableITN:            input.AliyunASREnableITN,
+		AliyunASREnablePunc:           input.AliyunASREnablePunc,
+		AliyunASREnableDisfluency:     input.AliyunASREnableDisfluency,
+		AliyunASREnableIntermediate:   input.AliyunASREnableIntermediate,
+		AliyunASREnableSemanticBreak:  input.AliyunASREnableSemanticBreak,
+		AliyunASRMaxSentenceSilence:   input.AliyunASRMaxSentenceSilence,
 		AliyunASREnableVoiceDetection: input.AliyunASREnableVoiceDetection,
-		AliyunASRMaxStartSilence:   input.AliyunASRMaxStartSilence,
-		AliyunASRMaxEndSilence:     input.AliyunASRMaxEndSilence,
+		AliyunASRMaxStartSilence:      input.AliyunASRMaxStartSilence,
+		AliyunASRMaxEndSilence:        input.AliyunASRMaxEndSilence,
 	}
 	if utf8.RuneCountInString(normalized.AppID) > 200 || utf8.RuneCountInString(normalized.AliyunAppKey) > 200 {
 		return SpeechInput{}, ErrInvalidInput

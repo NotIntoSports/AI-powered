@@ -346,6 +346,12 @@ export function displayError(error: APIError): string {
       return "不能禁用当前登录的管理员";
     case "RESUME_NOT_FOUND":
       return "资料不存在或已删除";
+    case "SETTINGS_STORE_UNAVAILABLE":
+      return "设置库暂时不可用，请稍后重试。若持续出现，请查看 control-api 日志中的数据库错误。";
+    case "INVALID_INPUT":
+      return "提交的内容无效。若在启用模型，请确认该模型已在官方名单或已发现列表中。";
+    case "MODEL_NOT_VERIFIED":
+      return "该模型尚未通过本人验证，无法用于当前线路。Realtime / ASR / TTS 专用协议只需先启用，不必用 Chat Completions 实测。";
     default:
       return error.message;
   }

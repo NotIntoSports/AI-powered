@@ -152,6 +152,22 @@ func (s *Store) RecordOfficialTokenPlanCatalogFailure(ctx context.Context, warni
 	return nil
 }
 
+func (s *Store) GetOfficialTokenPlanModel(ctx context.Context, modelID string) (OfficialTokenPlanModel, error) {
+	modelID = strings.TrimSpace(modelID)
+	if modelID == "" {
+		return OfficialTokenPlanModel{}, ErrInvalidInput
+	}
+	var model OfficialTokenPlanModel
+	err := s.db.QueryRow(ctx, `select model_id, capability, protocol from token_plan_official_models where model_id=$1`, modelID).Scan(&model.ModelID, &model.Capability, &model.Protocol)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return OfficialTokenPlanModel{}, ErrNotConfigured
+	}
+	if err != nil {
+		return OfficialTokenPlanModel{}, wrapStore(err)
+	}
+	return model, nil
+}
+
 func IsTokenPlanPersonalBaseURL(baseURL string) bool {
 	return strings.EqualFold(strings.TrimRight(strings.TrimSpace(baseURL), "/"), TokenPlanPersonalBaseURL)
 }
@@ -188,7 +204,7 @@ func (s *Store) ListTokenPlanProviderModels(ctx context.Context, providerID, bas
 	}
 	rows, err := s.db.Query(ctx, `select o.model_id, o.capability, o.protocol, o.synced_at, coalesce(st.key_discovered,false), coalesce(st.verification_status,'untested'), coalesce(st.verification_message,''), st.verified_at from token_plan_official_models o left join token_plan_model_status st on st.provider_id=$1 and st.model_id=o.model_id order by o.model_id`, providerID)
 	if err != nil {
-		return nil, ErrStore
+		return nil, wrapStore(err)
 	}
 	defer rows.Close()
 	for rows.Next() {
@@ -197,7 +213,7 @@ func (s *Store) ListTokenPlanProviderModels(ctx context.Context, providerID, bas
 		var keyDiscovered bool
 		var verifiedAt *time.Time
 		if err := rows.Scan(&id, &capability, &protocol, &synced, &keyDiscovered, &verification, &message, &verifiedAt); err != nil {
-			return nil, ErrStore
+			return nil, wrapStore(err)
 		}
 		model, ok := byID[id]
 		if !ok {
@@ -208,7 +224,7 @@ func (s *Store) ListTokenPlanProviderModels(ctx context.Context, providerID, bas
 		byID[id] = model
 	}
 	if err := rows.Err(); err != nil {
-		return nil, ErrStore
+		return nil, wrapStore(err)
 	}
 	out := make([]DiscoveredModel, 0, len(byID))
 	for _, model := range byID {
@@ -239,12 +255,24 @@ func (s *Store) SetTokenPlanVerification(ctx context.Context, providerID, modelI
 }
 
 func (s *Store) TokenPlanModelVerified(ctx context.Context, providerID, modelID string) (bool, error) {
-	var official, verified bool
-	err := s.db.QueryRow(ctx, `select exists(select 1 from token_plan_official_models where model_id=$2), exists(select 1 from token_plan_model_status where provider_id=$1 and model_id=$2 and verification_status='success')`, providerID, modelID).Scan(&official, &verified)
+	var official bool
+	var protocol, verification string
+	err := s.db.QueryRow(ctx, `
+		select
+			exists(select 1 from token_plan_official_models where model_id=$2),
+			coalesce((select protocol from token_plan_official_models where model_id=$2), ''),
+			coalesce((select verification_status from token_plan_model_status where provider_id=$1 and model_id=$2), 'untested')
+	`, providerID, modelID).Scan(&official, &protocol, &verification)
 	if err != nil {
-		return false, ErrStore
+		return false, wrapStore(err)
 	}
-	return official && verified, nil
+	if !official {
+		return false, nil
+	}
+	if tokenPlanDedicatedProtocol(protocol) {
+		return true, nil
+	}
+	return verification == "success", nil
 }
 
 func (s *Service) VerifyTokenPlanModel(ctx context.Context, providerID, modelID string) (ModelVerificationResult, error) {

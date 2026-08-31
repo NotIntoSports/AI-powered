@@ -83,6 +83,8 @@ export default function AISettingsPage() {
   const [manualModelId, setManualModelId] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState("");
   const [busyId, setBusyId] = useState("");
+  const [togglingModel, setTogglingModel] = useState("");
+  const [modelRowError, setModelRowError] = useState("");
   const [discoveringId, setDiscoveringId] = useState("");
   const [syncing, setSyncing] = useState(false);
   const [officialSyncing, setOfficialSyncing] = useState(false);
@@ -299,20 +301,29 @@ export default function AISettingsPage() {
   }
 
   async function toggleModel(providerId: string, model: DiscoveredModel) {
+    const key = `${providerId}:${model.modelId}`;
     setError("");
     setNotice("");
-    const result = await requestJSON(
-      `/api/v1/admin/settings/ai/providers/${encodeURIComponent(providerId)}/models/${encodeURIComponent(model.modelId)}`,
-      {
-        method: "PATCH",
-        body: JSON.stringify({ enabled: !model.enabled })
+    setModelRowError("");
+    setTogglingModel(key);
+    try {
+      const result = await requestJSON(
+        `/api/v1/admin/settings/ai/providers/${encodeURIComponent(providerId)}/models/${encodeURIComponent(model.modelId)}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ enabled: !model.enabled })
+        }
+      );
+      if (!result.response.ok) {
+        const message = displayError(parseAPIError(result.body, "操作失败"));
+        setError(message);
+        setModelRowError(`${model.modelId}：${message}`);
+        return;
       }
-    );
-    if (!result.response.ok) {
-      setError(displayError(parseAPIError(result.body, "操作失败")));
-      return;
+      await loadProviderModels(providerId);
+    } finally {
+      setTogglingModel("");
     }
-    await loadProviderModels(providerId);
   }
 
   async function activateModel(providerId: string, modelId: string) {
@@ -558,6 +569,7 @@ export default function AISettingsPage() {
                     </label>
                     <button className="secondary" type="button" onClick={() => void addManualModel(provider.id)}>添加</button>
                   </div>
+                  {modelRowError && models.some((model) => modelRowError.startsWith(`${model.modelId}：`)) ? <p className="error">{modelRowError}</p> : null}
                   {models.length === 0 ? (
                     <p className="muted">暂无模型，请先发现或手动添加。</p>
                   ) : (
@@ -587,8 +599,13 @@ export default function AISettingsPage() {
                             </td>
                             <td>
                               <div className="row">
-                                <button className="secondary" type="button" onClick={() => void toggleModel(provider.id, model)}>
-                                  {model.enabled ? "禁用" : "启用"}
+                                <button
+                                  className="secondary"
+                                  type="button"
+                                  disabled={togglingModel === `${provider.id}:${model.modelId}` || Boolean(busy)}
+                                  onClick={() => void toggleModel(provider.id, model)}
+                                >
+                                  {togglingModel === `${provider.id}:${model.modelId}` ? "处理中…" : model.enabled ? "禁用" : "启用"}
                                 </button>
                                 {model.officialSupported ? (
                                   <button className="secondary" type="button" disabled={busy} onClick={() => void verifyModel(provider.id, model.modelId)}>本人验证</button>

@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"log"
 	"net/http"
 	"strings"
 
@@ -751,6 +752,7 @@ func writeSettingsError(w http.ResponseWriter, request *http.Request, err error)
 	case errors.Is(err, settings.ErrOfficialCatalogUnavailable):
 		writeAPIError(w, request, http.StatusBadGateway, "OFFICIAL_CATALOG_UNAVAILABLE", "official catalog unavailable; previous successful catalog was preserved")
 	case errors.Is(err, settings.ErrStore):
+		log.Printf("settings store unavailable request_id=%s err=%v", middleware.GetReqID(request.Context()), err)
 		writeAPIError(w, request, http.StatusServiceUnavailable, "SETTINGS_STORE_UNAVAILABLE", "settings database unavailable")
 	default:
 		writeAPIError(w, request, http.StatusInternalServerError, "INTERNAL_ERROR", "settings service unavailable")
