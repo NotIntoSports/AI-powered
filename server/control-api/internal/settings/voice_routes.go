@@ -258,7 +258,11 @@ func (s *Service) validateVoiceRouteModels(ctx context.Context, input VoiceRoute
 	store := NewStore(s.db, s.box)
 	for _, c := range checks {
 		model, err := store.GetCatalogModel(ctx, c[0], c[1])
-		if err != nil || !model.Enabled || model.Capability != c[2] {
+		capabilityMatches := model.Capability == c[2]
+		if c[2] == CapabilityE2E && model.RealtimeEnabled && model.RealtimeSupported {
+			capabilityMatches = true
+		}
+		if err != nil || !model.Enabled || !capabilityMatches {
 			return ErrModelNotVerified
 		}
 		if !strings.HasPrefix(c[0], "speech:") {

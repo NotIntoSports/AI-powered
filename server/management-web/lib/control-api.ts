@@ -276,6 +276,12 @@ export type DiscoveredModel = {
   verifiedAt?: string;
   protocol?: string;
   officialSyncedAt?: string;
+  realtimeSupported: boolean;
+  realtimeEnabled: boolean;
+  realtimeVerificationStatus: "untested" | "verified" | "failed" | "stale";
+  realtimeVerificationMessage?: string;
+  realtimeVerifiedAt?: string;
+  realtimeVerifiedProviderVersion: number;
 };
 
 export type APIError = {

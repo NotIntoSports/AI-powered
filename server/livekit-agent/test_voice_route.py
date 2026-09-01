@@ -11,6 +11,25 @@ class VoiceRouteTests(unittest.TestCase):
         })
         self.assertEqual(runtime.route_id, "route-1")
         self.assertEqual(runtime.e2e.model, "qwen-audio")
+        self.assertFalse(runtime.e2e.realtime_enabled)
+
+    def test_e2e_route_uses_explicit_realtime_flag_not_model_name(self):
+        enabled = parse_voice_route({
+            "id": "route-enabled", "mode": "e2e", "active": True, "ready": True,
+            "e2e": {"providerId": "custom", "modelId": "audio-model", "baseUrl": "https://example/v1", "apiKey": "secret", "realtimeEnabled": True},
+        })
+        disabled = parse_voice_route({
+            "id": "route-disabled", "mode": "e2e", "active": True, "ready": True,
+            "e2e": {"providerId": "custom", "modelId": "contains-realtime", "baseUrl": "https://example/v1", "apiKey": "secret", "realtimeEnabled": False},
+        })
+        self.assertTrue(enabled.e2e.realtime_enabled)
+        self.assertFalse(disabled.e2e.realtime_enabled)
+
+    def test_agent_does_not_route_by_model_name(self):
+        from pathlib import Path
+        source = Path(__file__).with_name("agent.py").read_text(encoding="utf-8")
+        self.assertNotIn('"realtime" in', source)
+        self.assertIn("e2e_config.realtime_enabled", source)
 
     def test_not_ready_is_explicit(self):
         with self.assertRaisesRegex(VoiceRouteError, "VOICE_ROUTE_NOT_READY"):

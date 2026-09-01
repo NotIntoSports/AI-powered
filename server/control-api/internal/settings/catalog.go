@@ -26,6 +26,7 @@ type CatalogEntry struct {
 	RuntimeVerified bool       `json:"runtimeVerified"`
 	ClassifiedBy    string     `json:"classifiedBy,omitempty"`
 	ClassifiedAt    *time.Time `json:"classifiedAt,omitempty"`
+	RealtimeEnabled bool       `json:"realtimeEnabled"`
 }
 
 func catalogRuntimeVerified(baseURL string, official bool, verificationStatus, protocol string) bool {
@@ -83,12 +84,13 @@ type ClientPipeline struct {
 }
 
 type ClientPipelineEndpoint struct {
-	ProviderID   string `json:"providerId"`
-	ProviderName string `json:"providerName"`
-	ModelID      string `json:"modelId"`
-	BaseURL      string `json:"baseUrl,omitempty"`
-	APIKey       string `json:"apiKey,omitempty"`
-	Source       string `json:"source,omitempty"`
+	ProviderID      string `json:"providerId"`
+	ProviderName    string `json:"providerName"`
+	ModelID         string `json:"modelId"`
+	BaseURL         string `json:"baseUrl,omitempty"`
+	APIKey          string `json:"apiKey,omitempty"`
+	Source          string `json:"source,omitempty"`
+	RealtimeEnabled bool   `json:"realtimeEnabled"`
 }
 
 func ClassifyModelID(modelID string) string {
@@ -145,10 +147,13 @@ func scanDiscoveredModels(rows pgx.Rows) ([]DiscoveredModel, error) {
 		if err := rows.Scan(
 			&m.ID, &m.ProviderID, &m.ModelID, &m.BaseURL, &m.Enabled, &m.OwnedBy,
 			&m.Capability, &m.DisplayName, &m.ClassifiedBy, &classifiedAt, &m.DiscoveredAt, &m.UpdatedAt,
+			&m.RealtimeEnabled, &m.RealtimeVerificationStatus, &m.RealtimeVerificationMessage,
+			&m.RealtimeVerifiedAt, &m.RealtimeVerifiedProviderVersion,
 		); err != nil {
 			return nil, wrapStore(err)
 		}
 		m.ClassifiedAt = classifiedAt
+		m.RealtimeSupported = m.RealtimeVerificationStatus == RealtimeVerificationVerified
 		models = append(models, m)
 	}
 	if err := rows.Err(); err != nil {
@@ -168,12 +173,13 @@ func (s *Store) ListCatalog(ctx context.Context, capability, query string) ([]Ca
 			dm.id, coalesce(dm.provider_id, ''), coalesce(p.name, dm.provider_id, ''),
 			dm.model_id, dm.base_url, coalesce(dm.capability, 'unknown'), dm.enabled,
 			coalesce(dm.display_name, ''), coalesce(dm.classified_by, ''), dm.classified_at,
-			(tpo.model_id is not null), coalesce(tps.verification_status, 'untested'), coalesce(tpo.protocol, '')
+			(tpo.model_id is not null), coalesce(tps.verification_status, 'untested'), coalesce(tpo.protocol, ''),
+			dm.realtime_enabled
 		from discovered_models as dm
 		left join ai_provider_configs as p on p.id = dm.provider_id
 		left join token_plan_official_models as tpo on tpo.model_id = dm.model_id
 		left join token_plan_model_status as tps on tps.provider_id = dm.provider_id and tps.model_id = dm.model_id
-		where ($1 = '' or dm.capability = $1)
+		where ($1 = '' or dm.capability = $1 or ($1 = 'e2e' and dm.realtime_enabled = true))
 		  and (
 			$2 = '' or
 			dm.model_id ilike '%' || $2 || '%' or
@@ -196,7 +202,7 @@ func (s *Store) ListCatalog(ctx context.Context, capability, query string) ([]Ca
 		if err := rows.Scan(
 			&e.ID, &e.ProviderID, &e.ProviderName, &e.ModelID, &e.BaseURL,
 			&e.Capability, &e.Enabled, &e.DisplayName, &e.ClassifiedBy, &classifiedAt,
-			&official, &verificationStatus, &protocol,
+			&official, &verificationStatus, &protocol, &e.RealtimeEnabled,
 		); err != nil {
 			return nil, wrapStore(err)
 		}
@@ -267,12 +273,16 @@ func (s *Store) GetCatalogModel(ctx context.Context, providerID, modelID string)
 	err := s.db.QueryRow(ctx, `
 		select id, coalesce(provider_id, ''), model_id, base_url, enabled, coalesce(owned_by, ''),
 		       coalesce(capability, 'unknown'), coalesce(display_name, ''), coalesce(classified_by, ''),
-		       classified_at, discovered_at, updated_at
+		       classified_at, discovered_at, updated_at,
+		       realtime_enabled, realtime_verification_status, realtime_verification_message,
+		       realtime_verified_at, realtime_verified_provider_version
 		from discovered_models
 		where provider_id = $1 and model_id = $2
 	`, providerID, modelID).Scan(
 		&m.ID, &m.ProviderID, &m.ModelID, &m.BaseURL, &m.Enabled, &m.OwnedBy,
 		&m.Capability, &m.DisplayName, &m.ClassifiedBy, &classifiedAt, &m.DiscoveredAt, &m.UpdatedAt,
+		&m.RealtimeEnabled, &m.RealtimeVerificationStatus, &m.RealtimeVerificationMessage,
+		&m.RealtimeVerifiedAt, &m.RealtimeVerifiedProviderVersion,
 	)
 	if err == pgx.ErrNoRows {
 		return DiscoveredModel{}, ErrNotConfigured
@@ -281,6 +291,7 @@ func (s *Store) GetCatalogModel(ctx context.Context, providerID, modelID string)
 		return DiscoveredModel{}, wrapStore(err)
 	}
 	m.ClassifiedAt = classifiedAt
+	m.RealtimeSupported = m.RealtimeVerificationStatus == RealtimeVerificationVerified
 	return m, nil
 }
 
@@ -288,7 +299,9 @@ func (s *Store) ListUnclassifiedModels(ctx context.Context) ([]DiscoveredModel, 
 	rows, err := s.db.Query(ctx, `
 		select id, coalesce(provider_id, ''), model_id, base_url, enabled, coalesce(owned_by, ''),
 		       coalesce(capability, 'unknown'), coalesce(display_name, ''), coalesce(classified_by, ''),
-		       classified_at, discovered_at, updated_at
+		       classified_at, discovered_at, updated_at,
+		       realtime_enabled, realtime_verification_status, realtime_verification_message,
+		       realtime_verified_at, realtime_verified_provider_version
 		from discovered_models
 		where capability = 'unknown' or capability is null or capability = ''
 		order by provider_id, model_id
@@ -726,8 +739,9 @@ func (s *Service) resolvePipelineEndpoint(ctx context.Context, providerID, model
 		return nil, err
 	}
 	apiKey, _ := store.DecryptAPIKey(record)
+	model, _ := store.GetCatalogModel(ctx, providerID, modelID)
 	return &ClientPipelineEndpoint{
 		ProviderID: providerID, ProviderName: record.Name, ModelID: modelID,
-		BaseURL: record.BaseURL, APIKey: apiKey, Source: "ai",
+		BaseURL: record.BaseURL, APIKey: apiKey, Source: "ai", RealtimeEnabled: model.RealtimeEnabled && model.RealtimeSupported,
 	}, nil
 }

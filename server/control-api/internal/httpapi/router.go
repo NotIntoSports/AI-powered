@@ -120,6 +120,7 @@ func NewRouter(dependencies Dependencies) http.Handler {
 							r.Post("/discover", adminSettings.discoverAIProviderModels)
 							r.Get("/models", adminSettings.listAIProviderModels)
 							r.Post("/models", adminSettings.createAIProviderModel)
+							r.Patch("/models/{modelId}", adminSettings.patchAIProviderModel)
 							r.Route("/models/{modelId}", func(r chi.Router) {
 								r.Patch("/", adminSettings.patchAIProviderModel)
 								r.Delete("/", adminSettings.deleteAIProviderModel)

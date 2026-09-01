@@ -382,7 +382,7 @@ async def entrypoint(ctx: JobContext) -> None:
                     pcm = await asyncio.to_thread(call_tts, runtime.tts, text, runtime.voice_id)
                     await publish_pcm(ctx.room, pcm)
             else:
-                if runtime.e2e is None or "realtime" not in runtime.e2e.model.lower():
+                if runtime.e2e is None or not runtime.e2e.realtime_enabled:
                     raise VoiceRouteError("VOICE_ROUTE_COMMAND_NOT_SUPPORTED")
                 cached_audio: dict[str, bytes] = {}
 
@@ -501,7 +501,7 @@ async def entrypoint(ctx: JobContext) -> None:
             )
         )
         if e2e_mode and e2e_config is not None:
-            if "realtime" in e2e_config.model.lower():
+            if e2e_config.realtime_enabled:
                 task = asyncio.create_task(realtime_track(ctx.room, track, e2e_config, route.voice_id, session_context))
             else:
                 task = asyncio.create_task(e2e_track(ctx.room, track, e2e_config))

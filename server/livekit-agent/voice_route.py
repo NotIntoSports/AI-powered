@@ -14,6 +14,7 @@ class ModelEndpoint:
     base_url: str
     api_key: str
     source: str
+    realtime_enabled: bool = False
 
     @classmethod
     def from_dict(cls, payload: dict | None) -> "ModelEndpoint":
@@ -24,6 +25,7 @@ class ModelEndpoint:
             base_url=str(data.get("baseUrl") or "").strip().rstrip("/"),
             api_key=str(data.get("apiKey") or "").strip(),
             source=str(data.get("source") or "").strip(),
+            realtime_enabled=data.get("realtimeEnabled") is True,
         )
 
     def valid(self) -> bool:
@@ -55,7 +57,7 @@ def parse_voice_route(payload: dict) -> VoiceRouteRuntime:
         if not endpoint.valid():
             raise VoiceRouteError("VOICE_ROUTE_NOT_READY")
         try:
-            e2e = E2EConfig.from_dict({"baseUrl": endpoint.base_url, "model": endpoint.model_id, "apiKey": endpoint.api_key, "language": payload.get("language") or "zh"})
+            e2e = E2EConfig.from_dict({"baseUrl": endpoint.base_url, "model": endpoint.model_id, "apiKey": endpoint.api_key, "language": payload.get("language") or "zh", "realtimeEnabled": endpoint.realtime_enabled})
         except RuntimeError as exc:
             raise VoiceRouteError("VOICE_ROUTE_NOT_READY") from exc
         return VoiceRouteRuntime(route_id, int(payload.get("configVersion") or 1), mode, str(payload.get("voiceId") or ""), e2e=e2e)

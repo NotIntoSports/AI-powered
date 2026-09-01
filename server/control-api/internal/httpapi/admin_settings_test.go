@@ -55,6 +55,8 @@ type fakeSettingsAdmin struct {
 	allocationErr    error
 	allocationAction string
 	listVoices       func() (map[string]settings.UserSpeechVoice, error)
+	realtimeEnabled  *bool
+	realtimeForce    bool
 }
 
 func (fake *fakeSettingsAdmin) GetRoles(context.Context) (settings.RoleProfiles, error) {
@@ -356,6 +358,24 @@ func (fake *fakeSettingsAdmin) DeleteProviderModel(context.Context, string, stri
 
 func (fake *fakeSettingsAdmin) SetProviderModelEnabled(context.Context, string, string, bool) error {
 	return nil
+}
+
+func (fake *fakeSettingsAdmin) SetProviderModelRealtime(_ context.Context, _, modelID string, enabled, force bool) (settings.DiscoveredModel, error) {
+	fake.realtimeEnabled = &enabled
+	fake.realtimeForce = force
+	return settings.DiscoveredModel{ModelID: modelID, Enabled: true, RealtimeSupported: enabled, RealtimeEnabled: enabled, RealtimeVerificationStatus: settings.RealtimeVerificationVerified}, nil
+}
+
+func TestPatchProviderModelCanEnableAndReverifyRealtime(t *testing.T) {
+	fake := &fakeSettingsAdmin{}
+	router := NewRouter(Dependencies{Authentication: adminBrowserAuth(), UserAdmin: &fakeUserAdmin{list: func(users.User) ([]users.User, error) { return nil, nil }}, SettingsAdmin: fake})
+	response := performAdminCookieRequest(t, router, http.MethodPatch, "/api/v1/admin/settings/ai/providers/provider-1/models/audio-model", `{"realtimeEnabled":true,"reverify":true}`)
+	if response.Code != http.StatusOK || fake.realtimeEnabled == nil || !*fake.realtimeEnabled || !fake.realtimeForce {
+		t.Fatalf("status=%d body=%s enabled=%v force=%v", response.Code, response.Body.String(), fake.realtimeEnabled, fake.realtimeForce)
+	}
+	if !strings.Contains(response.Body.String(), `"realtimeEnabled":true`) {
+		t.Fatalf("body=%s", response.Body.String())
+	}
 }
 
 func (fake *fakeSettingsAdmin) ActivateProviderModel(_ context.Context, _ users.User, _ string, providerID, modelID string) (settings.PublicAIProvider, error) {

@@ -84,6 +84,7 @@ export default function AISettingsPage() {
   const [notice, setNotice] = useState("");
   const [busyId, setBusyId] = useState("");
   const [togglingModel, setTogglingModel] = useState("");
+  const [togglingRealtime, setTogglingRealtime] = useState("");
   const [modelRowError, setModelRowError] = useState("");
   const [discoveringId, setDiscoveringId] = useState("");
   const [syncing, setSyncing] = useState(false);
@@ -308,7 +309,7 @@ export default function AISettingsPage() {
     setTogglingModel(key);
     try {
       const result = await requestJSON(
-        `/api/v1/admin/settings/ai/providers/${encodeURIComponent(providerId)}/models/${encodeURIComponent(model.modelId)}`,
+        `/api/v1/admin/settings/ai/providers/${encodeURIComponent(providerId)}/models/${encodeURIComponent(model.modelId)}/`,
         {
           method: "PATCH",
           body: JSON.stringify({ enabled: !model.enabled })
@@ -323,6 +324,34 @@ export default function AISettingsPage() {
       await loadProviderModels(providerId);
     } finally {
       setTogglingModel("");
+    }
+  }
+
+  async function setRealtime(providerId: string, model: DiscoveredModel, realtimeEnabled: boolean, reverify = false) {
+    const key = `${providerId}:${model.modelId}`;
+    setError("");
+    setNotice("");
+    setModelRowError("");
+    setTogglingRealtime(key);
+    try {
+      const result = await requestJSON(
+        `/api/v1/admin/settings/ai/providers/${encodeURIComponent(providerId)}/models/${encodeURIComponent(model.modelId)}/`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ realtimeEnabled, ...(reverify ? { reverify: true } : {}) })
+        }
+      );
+      if (!result.response.ok) {
+        const message = displayError(parseAPIError(result.body, "Realtime 验证失败"));
+        setError(message);
+        setModelRowError(`${model.modelId}：${message}`);
+        await loadProviderModels(providerId);
+        return;
+      }
+      setNotice(reverify ? `${model.modelId}：Realtime 重新验证成功。` : realtimeEnabled ? `${model.modelId}：Realtime 已启用。` : `${model.modelId}：Realtime 已关闭。`);
+      await loadProviderModels(providerId);
+    } finally {
+      setTogglingRealtime("");
     }
   }
 
@@ -579,6 +608,7 @@ export default function AISettingsPage() {
                           <th>模型 ID</th>
                           <th>能力 / 协议</th>
                           <th>来源状态</th>
+                          <th>Realtime</th>
                           <th>状态</th>
                           <th>操作</th>
                         </tr>
@@ -591,6 +621,10 @@ export default function AISettingsPage() {
                             <td className="muted">
                               {model.officialSupported ? "官方支持" : "非官方手动项"} · {model.keyDiscovered ? "Key 已发现" : "Key 未发现"}<br />
                               {model.verificationStatus === "success" ? "本人实测成功" : model.verificationStatus === "failed" ? "本人实测失败" : model.verificationStatus === "unsupported" ? "本应用未接入该专用协议" : "尚未实测"}
+                            </td>
+                            <td className="muted">
+                              {model.realtimeVerificationStatus === "verified" ? "握手已验证" : model.realtimeVerificationStatus === "failed" ? `验证失败${model.realtimeVerificationMessage ? ` · ${model.realtimeVerificationMessage}` : ""}` : model.realtimeVerificationStatus === "stale" ? "配置已变化，需重新验证" : "尚未验证"}<br />
+                              {model.realtimeSupported ? (model.realtimeEnabled ? "支持 · 已开启" : "支持 · 已关闭") : "未确认支持"}
                             </td>
                             <td>
                               <span className={model.enabled ? "online" : "offline"}>
@@ -607,6 +641,20 @@ export default function AISettingsPage() {
                                 >
                                   {togglingModel === `${provider.id}:${model.modelId}` ? "处理中…" : model.enabled ? "禁用" : "启用"}
                                 </button>
+                                <button
+                                  className="secondary"
+                                  type="button"
+                                  disabled={!model.enabled || togglingRealtime === `${provider.id}:${model.modelId}` || Boolean(busy)}
+                                  onClick={() => void setRealtime(provider.id, model, !model.realtimeEnabled)}
+                                >
+                                  {togglingRealtime === `${provider.id}:${model.modelId}` ? "验证中…" : model.realtimeEnabled ? "关闭 Realtime" : "启用 Realtime"}
+                                </button>
+                                <button
+                                  className="secondary"
+                                  type="button"
+                                  disabled={!model.enabled || togglingRealtime === `${provider.id}:${model.modelId}` || Boolean(busy)}
+                                  onClick={() => void setRealtime(provider.id, model, true, true)}
+                                >重新验证 Realtime</button>
                                 {model.officialSupported ? (
                                   <button className="secondary" type="button" disabled={busy} onClick={() => void verifyModel(provider.id, model.modelId)}>本人验证</button>
                                 ) : null}

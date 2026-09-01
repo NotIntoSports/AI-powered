@@ -4,6 +4,7 @@ go 1.26.5
 
 require (
 	github.com/go-chi/chi/v5 v5.3.1
+	github.com/coder/websocket v1.8.13
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728
 	github.com/modelcontextprotocol/go-sdk v1.7.0
@@ -17,7 +18,6 @@ require (
 
 require (
 	github.com/clbanning/mxj v1.8.4 // indirect
-	github.com/coder/websocket v1.8.13 // indirect
 	github.com/google/go-querystring v1.0.0 // indirect
 	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/google/uuid v1.6.0 // indirect

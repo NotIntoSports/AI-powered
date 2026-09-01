@@ -709,25 +709,31 @@ func AuditMetadata(configVersion int, available bool) map[string]any {
 }
 
 type DiscoveredModel struct {
-	ID                  string     `json:"id"`
-	ProviderID          string     `json:"providerId,omitempty"`
-	ModelID             string     `json:"modelId"`
-	BaseURL             string     `json:"baseUrl"`
-	Enabled             bool       `json:"enabled"`
-	OwnedBy             string     `json:"ownedBy,omitempty"`
-	Capability          string     `json:"capability,omitempty"`
-	DisplayName         string     `json:"displayName,omitempty"`
-	ClassifiedBy        string     `json:"classifiedBy,omitempty"`
-	ClassifiedAt        *time.Time `json:"classifiedAt,omitempty"`
-	DiscoveredAt        time.Time  `json:"discoveredAt"`
-	UpdatedAt           time.Time  `json:"updatedAt"`
-	OfficialSupported   bool       `json:"officialSupported"`
-	KeyDiscovered       bool       `json:"keyDiscovered"`
-	VerificationStatus  string     `json:"verificationStatus"`
-	VerificationMessage string     `json:"verificationMessage,omitempty"`
-	VerifiedAt          *time.Time `json:"verifiedAt,omitempty"`
-	Protocol            string     `json:"protocol,omitempty"`
-	OfficialSyncedAt    *time.Time `json:"officialSyncedAt,omitempty"`
+	ID                              string     `json:"id"`
+	ProviderID                      string     `json:"providerId,omitempty"`
+	ModelID                         string     `json:"modelId"`
+	BaseURL                         string     `json:"baseUrl"`
+	Enabled                         bool       `json:"enabled"`
+	OwnedBy                         string     `json:"ownedBy,omitempty"`
+	Capability                      string     `json:"capability,omitempty"`
+	DisplayName                     string     `json:"displayName,omitempty"`
+	ClassifiedBy                    string     `json:"classifiedBy,omitempty"`
+	ClassifiedAt                    *time.Time `json:"classifiedAt,omitempty"`
+	DiscoveredAt                    time.Time  `json:"discoveredAt"`
+	UpdatedAt                       time.Time  `json:"updatedAt"`
+	OfficialSupported               bool       `json:"officialSupported"`
+	KeyDiscovered                   bool       `json:"keyDiscovered"`
+	VerificationStatus              string     `json:"verificationStatus"`
+	VerificationMessage             string     `json:"verificationMessage,omitempty"`
+	VerifiedAt                      *time.Time `json:"verifiedAt,omitempty"`
+	Protocol                        string     `json:"protocol,omitempty"`
+	OfficialSyncedAt                *time.Time `json:"officialSyncedAt,omitempty"`
+	RealtimeSupported               bool       `json:"realtimeSupported"`
+	RealtimeEnabled                 bool       `json:"realtimeEnabled"`
+	RealtimeVerificationStatus      string     `json:"realtimeVerificationStatus"`
+	RealtimeVerificationMessage     string     `json:"realtimeVerificationMessage,omitempty"`
+	RealtimeVerifiedAt              *time.Time `json:"realtimeVerifiedAt,omitempty"`
+	RealtimeVerifiedProviderVersion int        `json:"realtimeVerifiedProviderVersion"`
 }
 
 const (
@@ -745,7 +751,9 @@ func (s *Store) ListDiscoveredModels(ctx context.Context, baseURL string) ([]Dis
 	rows, err := s.db.Query(ctx, `
 		select id, coalesce(provider_id, ''), model_id, base_url, enabled, coalesce(owned_by, ''),
 		       coalesce(capability, 'unknown'), coalesce(display_name, ''), coalesce(classified_by, ''),
-		       classified_at, discovered_at, updated_at
+		       classified_at, discovered_at, updated_at,
+		       realtime_enabled, realtime_verification_status, realtime_verification_message,
+		       realtime_verified_at, realtime_verified_provider_version
 		from discovered_models
 		where base_url = $1
 		order by model_id
@@ -830,7 +838,7 @@ func (s *Store) UpsertDiscoveredModels(ctx context.Context, baseURL string, mode
 func (s *Store) SetModelEnabled(ctx context.Context, baseURL, modelID string, enabled bool) error {
 	tag, err := s.db.Exec(ctx, `
 		update discovered_models
-		set enabled = $1, updated_at = now()
+		set enabled = $1, realtime_enabled = case when $1 then realtime_enabled else false end, updated_at = now()
 		where base_url = $2 and model_id = $3
 	`, enabled, baseURL, modelID)
 	if err != nil {
@@ -840,6 +848,43 @@ func (s *Store) SetModelEnabled(ctx context.Context, baseURL, modelID string, en
 		return ErrInvalidInput
 	}
 	return nil
+}
+
+func (s *Store) SetModelRealtime(ctx context.Context, providerID, modelID string, enabled bool, status, message string, verifiedAt *time.Time, providerVersion int) (DiscoveredModel, error) {
+	tag, err := s.db.Exec(ctx, `
+		update discovered_models
+		set realtime_enabled=$1, realtime_verification_status=$2,
+		    realtime_verification_message=$3, realtime_verified_at=$4,
+		    realtime_verified_provider_version=$5, updated_at=now()
+		where provider_id=$6 and model_id=$7 and enabled=true
+	`, enabled, status, message, verifiedAt, providerVersion, providerID, modelID)
+	if err != nil {
+		return DiscoveredModel{}, wrapStore(err)
+	}
+	if tag.RowsAffected() == 0 {
+		return DiscoveredModel{}, ErrModelNotVerified
+	}
+	return s.GetCatalogModel(ctx, providerID, modelID)
+}
+
+func (s *Store) InvalidateProviderRealtime(ctx context.Context, providerID, baseURL string) error {
+	_, err := s.db.Exec(ctx, `
+		update discovered_models
+		set base_url=$2, realtime_enabled=false,
+		    realtime_verification_status=case when realtime_verification_status='untested' then 'untested' else 'stale' end,
+		    realtime_verification_message=case when realtime_verification_status='untested' then '' else 'PROVIDER_CONFIG_CHANGED' end,
+		    updated_at=now()
+		where provider_id=$1
+	`, providerID, baseURL)
+	return wrapStore(err)
+}
+
+func (s *Store) RefreshProviderRealtimeVersion(ctx context.Context, providerID string, providerVersion int) error {
+	_, err := s.db.Exec(ctx, `
+		update discovered_models set realtime_verified_provider_version=$2
+		where provider_id=$1 and realtime_verification_status='verified'
+	`, providerID, providerVersion)
+	return wrapStore(err)
 }
 
 func (s *Store) GetEnabledModels(ctx context.Context, baseURL string) ([]string, error) {

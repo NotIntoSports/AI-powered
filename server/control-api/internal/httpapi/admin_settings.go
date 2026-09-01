@@ -61,6 +61,7 @@ type SettingsAdmin interface {
 	AddProviderModel(ctx context.Context, providerID, modelID, ownedBy string) (settings.DiscoveredModel, error)
 	DeleteProviderModel(ctx context.Context, providerID, modelID string) error
 	SetProviderModelEnabled(ctx context.Context, providerID, modelID string, enabled bool) error
+	SetProviderModelRealtime(ctx context.Context, providerID, modelID string, enabled, force bool) (settings.DiscoveredModel, error)
 	ActivateProviderModel(ctx context.Context, actor users.User, requestID, providerID, modelID string) (settings.PublicAIProvider, error)
 	ListCatalog(ctx context.Context, capability, query string) ([]settings.CatalogEntry, error)
 	SyncCatalog(ctx context.Context) (settings.CatalogSyncResult, error)
@@ -729,6 +730,10 @@ func writeSettingsError(w http.ResponseWriter, request *http.Request, err error)
 		return true
 	}
 	switch {
+	case func() bool { var target *settings.RealtimeVerificationError; return errors.As(err, &target) }():
+		var target *settings.RealtimeVerificationError
+		_ = errors.As(err, &target)
+		writeAPIError(w, request, http.StatusBadGateway, "REALTIME_VERIFICATION_FAILED", target.Code)
 	case errors.Is(err, settings.ErrVoiceAlreadyAllocated):
 		writeAPIError(w, request, http.StatusConflict, "VOICE_ALREADY_ALLOCATED", "voice has already been allocated")
 	case errors.Is(err, settings.ErrVoiceAllocationInProgress):

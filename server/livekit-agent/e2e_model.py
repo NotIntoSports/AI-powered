@@ -31,6 +31,7 @@ class E2EConfig:
     timeout_ms: int = 60_000
     language: str = "zh"
     enabled: bool = True
+    realtime_enabled: bool = False
 
     @classmethod
     def from_dict(cls, payload: dict) -> "E2EConfig":
@@ -44,6 +45,9 @@ class E2EConfig:
         enabled = payload.get("enabled")
         if not isinstance(enabled, bool):
             enabled = True
+        realtime_enabled = payload.get("realtimeEnabled")
+        if not isinstance(realtime_enabled, bool):
+            realtime_enabled = False
         if not base_url:
             raise E2EModelError("E2E_BASE_URL_MISSING")
         if not model:
@@ -57,6 +61,7 @@ class E2EConfig:
             timeout_ms=timeout_ms,
             language=language,
             enabled=enabled,
+            realtime_enabled=realtime_enabled,
         )
 
 

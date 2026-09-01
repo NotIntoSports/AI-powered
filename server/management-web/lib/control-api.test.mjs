@@ -160,3 +160,13 @@ test("voice route manager supports route lifecycle and capability-specific model
   assert.match(panel, /当前会议使用/);
   assert.match(panel, /尚未启用任何线路，Agent 无法开会/);
 });
+
+test("model manager exposes verified realtime controls without model-name routing", () => {
+  const page = readFileSync(join(root, "..", "app", "settings", "ai", "page.tsx"), "utf8");
+  assert.match(page, /realtimeEnabled/);
+  assert.match(page, /realtimeSupported/);
+  assert.match(page, /realtimeVerificationStatus/);
+  assert.match(page, /重新验证 Realtime/);
+  assert.match(page, /启用 Realtime/);
+  assert.match(page, /JSON\.stringify\(\{ realtimeEnabled/);
+});

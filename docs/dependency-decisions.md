@@ -845,3 +845,12 @@
 - 兼容与成本：不新增依赖或付费后台探测；沿用 Go/PostgreSQL/goose、React/Next.js 和现有 LiveKit Python 运行时。新增线路只保存模型引用和音色，不复制密钥；Agent 内部接口才返回按需解密的运行快照。
 - 安全与运行：客户端不应获得 provider 端点或密钥；Agent 日志仅记录线路 ID、版本、模式、阶段和错误类型。线路失效返回 `VOICE_ROUTE_NOT_READY`，不静默回退；切换只影响新会话。
 - 未采用：三套配置继续双向同步（会产生冲突和热切歧义）；客户端直连云模型（泄露密钥并造成双调用）；自行实现 RTC/声卡驱动（现有 LiveKit 媒体层已覆盖且维护成本过高）。
+
+## 2026-09-01：管理端真实验证通用 Realtime 能力
+
+- 目标：模型是否进入 Realtime 由管理端真实握手结果和管理员开关共同决定，不再依赖模型名称或供应商品牌白名单；任意 OpenAI Realtime 兼容网关均可使用自己的 Base URL、模型 ID 和密钥。
+- 官方协议：OpenAI 与阿里云均以 `session.update` 请求、`session.updated` 成功事件及 `error` 失败事件确认会话配置。能力探测只建立 WebSocket 并发送最小会话配置，不上传音频、候选人数据或 ASR transcription 字段。
+- 采用：复用项目已有 `github.com/coder/websocket` v1.8.13（OpenBSD/ISC 风格宽松许可证）和现有 PostgreSQL/goose、React/Next.js 能力；该库仍在维护，支持当前 Go/Windows/Linux 构建，且已用于项目的阿里云 WebSocket 链路。
+- 资源与成本：不新增 SDK、安装体积或常驻 GPU/CPU；只有管理员首次开启或主动重新验证时产生一次短连接，不产生媒体生成调用。成功记录在供应商连接配置不变时复用。
+- 安全：Key 只在 Control API 后端解密并用于 Authorization；数据库只保存状态、配置版本、时间和限长错误码。日志不记录 Key、完整查询参数、响应正文或完整 URL。
+- 未采用：按模型名/厂商硬编码支持列表（无法覆盖自建网关）；浏览器直接探测（会暴露 Key）；引入供应商专用 SDK（协议事件已足够，增加体积和维护面）。

@@ -22,9 +22,11 @@ type aiProviderSettingsRequest struct {
 }
 
 type aiProviderModelRequest struct {
-	ModelID string `json:"modelId"`
-	OwnedBy string `json:"ownedBy"`
-	Enabled *bool  `json:"enabled"`
+	ModelID         string `json:"modelId"`
+	OwnedBy         string `json:"ownedBy"`
+	Enabled         *bool  `json:"enabled"`
+	RealtimeEnabled *bool  `json:"realtimeEnabled"`
+	Reverify        bool   `json:"reverify"`
 }
 
 func aiProviderInputFromRequest(input aiProviderSettingsRequest) settings.AIProviderInput {
@@ -211,12 +213,22 @@ func (handler *adminSettingsHandler) patchAIProviderModel(w http.ResponseWriter,
 		writeJSONDecodeError(w, request, err)
 		return
 	}
-	if input.Enabled == nil {
-		writeAPIError(w, request, http.StatusUnprocessableEntity, "INVALID_INPUT", "enabled is required")
+	if input.Enabled == nil && input.RealtimeEnabled == nil {
+		writeAPIError(w, request, http.StatusUnprocessableEntity, "INVALID_INPUT", "enabled or realtimeEnabled is required")
 		return
 	}
-	err := handler.admin.SetProviderModelEnabled(request.Context(), chi.URLParam(request, "id"), chi.URLParam(request, "modelId"), *input.Enabled)
-	if !writeSettingsError(w, request, err) {
+	if input.Enabled != nil {
+		err := handler.admin.SetProviderModelEnabled(request.Context(), chi.URLParam(request, "id"), chi.URLParam(request, "modelId"), *input.Enabled)
+		if !writeSettingsError(w, request, err) {
+			return
+		}
+	}
+	if input.RealtimeEnabled != nil {
+		model, err := handler.admin.SetProviderModelRealtime(request.Context(), chi.URLParam(request, "id"), chi.URLParam(request, "modelId"), *input.RealtimeEnabled, input.Reverify)
+		if !writeSettingsError(w, request, err) {
+			return
+		}
+		writeJSON(w, http.StatusOK, model)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})

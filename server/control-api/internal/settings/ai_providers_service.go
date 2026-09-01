@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/ai-interviewer/ai-powered/control-api/internal/audit"
 	"github.com/ai-interviewer/ai-powered/control-api/internal/users"
@@ -82,6 +83,8 @@ func (s *Service) UpdateAIProvider(ctx context.Context, actor users.User, reques
 		}
 	}
 	var public PublicAIProvider
+	current, currentErr := NewStore(s.db, s.box).GetAIByID(ctx, id)
+	connectionChanged := currentErr == nil && (strings.TrimRight(strings.TrimSpace(input.BaseURL), "/") != strings.TrimRight(current.BaseURL, "/") || strings.TrimSpace(input.APIKey) != "" || input.ClearAPIKey)
 	err := pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
 		store := NewStore(tx, s.box)
 		record, err := store.UpdateAIProvider(ctx, actor, id, input)
@@ -90,6 +93,15 @@ func (s *Service) UpdateAIProvider(ctx context.Context, actor users.User, reques
 		}
 		_, decryptErr := store.DecryptAPIKey(record)
 		public = record.publicProvider(decryptErr)
+		if connectionChanged {
+			if err := store.InvalidateProviderRealtime(ctx, id, record.BaseURL); err != nil {
+				return err
+			}
+		} else if currentErr == nil {
+			if err := store.RefreshProviderRealtimeVersion(ctx, id, record.ConfigVersion); err != nil {
+				return err
+			}
+		}
 		return audit.NewStore(tx).Append(ctx, audit.Event{
 			ActorUserID: actor.ID,
 			Action:      audit.ActionAISettingsUpdated,
@@ -331,6 +343,55 @@ func (s *Service) SetProviderModelEnabled(ctx context.Context, providerID, model
 		return upsertErr
 	}
 	return store.SetModelEnabled(ctx, record.BaseURL, modelID, enabled)
+}
+
+func (s *Service) SetProviderModelRealtime(ctx context.Context, providerID, modelID string, enabled, force bool) (DiscoveredModel, error) {
+	var updated DiscoveredModel
+	var verificationErr error
+	err := pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
+		store := NewStore(tx, s.box)
+		lockKey := strings.TrimSpace(providerID) + ":" + strings.TrimSpace(modelID)
+		if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended($1, 0))`, lockKey); err != nil {
+			return wrapStore(err)
+		}
+		record, err := store.GetAIByID(ctx, providerID)
+		if err != nil {
+			return err
+		}
+		model, err := store.GetCatalogModel(ctx, providerID, strings.TrimSpace(modelID))
+		if err != nil {
+			return err
+		}
+		if !model.Enabled {
+			return ErrModelNotVerified
+		}
+		if !enabled {
+			updated, err = store.SetModelRealtime(ctx, providerID, model.ModelID, false, model.RealtimeVerificationStatus, model.RealtimeVerificationMessage, model.RealtimeVerifiedAt, model.RealtimeVerifiedProviderVersion)
+			return err
+		}
+		if !force && model.RealtimeVerificationStatus == RealtimeVerificationVerified && model.RealtimeVerifiedProviderVersion == record.ConfigVersion {
+			updated, err = store.SetModelRealtime(ctx, providerID, model.ModelID, true, model.RealtimeVerificationStatus, model.RealtimeVerificationMessage, model.RealtimeVerifiedAt, model.RealtimeVerifiedProviderVersion)
+			return err
+		}
+		apiKey, err := store.DecryptAPIKey(record)
+		if err != nil || (!isLocalEndpoint(record.BaseURL) && strings.TrimSpace(apiKey) == "") {
+			return ErrNotConfigured
+		}
+		result := probeRealtime(ctx, record.BaseURL, model.ModelID, apiKey)
+		now := time.Now().UTC().Truncate(time.Microsecond)
+		updated, err = store.SetModelRealtime(ctx, providerID, model.ModelID, result.Supported, result.Status, result.Message, &now, record.ConfigVersion)
+		if err != nil {
+			return err
+		}
+		if !result.Supported {
+			verificationErr = &RealtimeVerificationError{Code: result.Message}
+		}
+		return nil
+	})
+	if err != nil {
+		return DiscoveredModel{}, err
+	}
+	return updated, verificationErr
 }
 
 func ProviderInputFromLegacy(input AIInput, name string) AIProviderInput {
