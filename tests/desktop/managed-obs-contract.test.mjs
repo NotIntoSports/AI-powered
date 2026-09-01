@@ -24,7 +24,9 @@ async function loadTypeScriptModule(url, stubs = {}) {
     fileName: url.pathname
   }).outputText;
   const module = { exports: {} };
-  const requireFromTest = (specifier) => stubs[specifier] ?? localRequire(specifier);
+  const requireFromTest = (specifier) => stubs[specifier] ?? (specifier === "./audio/communications-microphone-router"
+    ? { CommunicationsMicrophoneRouter: class CommunicationsMicrophoneRouter { async activate() {} async restore() {} } }
+    : localRequire(specifier));
   const execute = new Function("exports", "require", "module", "__filename", "__dirname", compiled);
   execute(module.exports, requireFromTest, module, url.pathname, path.dirname(url.pathname));
   return module.exports;
@@ -222,6 +224,37 @@ test("OBS IPC validates booleans and intervention actions before calling the man
     ["routing", "resume"],
     ["routing", "mute"]
   ]);
+});
+
+test("audio capture events are ignored after the renderer window is destroyed", async () => {
+  const handlers = new Map();
+  let captureOptions;
+  const { registerDesktopIpc } = await loadTypeScriptModule(
+    new URL("../../desktop/ipc.ts", import.meta.url),
+    {
+      electron: { shell: { async openExternal() {} } },
+      "./audio/capture-process": { AudioCaptureProcess: class AudioCaptureProcess { start(options) { captureOptions = options; } stop() {} } },
+      "./audio/meeting-processes": { async listMeetingProcesses() { return [{ pid: 42 }]; } },
+      "./prerequisites/windows-install": {
+        getPrerequisiteStatus() { return {}; },
+        async installPrerequisite() { return { installed: true, rebootRequired: false }; },
+        async ensureVirtualAudioResources() { return { staged: true }; }
+      }
+    }
+  );
+  const destroyedWindow = {
+    isDestroyed: () => true,
+    webContents: { isDestroyed: () => true, send() { throw new Error("Object has been destroyed"); } }
+  };
+  registerDesktopIpc(
+    { handle(channel, handler) { handlers.set(channel, handler); } },
+    () => ({ ready: true, baseUrl: null, serverOwned: false }),
+    () => destroyedWindow,
+    "AudioBridge.exe"
+  );
+  await handlers.get("desktop:start-audio-capture")({}, 42);
+  assert.doesNotThrow(() => captureOptions.onPcm(new Uint8Array([1])));
+  assert.doesNotThrow(() => captureOptions.onEvent({ type: "exit", sequence: 1, code: 0 }));
 });
 
 test("prerequisite status IPC passes the hosted resources directory", async () => {

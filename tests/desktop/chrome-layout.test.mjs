@@ -46,6 +46,7 @@ test("workspace keeps heavy meeting access off the main page but embeds the auto
   const intervention = await readFile(new URL("../../features/intervention/intervention-controls.tsx", import.meta.url), "utf8");
   const monitor = await readFile(new URL("../../features/audio/remote-monitor.ts", import.meta.url), "utf8");
   const adapter = await readFile(new URL("../../desktop/rtc/livekit-adapter.ts", import.meta.url), "utf8");
+  const playback = await readFile(new URL("../../features/audio/agent-audio-playback.ts", import.meta.url), "utf8");
 
   assert.doesNotMatch(page, /MeetingAccessCard/);
   assert.doesNotMatch(page, /RtcBridgeControl/);
@@ -54,7 +55,7 @@ test("workspace keeps heavy meeting access off the main page but embeds the auto
   assert.match(page, /IntegrationAlerts missing=\{readiness\.missing\}/);
   assert.doesNotMatch(page, /attachRemoteMonitor|\/api\/transcribe/);
   assert.match(adapter, /loadLocalAiMonitorEnabled/);
-  assert.match(adapter, /setSinkId/);
+  assert.match(playback, /setSinkId/);
   const alerts = await readFile(new URL("../../features/meeting/integration-alerts.tsx", import.meta.url), "utf8");
   assert.match(alerts, /workspaceToasts/);
   assert.match(alerts, /workspaceToastClose/);
@@ -81,4 +82,18 @@ test("workspace keeps heavy meeting access off the main page but embeds the auto
   assert.match(intervention, /本机听到 AI 播报/);
   assert.match(monitor, /parseRemoteMonitorEnabled/);
   assert.match(monitor, /ai-remote-monitor-enabled/);
+});
+
+test("livekit AI monitor reacts to changes after the remote track is subscribed", async () => {
+  const [adapter, playback] = await Promise.all([
+    readFile(new URL("../../desktop/rtc/livekit-adapter.ts", import.meta.url), "utf8"),
+    readFile(new URL("../../features/audio/agent-audio-playback.ts", import.meta.url), "utf8"),
+  ]);
+  const intervention = await readFile(new URL("../../features/intervention/intervention-controls.tsx", import.meta.url), "utf8");
+  assert.match(adapter, /subscribeLocalAiMonitor/);
+  assert.match(adapter, /setMonitorEnabled/);
+  assert.match(playback, /startMonitor/);
+  assert.match(playback, /track\.detach\(element\)/);
+  assert.match(adapter, /ai-local-monitor-error/);
+  assert.match(intervention, /ai-local-monitor-error/);
 });

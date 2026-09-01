@@ -42,6 +42,14 @@ assert.deepEqual(vbCable.routes, [{
   inputDeviceId: "cable-out",
   outputDeviceId: "cable-in"
 }]);
+
+const vbCablePrefersStereo = classifyAudioDevices([
+  { kind: "audioinput", label: "CABLE Output (VB-Audio Virtual Cable)", deviceId: "cable-out" },
+  { kind: "audiooutput", label: "CABLE In 16ch (VB-Audio Virtual Cable)", deviceId: "cable-in16" },
+  { kind: "audiooutput", label: "CABLE Input (VB-Audio Virtual Cable)", deviceId: "cable-in" }
+]);
+assert.equal(vbCablePrefersStereo.routes[0]?.outputDeviceId, "cable-in");
+assert.equal(vbCablePrefersStereo.routes[0]?.output, "CABLE Input (VB-Audio Virtual Cable)");
 assert.deepEqual(vbCable.inputs, [
   "CABLE Output (VB-Audio Virtual Cable)",
   "Realtek Microphone"

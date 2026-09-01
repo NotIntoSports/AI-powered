@@ -66,6 +66,19 @@ function isRemoteAudio(label: string) {
   return /todesk|sunshine|parsec|remote desktop/i.test(label);
 }
 
+function pickProfileOutput(
+  profile: (typeof routeProfiles)[number],
+  devices: AudioDeviceCandidate[]
+) {
+  const matches = devices.filter(
+    (device) => !isRemoteAudio(device.label) && profile.output.test(device.label)
+  );
+  if (profile.provider === "vb-cable" && profile.label === "VB-CABLE") {
+    return matches.find((device) => /\bcable\s+input\b/i.test(device.label)) || matches[0];
+  }
+  return matches[0];
+}
+
 export function classifyAudioDevices(devices: AudioDeviceCandidate[]) {
   const inputDevices = devices.filter(
     (device) => device.kind === "audioinput" && device.deviceId !== "default"
@@ -77,7 +90,7 @@ export function classifyAudioDevices(devices: AudioDeviceCandidate[]) {
   const outputs = unique(outputDevices.map((device) => device.label || "未命名播放设备"));
   const routes = routeProfiles.flatMap((profile) => {
     const input = inputDevices.find((device) => !isRemoteAudio(device.label) && profile.input.test(device.label));
-    const output = outputDevices.find((device) => !isRemoteAudio(device.label) && profile.output.test(device.label));
+    const output = pickProfileOutput(profile, outputDevices);
     return input?.deviceId && output?.deviceId ? [{
       provider: profile.provider,
       label: profile.label,

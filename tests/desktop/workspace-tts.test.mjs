@@ -49,8 +49,9 @@ test("LiveKit adapter owns Agent audio and stage is visual-only", async () => {
   const workspace = await readFile(new URL("../../app/page.tsx", import.meta.url), "utf8");
   const stage = await readFile(new URL("../../app/stage/page.tsx", import.meta.url), "utf8");
   const controller = await readFile(new URL("../../desktop/rtc/livekit-adapter.ts", import.meta.url), "utf8");
+  const playback = await readFile(new URL("../../features/audio/agent-audio-playback.ts", import.meta.url), "utf8");
   assert.doesNotMatch(workspace, /useWorkspaceTts|\/api\/tts/);
-  assert.match(controller, /setSinkId/);
+  assert.match(playback, /setSinkId/);
   assert.match(controller, /TrackSubscribed/);
   assert.match(controller, /loadLocalAiMonitorEnabled/);
   assert.doesNotMatch(controller, /speechSynthesis|playWebSpeech|\/api\/tts/);
@@ -59,7 +60,7 @@ test("LiveKit adapter owns Agent audio and stage is visual-only", async () => {
 
 test("Agent audio output failure is logged without credentials", async () => {
   const controller = await readFile(new URL("../../desktop/rtc/livekit-adapter.ts", import.meta.url), "utf8");
-  assert.match(controller, /agent audio output failed/);
+  assert.match(controller, /agent audio route/);
   assert.doesNotMatch(controller, /apiKey|apiSecret/);
 });
 

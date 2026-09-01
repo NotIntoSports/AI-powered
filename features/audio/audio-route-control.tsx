@@ -10,7 +10,7 @@ import { calculatePcmRms, hasMeaningfulAudioSignal } from "./audio-signal";
 import {
   clearVirtualAudioRoute,
   loadVirtualAudioRoute,
-  resolveStoredRouteAgainstDevices,
+  resolvePreferredVirtualAudioRoute,
   saveVirtualAudioRoute
 } from "./virtual-audio-route";
 import {
@@ -313,7 +313,7 @@ export function AudioRouteControl({ onReadyChange }: AudioRouteControlProps) {
       setOutputs(classified.outputs);
 
       const stored = loadVirtualAudioRoute();
-      const resolvedStored = stored ? resolveStoredRouteAgainstDevices(stored, candidates) : null;
+      const resolvedStored = stored ? resolvePreferredVirtualAudioRoute(stored, candidates) : null;
       if (resolvedStored) {
         if (await verifyRouteSignal(resolvedStored.inputDeviceId, resolvedStored.outputDeviceId, generation)) {
           applyReady(resolvedStored, true);
@@ -375,7 +375,7 @@ export function AudioRouteControl({ onReadyChange }: AudioRouteControlProps) {
         setMessage("虚拟声卡线路自动复核未通过，请重新检测。");
         return;
       }
-      const resolved = resolveStoredRouteAgainstDevices(stored, await readDeviceCandidates());
+      const resolved = resolvePreferredVirtualAudioRoute(stored, await readDeviceCandidates());
       if (checkGenerationRef.current !== generation) return;
       if (!resolved) {
         updateState("idle");
@@ -417,7 +417,7 @@ export function AudioRouteControl({ onReadyChange }: AudioRouteControlProps) {
         typeof navigator.mediaDevices?.enumerateDevices === "function"
       ) {
         try {
-          const resolved = resolveStoredRouteAgainstDevices(stored, await readDeviceCandidates());
+          const resolved = resolvePreferredVirtualAudioRoute(stored, await readDeviceCandidates());
           if (resolved && stateRef.current !== "ready" && checkGenerationRef.current === 0) {
             readyRef.current = true;
             stateRef.current = "ready";

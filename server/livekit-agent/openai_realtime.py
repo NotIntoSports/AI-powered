@@ -30,6 +30,35 @@ ALIYUN_DIALECT = RealtimeDialect("aliyun", "pcm", None)
 OPENAI_DIALECT = RealtimeDialect("openai", "pcm16", "alloy")
 
 
+class InputTranscriptAssembler:
+    def __init__(self) -> None:
+        self._texts: dict[str, str] = {}
+        self._finalized: set[str] = set()
+
+    def update(self, kind: str, payload: dict) -> tuple[str, str, bool] | None:
+        item_id = str(payload.get("item_id") or "").strip()
+        if not item_id or item_id in self._finalized:
+            return None
+        if kind == "input_transcript_completed":
+            transcript = str(payload.get("transcript") or "").strip()
+            if not transcript:
+                return None
+            self._texts[item_id] = transcript
+            self._finalized.add(item_id)
+            return item_id, transcript, True
+        if kind != "input_transcript_delta":
+            return None
+        stable = str(payload.get("text") or "")
+        stash = str(payload.get("stash") or "")
+        delta = str(payload.get("delta") or "")
+        text = stable + stash if stable or stash else self._texts.get(item_id, "") + delta
+        text = text.strip()
+        if not text:
+            return None
+        self._texts[item_id] = text
+        return item_id, text, False
+
+
 def _websocket_scheme(scheme: str) -> str:
     if scheme == "https":
         return "wss"
@@ -122,7 +151,7 @@ def response_create_event(modalities: list[str]) -> dict:
     return {"type": "response.create", "response": {"modalities": modalities}}
 
 
-def parse_server_event(raw: str) -> tuple[str, bytes | str] | None:
+def parse_server_event(raw: str) -> tuple[str, bytes | str | dict] | None:
     try:
         event = json.loads(raw)
     except json.JSONDecodeError as exc:
@@ -137,8 +166,18 @@ def parse_server_event(raw: str) -> tuple[str, bytes | str] | None:
         return "output_transcript", event["delta"]
     if kind == "response.text.delta" and isinstance(event.get("delta"), str):
         return "output_text", event["delta"]
+    if kind == "conversation.item.input_audio_transcription.delta":
+        return "input_transcript_delta", {
+            "item_id": str(event.get("item_id") or ""),
+            "delta": event.get("delta") if isinstance(event.get("delta"), str) else "",
+            "text": event.get("text") if isinstance(event.get("text"), str) else "",
+            "stash": event.get("stash") if isinstance(event.get("stash"), str) else "",
+        }
     if kind == "conversation.item.input_audio_transcription.completed" and isinstance(event.get("transcript"), str):
-        return "input_transcript", event["transcript"]
+        return "input_transcript_completed", {
+            "item_id": str(event.get("item_id") or ""),
+            "transcript": event["transcript"],
+        }
     if kind == "response.done":
         return "response_done", ""
     if kind == "session.updated":

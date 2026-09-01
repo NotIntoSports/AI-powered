@@ -1,4 +1,5 @@
 using AudioBridge;
+using System.Text.Json;
 
 if (args is ["--self-test"])
 {
@@ -7,6 +8,32 @@ if (args is ["--self-test"])
     if (!Protocol.Event("ready", new { captureScope = "process-tree" }).Contains("process-tree")) return 3;
     Console.WriteLine("AudioBridge self-test passed");
     return 0;
+}
+
+if (args is ["--set-default-communications-mic"])
+{
+    try
+    {
+        var change = CommunicationsMicrophone.UseCableOutput();
+        Console.WriteLine(JsonSerializer.Serialize(new {
+            changed = change.Changed,
+            previousId = change.PreviousId,
+            cableId = change.CableId,
+            cableLabel = change.CableLabel
+        }));
+        return 0;
+    }
+    catch (Exception error)
+    {
+        Console.Error.WriteLine(error.Message);
+        return 1;
+    }
+}
+
+if (args is ["--restore-default-communications-mic", var endpointId])
+{
+    try { CommunicationsMicrophone.Restore(endpointId); return 0; }
+    catch (Exception error) { Console.Error.WriteLine(error.Message); return 1; }
 }
 
 if (args.Length != 2 || args[0] != "--pid" || !uint.TryParse(args[1], out var processId) || processId == 0)

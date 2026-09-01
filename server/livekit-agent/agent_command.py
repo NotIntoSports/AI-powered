@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import Awaitable, Callable
 
 from session_context import SessionContextError, parse_session_context
+from agent_mode import VALID_AGENT_MODES
 
 
 class AgentCommandError(RuntimeError):
@@ -17,9 +18,12 @@ class AgentCommand:
     answer: str = ""
     expected_revision: int = 0
     context: dict | None = None
+    mode: str = ""
 
 
 def command_requirements(action: str) -> set[str]:
+    if action == "set_mode":
+        return set()
     if action == "say":
         return {"speak"}
     if action in {"retry", "correct"}:
@@ -34,12 +38,12 @@ def parse_agent_command(data: bytes) -> AgentCommand:
         payload = json.loads(data.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise AgentCommandError("AGENT_COMMAND_INVALID") from exc
-    allowed = {"v", "id", "action", "text", "answer", "expectedRevision", "context"}
+    allowed = {"v", "id", "action", "text", "answer", "expectedRevision", "context", "mode"}
     if not isinstance(payload, dict) or set(payload) - allowed or payload.get("v") != 1:
         raise AgentCommandError("AGENT_COMMAND_INVALID")
     command_id = str(payload.get("id") or "").strip()
     action = str(payload.get("action") or "").strip()
-    if not command_id or len(command_id) > 128 or action not in {"say", "retry", "correct", "report"}:
+    if not command_id or len(command_id) > 128 or action not in {"say", "retry", "correct", "report", "set_mode"}:
         raise AgentCommandError("AGENT_COMMAND_INVALID")
     text = str(payload.get("text") or "").strip()
     answer = str(payload.get("answer") or "").strip()
@@ -48,13 +52,18 @@ def parse_agent_command(data: bytes) -> AgentCommand:
         raise AgentCommandError("AGENT_COMMAND_INVALID")
     if action == "say" and not text or action == "correct" and not answer:
         raise AgentCommandError("AGENT_COMMAND_INVALID")
+    mode = str(payload.get("mode") or "").strip()
+    if action == "set_mode" and mode not in VALID_AGENT_MODES:
+        raise AgentCommandError("AGENT_COMMAND_INVALID")
+    if action != "set_mode" and mode:
+        raise AgentCommandError("AGENT_COMMAND_INVALID")
     context = None
     if payload.get("context") is not None:
         try:
             context = parse_session_context(json.dumps(payload["context"], ensure_ascii=False).encode())
         except SessionContextError as exc:
             raise AgentCommandError("AGENT_COMMAND_INVALID") from exc
-    return AgentCommand(command_id, action, text, answer, revision, context)
+    return AgentCommand(command_id, action, text, answer, revision, context, mode)
 
 
 def result_packet(command_id: str, action: str, result: dict, error: str = "") -> bytes:

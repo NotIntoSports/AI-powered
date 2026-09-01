@@ -1,6 +1,7 @@
 import { shell, type BrowserWindow, type IpcMain } from "electron";
 import path from "node:path";
 import { AudioCaptureProcess } from "./audio/capture-process";
+import { CommunicationsMicrophoneRouter } from "./audio/communications-microphone-router";
 import { listMeetingProcesses } from "./audio/meeting-processes";
 import { getPrerequisiteStatus, installPrerequisite, ensureVirtualAudioResources } from "./prerequisites/windows-install";
 import type { DesktopStatus, ManagedObsState } from "./types";
@@ -29,25 +30,42 @@ export function registerDesktopIpc(
   audioBridgePath: string,
   installResources?: InstallResources,
   obsManager?: ManagedObsIpcController
-): void {
+): () => Promise<void> {
   ipcMain.handle("desktop:get-status", () => getStatus());
   const capture = new AudioCaptureProcess();
+  const communicationsMicrophone = new CommunicationsMicrophoneRouter();
+  const sendToRenderer = (channel: string, payload: unknown) => {
+    const window = getWindow();
+    if (!window || window.isDestroyed() || window.webContents.isDestroyed()) return;
+    try {
+      window.webContents.send(channel, payload);
+    } catch (error) {
+      // Window teardown can race with a final AudioBridge stdout event.
+      if (window.isDestroyed() || window.webContents.isDestroyed()) return;
+      throw error;
+    }
+  };
   ipcMain.handle("desktop:list-meeting-processes", () => listMeetingProcesses());
   ipcMain.handle("desktop:start-audio-capture", async (_event, rawPid: unknown) => {
     if (!Number.isInteger(rawPid) || Number(rawPid) <= 0) throw new Error("INVALID_MEETING_PROCESS");
     const pid = Number(rawPid);
     const allowed = await listMeetingProcesses();
     if (!allowed.some((process) => process.pid === pid)) throw new Error("MEETING_PROCESS_NOT_AVAILABLE");
+    await communicationsMicrophone.activate(audioBridgePath, pid);
     capture.start({
       executablePath: audioBridgePath,
       pid,
-      onPcm: (data) => getWindow()?.webContents.send("desktop:audio-pcm", data),
-      onEvent: (event) => getWindow()?.webContents.send("desktop:audio-event", event)
+      onPcm: (data) => sendToRenderer("desktop:audio-pcm", data),
+      onEvent: (event) => {
+        sendToRenderer("desktop:audio-event", event);
+        if (event.type === "process-exited") void communicationsMicrophone.restore(audioBridgePath);
+      }
     });
     return { started: true as const };
   });
-  ipcMain.handle("desktop:stop-audio-capture", () => {
+  ipcMain.handle("desktop:stop-audio-capture", async () => {
     capture.stop();
+    await communicationsMicrophone.restore(audioBridgePath);
     return { stopped: true as const };
   });
   ipcMain.handle("desktop:get-prerequisite-status", () => {
@@ -104,4 +122,8 @@ export function registerDesktopIpc(
   ipcMain.handle("desktop:open-microphone-settings", async () => ({
     opened: (await shell.openExternal("ms-settings:privacy-microphone")) === undefined
   }));
+  return async () => {
+    capture.stop();
+    await communicationsMicrophone.restore(audioBridgePath).catch(() => undefined);
+  };
 }

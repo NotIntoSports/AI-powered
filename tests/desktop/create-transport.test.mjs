@@ -61,16 +61,17 @@ test("auto-bridge keeps Agent presence seen during connect instead of resetting 
 });
 
 test("desktop sends versioned session context to the Agent without model configuration", async () => {
-  const [contract, adapter, session] = await Promise.all([
+  const [contract, adapter, playback, session] = await Promise.all([
     readFile(new URL("../../lib/subtitles/transport.ts", import.meta.url), "utf8"),
     readFile(new URL("../../desktop/rtc/livekit-adapter.ts", import.meta.url), "utf8"),
+    readFile(new URL("../../features/audio/agent-audio-playback.ts", import.meta.url), "utf8"),
     readFile(new URL("../../features/rtc/bridge-session.ts", import.meta.url), "utf8")
   ]);
   assert.match(contract, /sessionContext/);
   assert.match(adapter, /session\.context\.v1/);
   assert.match(adapter, /publishData/);
   assert.match(adapter, /TrackSubscribed/);
-  assert.match(adapter, /setSinkId/);
+  assert.match(playback, /setSinkId/);
   assert.match(adapter, /loadVirtualAudioRoute/);
   assert.match(session, /\/api\/session/);
   assert.doesNotMatch(contract, /apiKey|baseUrl|providerId|modelId/);

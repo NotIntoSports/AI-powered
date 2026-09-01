@@ -463,7 +463,7 @@ a.accountDockTrigger { color: #eaf1ff; }
 .setup label { display: grid; gap: 7px; color: #9ba6b5; font-size: 13px; }
 .setup .consentCheck { display: flex; align-items: flex-start; gap: 9px; padding: 10px; border: 1px solid #4c412c; border-radius: 10px; background: #17140e; line-height: 1.5; }
 .consentCheck input { width: 17px; height: 17px; margin: 2px 0 0; flex: 0 0 auto; }
-.transcript { min-height: 450px; }
+.transcript { position: relative; min-height: 450px; }
 .transcript .cardHeading span, .muted { color: #737f90; }
 .transcriptMeta { display: flex; align-items: center; gap: 10px; }
 .transcriptMeta a { color: #a8bfe3; font-size: 12px; text-decoration: none; }
@@ -486,14 +486,23 @@ a.accountDockTrigger { color: #eaf1ff; }
 .historyList span { color: #7d8999; font-size: 11px; }
 .historyList a { color: #a8bfe3; font-size: 12px; text-decoration: none; }
 .historyList .historyDelete { padding: 5px 7px; border: 0; background: transparent; color: #d5959c; font-size: 11px; }
-.messages { margin-top: 17px; display: grid; gap: 12px; max-height: 600px; overflow: auto; }
-.message { max-width: 82%; border-radius: 13px; padding: 12px 14px; background: #1a202a; }
-.message.candidate { justify-self: end; background: #172a24; }
-.message strong { color: #91aad1; font-size: 12px; }
+.messages { margin-top: 17px; display: grid; gap: 12px; max-height: 600px; overflow: auto; scrollbar-color: rgba(190, 199, 211, .48) transparent; }
+.messagesContent { display: grid; gap: 0; align-content: start; }
+.messages::-webkit-scrollbar { width: 10px; }
+.messages::-webkit-scrollbar-track { background: transparent; }
+.messages::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 999px; background: rgba(190, 199, 211, .38); background-clip: padding-box; }
+.messages::-webkit-scrollbar-thumb:hover { background: rgba(220, 227, 236, .68); background-clip: padding-box; }
+.returnToLatest { position: absolute; right: 24px; bottom: 18px; z-index: 2; padding: 7px 12px; border: 1px solid rgba(126, 203, 166, .48); background: rgba(16, 31, 27, .82); color: #a8e3c6; box-shadow: 0 8px 24px rgba(0, 0, 0, .28); backdrop-filter: blur(8px); }
+.message { position: relative; width: 100%; max-width: none; padding: 15px 18px 15px 20px; border-top: 1px solid rgba(125, 139, 158, .12); border-left: 2px solid rgba(145, 170, 209, .46); border-radius: 0; background: transparent; }
+.message:first-child { border-top-color: transparent; }
+.message.candidate { justify-self: stretch; border-left-color: rgba(128, 203, 166, .58); background: transparent; }
+.message strong { display: block; color: #91aad1; font-size: 11px; font-weight: 650; letter-spacing: .04em; }
 .message.candidate strong { color: #80cba6; }
-.message p { margin: 6px 0 0; line-height: 1.65; }
-.message.live { border: 1px dashed #356653; opacity: .86; }
+.message p { margin: 5px 0 0; max-width: 100%; color: #e4e8ef; font-size: 15px; line-height: 1.72; }
+.message.live { border-top-color: rgba(128, 203, 166, .12); border-right: 0; border-bottom: 0; background: linear-gradient(90deg, rgba(38, 91, 69, .16), transparent 62%); opacity: .94; }
 .message.subtitlePreview small { display: block; margin-top: 7px; color: #7f9b8c; font-size: 11px; }
+.message.subtitlePreview small::before { content: ""; display: inline-block; width: 5px; height: 5px; margin: 0 7px 1px 0; border-radius: 50%; background: #80cba6; box-shadow: 0 0 0 3px rgba(128, 203, 166, .1); animation: subtitlePulse 1.2s ease-in-out infinite; }
+@keyframes subtitlePulse { 50% { opacity: .35; transform: scale(.76); } }
 .timelineNotice { margin: 0; padding: 10px 12px; border: 1px solid #4c412c; border-radius: 10px; background: #17140e; color: #d8be83; font-size: 13px; line-height: 1.5; }
 .message.live small { color: var(--muted); display: block; margin-top: 6px; }
 .conversationStatus { color: var(--accent); max-width: 240px; }

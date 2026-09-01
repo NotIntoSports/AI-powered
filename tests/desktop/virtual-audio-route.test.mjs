@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-const { loadVirtualAudioRoute, resolveStoredRouteAgainstDevices } = await import(
+const { loadVirtualAudioRoute, resolvePreferredVirtualAudioRoute, resolveStoredRouteAgainstDevices } = await import(
   "../../features/audio/virtual-audio-route.ts"
 );
 
@@ -31,6 +31,18 @@ test("resolves a stored route by label against current devices", () => {
     inputDeviceId: "new-input-id",
     outputDeviceId: "new-output-id"
   });
+});
+
+test("migrates a stored 16-channel VB-CABLE route to the standard stereo endpoint", () => {
+  const legacy16 = { ...stored, output: "CABLE In 16ch (VB-Audio Virtual Cable)" };
+  const devices = [
+    { kind: "audioinput", label: legacy16.input, deviceId: "input" },
+    { kind: "audiooutput", label: legacy16.output, deviceId: "output-16" },
+    { kind: "audiooutput", label: stored.output, deviceId: "output-stereo" },
+  ];
+  const resolved = resolvePreferredVirtualAudioRoute(legacy16, devices);
+  assert.equal(resolved?.output, stored.output);
+  assert.equal(resolved?.outputDeviceId, "output-stereo");
 });
 
 test("returns null when either endpoint label is missing", () => {

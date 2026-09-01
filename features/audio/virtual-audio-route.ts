@@ -1,4 +1,4 @@
-import type { AudioDeviceCandidate, VirtualAudioRoute } from "./audio-devices";
+import { classifyAudioDevices, type AudioDeviceCandidate, type VirtualAudioRoute } from "./audio-devices.ts";
 
 export const VIRTUAL_AUDIO_ROUTE_KEY = "ai-digital-human:virtual-audio-route:v2";
 const LEGACY_VIRTUAL_AUDIO_ROUTE_KEY = "ai-digital-human:virtual-audio-route:v1";
@@ -73,4 +73,23 @@ export function resolveStoredRouteAgainstDevices(
     inputDeviceId: input.deviceId,
     outputDeviceId: output.deviceId
   };
+}
+
+// Old clients could persist the first enumerated VB-CABLE playback endpoint,
+// which is commonly the 16-channel endpoint. Prefer the standard stereo cable
+// when it is present, while keeping the stored recording side/profile fixed.
+export function resolvePreferredVirtualAudioRoute(
+  stored: StoredVirtualAudioRoute,
+  devices: AudioDeviceCandidate[]
+): VirtualAudioRoute | null {
+  const resolvedStored = resolveStoredRouteAgainstDevices(stored, devices);
+  if (stored.provider !== "vb-cable" || stored.label !== "VB-CABLE") return resolvedStored;
+
+  const wantedInput = normalizeLabel(stored.input);
+  const preferred = classifyAudioDevices(devices).routes.find((route) =>
+    route.provider === "vb-cable" &&
+    route.label === "VB-CABLE" &&
+    normalizeLabel(route.input) === wantedInput
+  );
+  return preferred || resolvedStored;
 }

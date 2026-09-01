@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { InterviewSession } from "../lib/interview";
 import { assistantRoleIds, builtInRoleProfiles, transcriptSpeakerLabel, type AssistantRole } from "../lib/assistant-role";
 import { InterventionControls } from "../features/intervention/intervention-controls";
@@ -15,6 +15,12 @@ import {
 import { decideAutoSessionStart } from "../features/rtc/auto-session-start";
 import { UserAccountMenu } from "../features/settings/user-account-menu";
 import { selectTimelineSubtitleLines } from "../features/subtitles/timeline";
+import {
+  createTranscriptFollowState,
+  isTranscriptNearBottom,
+  reduceTranscriptFollowState,
+  type TranscriptFollowEvent,
+} from "../features/subtitles/scroll-follow";
 import { subtitleSink } from "../lib/subtitles/sink";
 import type { SubtitleLine } from "../lib/subtitles/contract";
 import { getInterviewReadiness } from "../features/readiness/interview-readiness";
@@ -105,6 +111,11 @@ export default function ConsolePage() {
   const [outputMode, setOutputMode] = useState<OutputMode>("real");
   const [uploadOpen, setUploadOpen] = useState(false);
   const autoStartAttemptedRef = useRef("");
+  const messagesRef = useRef<HTMLDivElement | null>(null);
+  const messagesContentRef = useRef<HTMLDivElement | null>(null);
+  const followStateRef = useRef(createTranscriptFollowState());
+  const followFrameRef = useRef<number | null>(null);
+  const [followingLatest, setFollowingLatest] = useState(true);
   const [snapshotReadiness, setSnapshotReadiness] = useState(() => getSnapshotReadiness({}));
   const readiness = getInterviewReadiness({
     outputMode,
@@ -252,22 +263,19 @@ export default function ConsolePage() {
   }
 
   useAgentE2eTurn({
-    enabled: automaticFollowup,
+    enabled: automaticFollowup && session.status === "running",
     processing: busy || answerPending,
     aiSpeaking: diagnostics.ttsState === "speaking",
     getExpectedRevision: () => sessionRef.current.revision,
-    onTurn: ({ answer, question, expectedRevision }) => {
+    onTurn: async ({ answer, question, expectedRevision }) => {
       setAnswerPending(true);
       setPendingFinalText(answer);
-      void act({
-        action: "e2e_turn",
-        answer,
-        question,
-        expectedRevision
-      }).finally(() => {
+      try {
+        return await act({ action: "e2e_turn", answer, question, expectedRevision });
+      } finally {
         setAnswerPending(false);
         setPendingFinalText("");
-      });
+      }
     },
     onBlocked: (message) => {
       if (sessionRef.current.status === "running") setError(message);
@@ -334,6 +342,52 @@ export default function ConsolePage() {
     status: session.status,
     finishedAt: session.finishedAt
   });
+  function updateFollowState(event: TranscriptFollowEvent) {
+    const next = reduceTranscriptFollowState(followStateRef.current, event);
+    followStateRef.current = next;
+    setFollowingLatest(next.mode !== "reviewing-history");
+  }
+
+  function scheduleScrollToLatest() {
+    const messages = messagesRef.current;
+    if (!messages || followStateRef.current.mode === "reviewing-history") return;
+    if (followFrameRef.current !== null) window.cancelAnimationFrame(followFrameRef.current);
+    updateFollowState({ type: "programmatic-start" });
+    followFrameRef.current = window.requestAnimationFrame(() => {
+      followFrameRef.current = null;
+      messages.scrollTop = messages.scrollHeight;
+      window.requestAnimationFrame(() => {
+        updateFollowState({
+          type: "programmatic-end",
+          nearBottom: isTranscriptNearBottom(messages),
+        });
+      });
+    });
+  }
+
+  function scrollToLatest() {
+    followStateRef.current = createTranscriptFollowState();
+    setFollowingLatest(true);
+    scheduleScrollToLatest();
+  }
+
+  useLayoutEffect(() => {
+    scheduleScrollToLatest();
+  }, [session.transcript, timelineSubtitleLines, pendingFinalText, answerPending]);
+
+  useEffect(() => {
+    const content = messagesContentRef.current;
+    if (!content || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      updateFollowState({ type: "content-resized" });
+      scheduleScrollToLatest();
+    });
+    observer.observe(content);
+    return () => {
+      observer.disconnect();
+      if (followFrameRef.current !== null) window.cancelAnimationFrame(followFrameRef.current);
+    };
+  }, []);
   const liveCandidateLine = session.status === "running" ? timelineSubtitleLines.at(-1) : undefined;
   const conversationStatus = diagnostics.ttsState === "error"
     ? `播报失败：${diagnostics.ttsError || "请检查助手舞台"}`
@@ -482,7 +536,26 @@ export default function ConsolePage() {
               </button>
             </div>
           </div>
-          <div className="messages">
+          <div
+            className="messages"
+            ref={messagesRef}
+            tabIndex={0}
+            onWheel={(event) => {
+              if (event.deltaY < 0) updateFollowState({ type: "user-scroll-up" });
+            }}
+            onPointerDown={() => updateFollowState({ type: "user-scroll-up" })}
+            onTouchStart={() => updateFollowState({ type: "user-scroll-up" })}
+            onKeyDown={(event) => {
+              if (["ArrowUp", "PageUp", "Home"].includes(event.key)) {
+                updateFollowState({ type: "user-scroll-up" });
+              }
+            }}
+            onScroll={(event) => {
+              const nearBottom = isTranscriptNearBottom(event.currentTarget);
+              updateFollowState({ type: "scroll-position", nearBottom });
+            }}
+          >
+            <div className="messagesContent" ref={messagesContentRef}>
             {session.transcript.length === 0 && timelineSubtitleLines.length === 0 && (
               <p className="muted">开始互动后，对话会显示在这里。</p>
             )}
@@ -515,7 +588,11 @@ export default function ConsolePage() {
                 </small>
               </div>
             ))}
+            </div>
           </div>
+          {!followingLatest ? (
+            <button className="returnToLatest" type="button" onClick={scrollToLatest}>回到最新</button>
+          ) : null}
           </article>
 
           <article className="card controls">

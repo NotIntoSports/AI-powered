@@ -41,3 +41,13 @@ test("clicking the intervention control toggles the human microphone without res
   assert.equal(stopped.humanMicActive, false);
   assert.equal(stopped.aiPaused, true);
 });
+
+test("intervention UI sends explicit Agent modes and starts a real microphone bridge", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(new URL("../../features/intervention/intervention-controls.tsx", import.meta.url), "utf8");
+  assert.match(source, /startHumanMicrophoneBridge/);
+  assert.match(source, /operator-speaking/);
+  assert.match(source, /set_mode/);
+  assert.match(source, /paused/);
+  assert.match(source, /ai-active/);
+});

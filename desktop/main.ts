@@ -16,6 +16,7 @@ for (const envFile of resolveDesktopEnvFiles(process.cwd())) {
 let server: (OwnedProcess & { baseUrl: string }) | null = null;
 let obsManager: ManagedObsController | null = null;
 let mainWindow: BrowserWindow | null = null;
+let cleanupDesktopIpc: (() => Promise<void>) | null = null;
 
 app.setName("AI Virtual Assistant");
 
@@ -116,7 +117,7 @@ if (!hasLock) {
     globalShortcut.register("CommandOrControl+,", () => {
       if (mainWindow && !mainWindow.isDestroyed()) void mainWindow.loadURL(`${baseUrl}/settings`);
     });
-    registerDesktopIpc(
+    cleanupDesktopIpc = registerDesktopIpc(
       ipcMain,
       getStatus,
       () => mainWindow,
@@ -153,7 +154,8 @@ app.on("before-quit", (event) => {
   shutdownStarted = true;
   void Promise.all([
     stopOwnedProcess(server),
-    obsManager?.stop() ?? Promise.resolve()
+    obsManager?.stop() ?? Promise.resolve(),
+    cleanupDesktopIpc?.() ?? Promise.resolve()
   ]).finally(() => {
     globalShortcut.unregisterAll();
     app.quit();

@@ -16,6 +16,26 @@ class AgentCommandTests(unittest.TestCase):
         self.assertEqual(command.action, "retry")
         self.assertEqual(command.expected_revision, 4)
 
+    def test_parses_agent_mode_command_without_generation_requirements(self):
+        command = parse_agent_command(json.dumps({
+            "v": 1,
+            "id": "cmd-mode-1",
+            "action": "set_mode",
+            "mode": "operator-speaking",
+        }).encode())
+        self.assertEqual(command.action, "set_mode")
+        self.assertEqual(command.mode, "operator-speaking")
+        self.assertEqual(command_requirements(command.action), set())
+
+    def test_rejects_unknown_agent_mode(self):
+        with self.assertRaisesRegex(AgentCommandError, "AGENT_COMMAND_INVALID"):
+            parse_agent_command(json.dumps({
+                "v": 1,
+                "id": "cmd-mode-2",
+                "action": "set_mode",
+                "mode": "guess-the-speaker",
+            }).encode())
+
     def test_rejects_model_or_secret_fields(self):
         with self.assertRaisesRegex(AgentCommandError, "AGENT_COMMAND_INVALID"):
             parse_agent_command(json.dumps({"v": 1, "id": "cmd-1", "action": "say", "text": "hi", "modelId": "x"}).encode())

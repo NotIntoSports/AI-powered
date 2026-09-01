@@ -17,7 +17,8 @@ from e2e_model import AudioTurnBuffer, E2EConfig, E2EModelError, call_e2e
 from voice_route import VoiceRouteError, VoiceRouteRuntime, parse_voice_route
 from session_context import SessionContextError, parse_session_context
 from agent_command import AgentCommandError, command_requirements, execute_agent_command, parse_agent_command, result_packet
-from openai_realtime import RealtimeError, RealtimeSession, realtime_error_code, run_text_turn
+from agent_mode import AgentModeState
+from openai_realtime import InputTranscriptAssembler, RealtimeError, RealtimeSession, realtime_error_code, run_text_turn
 
 COMMAND_TOPIC = "agent.command.v1"
 COMMAND_RESULT_TOPIC = "agent.command.result.v1"
@@ -180,6 +181,7 @@ async def transcribe_track(
     token_provider: AliyunTokenProvider,
     route: VoiceRouteRuntime,
     session_context: dict,
+    mode_state: AgentModeState,
 ) -> None:
     audio_stream = rtc.AudioStream(
         track,
@@ -213,7 +215,7 @@ async def transcribe_track(
                     transcript.final,
                     config.language,
                 )
-                if transcript.final and route.llm and route.tts:
+                if transcript.final and route.llm and route.tts and mode_state.can_answer():
                     try:
                         reply, pcm = await run_cascade_turn(route.llm, route.tts, transcript.text, route.voice_id, session_context)
                         await publish_response(room, transcript.utterance_id, transcript.text, reply, True, config.language)
@@ -228,7 +230,7 @@ async def transcribe_track(
         await session.close()
 
 
-async def e2e_track(room: rtc.Room, track: rtc.Track, config: E2EConfig) -> None:
+async def e2e_track(room: rtc.Room, track: rtc.Track, config: E2EConfig, mode_state: AgentModeState) -> None:
     audio_stream = rtc.AudioStream(
         track,
         sample_rate=SAMPLE_RATE,
@@ -265,19 +267,27 @@ async def e2e_track(room: rtc.Room, track: rtc.Track, config: E2EConfig) -> None
                 )
                 continue
             await publish_v1(room, result.utterance_id, result.transcript, True, config.language, source="livekit-e2e")
-            await publish_response(
-                room,
-                result.utterance_id,
-                result.transcript,
-                result.reply,
-                True,
-                config.language,
-            )
+            if mode_state.can_answer():
+                await publish_response(
+                    room,
+                    result.utterance_id,
+                    result.transcript,
+                    result.reply,
+                    True,
+                    config.language,
+                )
     finally:
         buffer.reset()
 
 
-async def realtime_track(room: rtc.Room, track: rtc.Track, config: E2EConfig, voice_id: str, session_context: dict) -> None:
+async def realtime_track(
+    room: rtc.Room,
+    track: rtc.Track,
+    config: E2EConfig,
+    voice_id: str,
+    session_context: dict,
+    mode_state: AgentModeState,
+) -> None:
     audio_stream = rtc.AudioStream(track, sample_rate=SAMPLE_RATE, num_channels=1, frame_size_ms=20)
     output = AgentAudioTrack(room, sample_rate=24000)
     instructions = f"角色：{session_context.get('role', 'assistant')}。主题：{session_context.get('topic', '')}。使用中文简洁自然回复。"
@@ -286,27 +296,41 @@ async def realtime_track(room: rtc.Room, track: rtc.Track, config: E2EConfig, vo
         async with RealtimeSession(config.base_url, config.model, config.api_key, voice_id, instructions) as realtime:
             candidate_text = ""
             reply_text = ""
-            utterance_id = str(uuid.uuid4())
+            utterance_id = ""
+            response_generation: int | None = None
+            transcripts = InputTranscriptAssembler()
 
             async def send_audio() -> None:
                 async for frame in audio_stream:
                     await realtime.send_audio(bytes(frame.frame.data))
 
             async def receive_events() -> None:
-                nonlocal candidate_text, reply_text, utterance_id
+                nonlocal candidate_text, reply_text, utterance_id, response_generation
                 async for kind, value in realtime.events():
                     if kind == "audio" and isinstance(value, bytes):
-                        await output.write(value)
-                    elif kind == "input_transcript":
-                        candidate_text = str(value)
-                        await publish_v1(room, utterance_id, candidate_text, True, config.language, source="livekit-e2e")
+                        if response_generation is None:
+                            response_generation = mode_state.answer_generation()
+                        if mode_state.can_answer() and response_generation == mode_state.generation:
+                            await output.write(value)
+                    elif kind in {"input_transcript_delta", "input_transcript_completed"} and isinstance(value, dict):
+                        assembled = transcripts.update(kind, value)
+                        if assembled is None:
+                            continue
+                        utterance_id, candidate_text, final = assembled
+                        await publish_v1(room, utterance_id, candidate_text, final, config.language, source="livekit-e2e")
+                        if final:
+                            response_generation = mode_state.answer_generation()
                     elif kind == "output_transcript":
-                        reply_text += str(value)
+                        if response_generation is None:
+                            response_generation = mode_state.answer_generation()
+                        if mode_state.can_answer() and response_generation == mode_state.generation:
+                            reply_text += str(value)
                     elif kind == "response_done":
-                        await output.flush()
-                        if candidate_text and reply_text:
+                        if mode_state.can_answer() and response_generation == mode_state.generation:
+                            await output.flush()
+                        if candidate_text and reply_text and mode_state.can_answer() and response_generation == mode_state.generation:
                             await publish_response(room, utterance_id, candidate_text, reply_text, True, config.language)
-                        candidate_text, reply_text, utterance_id = "", "", str(uuid.uuid4())
+                        candidate_text, reply_text, utterance_id, response_generation = "", "", "", None
 
             async with asyncio.TaskGroup() as group:
                 group.create_task(send_audio())
@@ -322,7 +346,13 @@ async def realtime_track(room: rtc.Room, track: rtc.Track, config: E2EConfig, vo
         await output.close()
 
 
-async def compatible_cascade_track(room: rtc.Room, track: rtc.Track, route: VoiceRouteRuntime, session_context: dict) -> None:
+async def compatible_cascade_track(
+    room: rtc.Room,
+    track: rtc.Track,
+    route: VoiceRouteRuntime,
+    session_context: dict,
+    mode_state: AgentModeState,
+) -> None:
     if not route.asr or not route.llm or not route.tts:
         raise VoiceRouteError("VOICE_ROUTE_NOT_READY")
     audio_stream = rtc.AudioStream(track, sample_rate=SAMPLE_RATE, num_channels=1, frame_size_ms=20)
@@ -336,6 +366,8 @@ async def compatible_cascade_track(room: rtc.Room, track: rtc.Track, route: Voic
             try:
                 transcript = await asyncio.to_thread(call_asr, route.asr, chunk, SAMPLE_RATE)
                 await publish_v1(room, utterance_id, transcript, True, str(session_context.get("language") or "zh"))
+                if not mode_state.can_answer():
+                    continue
                 reply, pcm = await run_cascade_turn(route.llm, route.tts, transcript, route.voice_id, session_context)
                 await publish_response(room, utterance_id, transcript, reply, True, str(session_context.get("language") or "zh"))
                 await publish_pcm(room, pcm)
@@ -358,6 +390,7 @@ async def wait_for_shutdown(ctx: JobContext) -> None:
 async def entrypoint(ctx: JobContext) -> None:
     session_context: dict = {"v": 1, "role": "assistant", "topic": "", "history": [], "resumeIds": [], "language": "zh"}
     route_state: dict = {"id": "pending", "runtime": None}
+    mode_state = AgentModeState()
 
     async def process_command(packet_data: bytes) -> None:
         try:
@@ -365,6 +398,15 @@ async def entrypoint(ctx: JobContext) -> None:
             runtime: VoiceRouteRuntime | None = route_state["runtime"]
             if runtime is None:
                 raise VoiceRouteError("VOICE_ROUTE_NOT_READY")
+
+            if command.action == "set_mode":
+                mode_state.set_mode(command.mode)
+                result = {"mode": mode_state.mode, "generation": mode_state.generation}
+                await ctx.room.local_participant.publish_data(
+                    result_packet(command.command_id, command.action, result),
+                    topic=COMMAND_RESULT_TOPIC,
+                )
+                return
 
             requirements = command_requirements(command.action)
             if runtime.mode == "cascaded":
@@ -502,13 +544,13 @@ async def entrypoint(ctx: JobContext) -> None:
         )
         if e2e_mode and e2e_config is not None:
             if e2e_config.realtime_enabled:
-                task = asyncio.create_task(realtime_track(ctx.room, track, e2e_config, route.voice_id, session_context))
+                task = asyncio.create_task(realtime_track(ctx.room, track, e2e_config, route.voice_id, session_context, mode_state))
             else:
-                task = asyncio.create_task(e2e_track(ctx.room, track, e2e_config))
+                task = asyncio.create_task(e2e_track(ctx.room, track, e2e_config, mode_state))
         elif nls_config is not None and token_provider is not None:
-            task = asyncio.create_task(transcribe_track(ctx.room, track, nls_config, token_provider, route, session_context))
+            task = asyncio.create_task(transcribe_track(ctx.room, track, nls_config, token_provider, route, session_context, mode_state))
         elif route.mode == "cascaded" and route.asr and route.asr.source == "ai":
-            task = asyncio.create_task(compatible_cascade_track(ctx.room, track, route, session_context))
+            task = asyncio.create_task(compatible_cascade_track(ctx.room, track, route, session_context, mode_state))
         else:
             return
         tasks.add(task)

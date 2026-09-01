@@ -3,9 +3,10 @@ export const AGENT_COMMAND_RESULT_TOPIC = "agent.command.result.v1";
 
 export type AgentCommand = {
   id: string;
-  action: "say" | "retry" | "correct" | "report";
+  action: "say" | "retry" | "correct" | "report" | "set_mode";
   text?: string;
   answer?: string;
+  mode?: "ai-active" | "operator-speaking" | "paused" | "muted";
   expectedRevision: number;
   context?: {
     v: 1;
@@ -34,7 +35,7 @@ export function encodeAgentCommand(command: AgentCommand): Uint8Array<ArrayBuffe
 export function parseAgentCommandResult(input: unknown): AgentCommandResult | null {
   if (!input || typeof input !== "object" || Array.isArray(input)) return null;
   const value = input as Record<string, unknown>;
-  if (value.v !== 1 || typeof value.commandId !== "string" || !["say", "retry", "correct", "report"].includes(String(value.action))) return null;
+  if (value.v !== 1 || typeof value.commandId !== "string" || !["say", "retry", "correct", "report", "set_mode"].includes(String(value.action))) return null;
   if (typeof value.ok !== "boolean" || !value.result || typeof value.result !== "object" || Array.isArray(value.result)) return null;
   return {
     commandId: value.commandId,

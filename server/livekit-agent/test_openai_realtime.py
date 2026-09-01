@@ -6,6 +6,7 @@ from pathlib import Path
 
 import openai_realtime
 from openai_realtime import (
+    InputTranscriptAssembler,
     RealtimeError,
     RealtimeSession,
     append_audio_event,
@@ -21,6 +22,40 @@ from openai_realtime import (
 
 
 class OpenAIRealtimeTests(unittest.TestCase):
+    def test_input_transcript_assembler_streams_snapshots_and_deltas_per_item(self):
+        assembler = InputTranscriptAssembler()
+        self.assertEqual(
+            assembler.update("input_transcript_delta", {
+                "item_id": "qwen-1", "text": "今天", "stash": "天气", "delta": ""
+            }),
+            ("qwen-1", "今天天气", False),
+        )
+        self.assertEqual(
+            assembler.update("input_transcript_delta", {
+                "item_id": "openai-1", "text": "", "stash": "", "delta": "你"
+            }),
+            ("openai-1", "你", False),
+        )
+        self.assertEqual(
+            assembler.update("input_transcript_delta", {
+                "item_id": "openai-1", "text": "", "stash": "", "delta": "好"
+            }),
+            ("openai-1", "你好", False),
+        )
+        self.assertEqual(
+            assembler.update("input_transcript_completed", {
+                "item_id": "openai-1", "transcript": "你好。"
+            }),
+            ("openai-1", "你好。", True),
+        )
+
+    def test_input_transcript_assembler_ignores_late_partial_after_final(self):
+        assembler = InputTranscriptAssembler()
+        assembler.update("input_transcript_completed", {"item_id": "item-1", "transcript": "最终"})
+        self.assertIsNone(assembler.update("input_transcript_delta", {
+            "item_id": "item-1", "text": "旧", "stash": "", "delta": ""
+        }))
+
     def test_openai_v1_uses_realtime_endpoint_and_pcm16(self):
         dialect = realtime_dialect("https://api.openai.com/v1")
         self.assertEqual(
@@ -92,6 +127,42 @@ class OpenAIRealtimeTests(unittest.TestCase):
         with self.assertRaisesRegex(RealtimeError, r"invalid_value:bad field"):
             parse_server_event(json.dumps({"type": "error", "error": {"code": "invalid_value", "message": "bad field"}}))
 
+    def test_parses_openai_input_transcript_delta_with_item_identity(self):
+        event = parse_server_event(json.dumps({
+            "type": "conversation.item.input_audio_transcription.delta",
+            "item_id": "item-openai-1",
+            "delta": "你好",
+        }))
+        self.assertEqual(event, ("input_transcript_delta", {
+            "item_id": "item-openai-1",
+            "delta": "你好",
+            "text": "",
+            "stash": "",
+        }))
+
+    def test_parses_qwen_input_transcript_snapshot_and_completion(self):
+        partial = parse_server_event(json.dumps({
+            "type": "conversation.item.input_audio_transcription.delta",
+            "item_id": "item-qwen-1",
+            "text": "今天",
+            "stash": "天气",
+        }))
+        completed = parse_server_event(json.dumps({
+            "type": "conversation.item.input_audio_transcription.completed",
+            "item_id": "item-qwen-1",
+            "transcript": "今天天气很好",
+        }))
+        self.assertEqual(partial, ("input_transcript_delta", {
+            "item_id": "item-qwen-1",
+            "delta": "",
+            "text": "今天",
+            "stash": "天气",
+        }))
+        self.assertEqual(completed, ("input_transcript_completed", {
+            "item_id": "item-qwen-1",
+            "transcript": "今天天气很好",
+        }))
+
     def test_realtime_error_code_unwraps_exception_group(self):
         group = ExceptionGroup("task group", [RealtimeError("REALTIME_SESSION_UPDATE_TIMEOUT")])
         self.assertEqual(realtime_error_code(group), "REALTIME_SESSION_UPDATE_TIMEOUT")
@@ -107,6 +178,7 @@ class OpenAIRealtimeTests(unittest.TestCase):
         self.assertIn("from openai_realtime import", agent)
         self.assertIn("realtime_track", agent)
         self.assertIn("openai_realtime.py", dockerfile)
+        self.assertIn("agent_mode.py", dockerfile)
         self.assertNotIn("qwen_realtime", agent + dockerfile)
         self.assertNotIn("QwenRealtime", agent + dockerfile)
 

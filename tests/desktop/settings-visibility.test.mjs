@@ -42,6 +42,7 @@ test("OBS automatic connection uses a bounded 30 second cold-start window", asyn
 test("virtual audio one-click installs the signed driver and Agent audio uses the virtual sink", async () => {
   const audioRoute = await readFile(new URL("../../features/audio/audio-route-control.tsx", import.meta.url), "utf8");
   const controller = await readFile(new URL("../../desktop/rtc/livekit-adapter.ts", import.meta.url), "utf8");
+  const playback = await readFile(new URL("../../features/audio/agent-audio-playback.ts", import.meta.url), "utf8");
   assert.match(audioRoute, /CABLE Output/);
   assert.match(audioRoute, /CABLE Input/);
   assert.doesNotMatch(audioRoute, /www\.vb-cable\.com/);
@@ -54,13 +55,14 @@ test("virtual audio one-click installs the signed driver and Agent audio uses th
   assert.match(audioRoute, /setSinkId/);
   assert.match(audioRoute, /loadReadinessSnapshot/);
   assert.match(audioRoute, /正在自动检测虚拟声卡线路/);
-  assert.match(audioRoute, /resolveStoredRouteAgainstDevices/);
+  assert.match(audioRoute, /resolvePreferredVirtualAudioRoute/);
   assert.match(audioRoute, /verifiedAt/);
   assert.doesNotMatch(audioRoute, /安装包中的虚拟音频驱动资源缺失/);
   assert.doesNotMatch(audioRoute, /\/api\/stage-test-speech/);
   assert.match(controller, /loadVirtualAudioRoute/);
-  assert.match(controller, /resolveStoredRouteAgainstDevices/);
-  assert.match(controller, /setSinkId/);
+  assert.match(controller, /resolvePreferredVirtualAudioRoute/);
+  assert.match(controller, /classifyAudioDevices\(candidates\)\.routes\[0\]/);
+  assert.match(playback, /setSinkId/);
 });
 
 test("voice clone returns an ID, binds the account, and TTS prefers that speaker", async () => {
