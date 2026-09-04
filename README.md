@@ -27,6 +27,22 @@ npm run test:tauri-package
 进程树没有 Node、Control API、Python、PostgreSQL 或 Nginx，并确认安装包目录未混入本地
 配置、数据库、日志或凭据测试文件。
 
+### Tauri Page Shell (Phase 2)
+
+The Tauri client now provides five read-only page shells with sidebar navigation:
+
+- **工作台** (Workspace) — Design §6.1
+- **资料** (Materials) — Design §6.2
+- **记录** (Records) — Design §6.3
+- **服务** (Services) — Design §6.4
+- **设置与诊断** (Settings & Diagnostics) — Design §6.5
+
+Pages display migration roadmaps and capability placeholders. Business commands are not yet wired — they will be connected in subsequent phases.
+
+Launch with `npm run tauri:dev` (development) or `npm run tauri:build` (packaging).
+
+The Electron/Next.js product path remains the default and is unaffected by this work.
+
 > 当前版本是 Windows x64 内部试用版。使用前须告知对方 AI 参与和记录方式，并由人工复核；不得用于隐蔽冒充或未经复核的自动决策。
 
 - `/`：虚拟助手工作台；

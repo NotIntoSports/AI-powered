@@ -8,6 +8,26 @@ The parallel Tauri foundation is accepted for planning the React page-shell migr
 
 The packaged foundation starts without Node, Control API, Python, PostgreSQL, or Nginx descendants. Product capabilities remain subject to the per-row `keep`, `migrate`, and `delete` decisions and their later gates.
 
+## Phase 2 Page-Shell Status (2026-09-05)
+
+All five desktop routes now have Tauri page shells in `src/screens/`:
+
+| Route | Shell File | Status |
+|-------|-----------|--------|
+| workspace | `src/screens/workspace/workspace-page.tsx` | Shell only — capabilities listed, zero business logic |
+| materials | `src/screens/materials/materials-page.tsx` | Shell only |
+| records | `src/screens/records/records-page.tsx` | Shell only |
+| services | `src/screens/services/services-page.tsx` | Shell only |
+| settings | `src/screens/settings/settings-page.tsx` | Shell only |
+
+Navigation: `src/components/app-nav.tsx` (sidebar, 5 buttons, hash routing via wouter).
+Shell composition: `src/app/shell.tsx` (useHashLocation + parseHash).
+Boundary contracts: `tests/tauri/page-shell-contract.test.mjs` (10 assertions, all PASS).
+
+Old `app/` routes remain unchanged and continue to serve the default Electron/Next.js product path.
+
+Next step: Phase 3 (provider & voice-route configuration) will wire the first real commands into these shells.
+
 ## Desktop client pages
 
 | Current route | Capability | Decision | Destination |
