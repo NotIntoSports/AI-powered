@@ -9,6 +9,8 @@ test("generated bindings have a deterministic warning header", async () => {
   assert.match(bindings, /export type CommandResult<T>/);
   assert.match(bindings, /export type FoundationStatus/);
   assert.match(bindings, /export type PublicError/);
+  assert.match(bindings, /export type SecretStatus/);
+  assert.doesNotMatch(bindings, /secret(Value|Contents)|apiKey|password/i);
 });
 
 test("only the command adapter imports the low-level Tauri invoke API", () => {

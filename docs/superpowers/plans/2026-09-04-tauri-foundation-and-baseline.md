@@ -579,21 +579,21 @@ git commit -m "feat: add versioned local configuration"
 **Interfaces:**
 - Produces: trait `SecretStore`, `SecretService`, `MemorySecretStore`, `WindowsSecretStore`, and commands `secret_set`, `secret_delete`, `secret_status`.
 
-- [ ] **Step 1: Write failing secret lifecycle tests against memory storage**
+- [x] **Step 1: Write failing secret lifecycle tests against memory storage**
 
 Cover set, status, replace, delete, delete missing, provider deletion cleanup, and namespace isolation. Assert public results never contain the secret value.
 
-- [ ] **Step 2: Write a Windows ignored integration test**
+- [x] **Step 2: Write a Windows ignored integration test**
 
 Use a random entry under `com.aivirtualassistant.desktop.test/<uuid>`, write a random value, read internally, delete in `finally`, and assert status changes. Mark the test ignored by default and run it explicitly on Windows CI/release hosts.
 
-- [ ] **Step 3: Verify tests fail**
+- [x] **Step 3: Verify tests fail**
 
 Run: `cargo test --manifest-path src-tauri/Cargo.toml secrets::`
 
 Expected: compile failure because `SecretStore` is missing.
 
-- [ ] **Step 4: Implement the secret abstraction and Windows backend**
+- [x] **Step 4: Implement the secret abstraction and Windows backend**
 
 ```rust
 pub trait SecretStore: Send + Sync {
@@ -606,11 +606,11 @@ pub trait SecretStore: Send + Sync {
 
 Add `zeroize` only after recording its dependency decision. Validate references against `^[a-z0-9][a-z0-9/_-]{0,127}$`. Never log value length, contents, clipboard data, or credential backend debug output.
 
-- [ ] **Step 5: Implement public commands without secret readback**
+- [x] **Step 5: Implement public commands without secret readback**
 
 `secret_set` accepts reference and new value, returns configured state. `secret_status` accepts references and returns booleans. There is no `secret_get` Tauri command.
 
-- [ ] **Step 6: Verify memory and Windows tests**
+- [x] **Step 6: Verify memory and Windows tests**
 
 Run:
 
@@ -622,7 +622,7 @@ cargo test --manifest-path src-tauri/Cargo.toml
 
 Expected: all tests PASS; integration test removes its credential even when an assertion fails.
 
-- [ ] **Step 7: Commit secret storage**
+- [x] **Step 7: Commit secret storage**
 
 ```powershell
 git add src-tauri/src src-tauri/Cargo.toml src-tauri/Cargo.lock

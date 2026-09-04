@@ -4,4 +4,6 @@ export type PublicError = { code: string, message: string, requestId: string, fi
 
 export type FoundationStatus = { ready: boolean, };
 
+export type SecretStatus = { reference: string, configured: boolean, };
+
 export type CommandResult<T> = { ok: true; data: T } | { ok: false; error: PublicError };
