@@ -4,6 +4,7 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   plugins: [react()],
   clearScreen: false,
+  publicDir: false,
   envPrefix: ["TAURI_ENV_"],
   server: {
     host: "127.0.0.1",

@@ -13,7 +13,7 @@
     "test:tauri-ui": "vitest run --config vite.config.ts",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
-    "test:tauri": "cargo test --manifest-path src-tauri/Cargo.toml && node --test tests/tauri/*.test.mjs && npm run build:tauri-ui",
+    "test:tauri": "cargo test --manifest-path src-tauri/Cargo.toml && npm run test:tauri-ui && node --test tests/tauri/*.test.mjs && npm run build:tauri-ui",
     "test:tauri-package": "node scripts/test-tauri-package.mjs",
     "predev": "npm run prepare:vad",
     "dev": "next dev -H 127.0.0.1",
@@ -66,6 +66,7 @@
     "obs-websocket-js": "^5.0.8",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "wouter": "3.10.0",
     "zod": "^3.25.0"
   },
   "devDependencies": {
