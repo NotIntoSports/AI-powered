@@ -1,9 +1,10 @@
-use tauri::{WebviewUrl, WebviewWindowBuilder};
+use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
 mod app_state;
 mod commands;
 mod config;
 mod contracts;
+mod database;
 mod error;
 mod secrets;
 
@@ -21,7 +22,6 @@ fn navigation_is_allowed(url: &tauri::Url) -> bool {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .manage(app_state::AppState::production())
         .invoke_handler(tauri::generate_handler![
             commands::foundation_get_status,
             commands::secret_set,
@@ -29,6 +29,8 @@ pub fn run() {
             commands::secret_status,
         ])
         .setup(|app| {
+            let data_directory = app.path().app_data_dir()?;
+            app.manage(app_state::AppState::production(&data_directory)?);
             WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("AI Virtual Assistant")
                 .inner_size(1180.0, 760.0)

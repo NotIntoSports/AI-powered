@@ -643,7 +643,7 @@ Use the actual changed manifest paths; do not stage unrelated files.
 **Interfaces:**
 - Produces: `Database::open(path)`, `Database::migrate()`, `Database::integrity_check()`, and a single Rust-owned connection service.
 
-- [ ] **Step 1: Write failing migration tests**
+- [x] **Step 1: Write failing migration tests**
 
 Use a temporary directory and verify:
 
@@ -654,13 +654,13 @@ Use a temporary directory and verify:
 - integrity check returns `ok`;
 - no table contains columns matching `api_key|token|secret|password`.
 
-- [ ] **Step 2: Verify tests fail**
+- [x] **Step 2: Verify tests fail**
 
 Run: `cargo test --manifest-path src-tauri/Cargo.toml database::`
 
 Expected: compile failure because `Database` is missing.
 
-- [ ] **Step 3: Create the foundation migration**
+- [x] **Step 3: Create the foundation migration**
 
 Create only these tables in this plan:
 
@@ -679,11 +679,11 @@ CREATE TABLE diagnostic_events(
 
 Do not prematurely create materials, vectors, sessions, or provider tables; their plans own those schemas.
 
-- [ ] **Step 4: Implement explicit migration execution**
+- [x] **Step 4: Implement explicit migration execution**
 
 Use one transaction, record version only after successful SQL, and reject database versions newer than the binary. The database path is supplied by app-state initialization; the database module never locates directories itself.
 
-- [ ] **Step 5: Run migration and full Cargo tests**
+- [x] **Step 5: Run migration and full Cargo tests**
 
 Run:
 
@@ -694,7 +694,7 @@ cargo test --manifest-path src-tauri/Cargo.toml
 
 Expected: all PASS.
 
-- [ ] **Step 6: Commit database foundation**
+- [x] **Step 6: Commit database foundation**
 
 ```powershell
 git add src-tauri/migrations src-tauri/src/database src-tauri/src/app_state.rs src-tauri/src/lib.rs
