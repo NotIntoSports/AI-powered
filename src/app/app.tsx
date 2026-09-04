@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { getStartupState, openAppDirectory, restoreDefaultConfig, restoreLastGoodConfig } from "../api/commands";
 import type { StartupState } from "../generated/bindings";
 import { ConfigRepair } from "../features/config-repair/config-repair";
+import { Shell } from "./shell";
 
 export function App() {
   const [startup, setStartup] = useState<StartupState | null>(null);
@@ -30,15 +31,5 @@ export function App() {
   if (startup.kind === "recoverable" || startup.kind === "invalid") {
     return <ConfigRepair state={startup} busy={busy} onRestoreLastGood={() => void repair(restoreLastGoodConfig)} onRestoreDefaults={() => void repair(restoreDefaultConfig)} onOpenConfig={() => void openAppDirectory("config")} />;
   }
-  return (
-    <main className="foundation-shell">
-      <section className="foundation-card" aria-labelledby="foundation-title">
-        <p className="foundation-eyebrow">本地单体迁移</p>
-        <h1 id="foundation-title">Tauri Foundation</h1>
-        <p className="foundation-status">
-          Rust 桌面核心与 React 界面外壳已建立，旧版 Electron 入口暂时保持不变。
-        </p>
-      </section>
-    </main>
-  );
+  return <Shell />;
 }

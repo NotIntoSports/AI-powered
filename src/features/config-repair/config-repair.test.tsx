@@ -16,10 +16,11 @@ describe("configuration repair mode", () => {
   beforeEach(() => vi.clearAllMocks());
   afterEach(cleanup);
 
-  it("renders the foundation shell when startup is ready", async () => {
+  it("renders the shell with the workspace page when startup is ready", async () => {
     getStartupState.mockResolvedValue({ ok: true, data: { kind: "ready" } });
     render(<App />);
-    expect(await screen.findByRole("heading", { name: "Tauri Foundation" })).toBeTruthy();
+    expect(await screen.findByRole("navigation", { name: "主导航" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "工作台" })).toBeTruthy();
   });
 
   it("shows stable field errors and restores last-good configuration", async () => {
