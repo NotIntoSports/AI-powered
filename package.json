@@ -7,6 +7,7 @@
   "main": "dist-desktop/main.js",
   "scripts": {
     "prepare:vad": "node scripts/copy-vad-assets.mjs",
+    "measure:legacy": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/measure-desktop-baseline.ps1",
     "predev": "npm run prepare:vad",
     "dev": "next dev -H 127.0.0.1",
     "prebuild": "npm run prepare:vad",

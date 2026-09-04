@@ -89,32 +89,55 @@ docs/migration/baseline-results.md         measured baseline and environment
 - Consumes: existing `package.json`, `electron-builder.yml`, `app/`, `desktop/`, `server/management-web/`, `server/control-api/`, and `server/livekit-agent/`.
 - Produces: `npm run measure:legacy`, which writes one JSON measurement to stdout and accepts `-OutputPath`; a reviewed capability inventory; a baseline results template populated with the current toolchain and repository commit.
 
-- [ ] **Step 1: Write the failing static contract test**
+- [x] **Step 1: Write the failing behavioral contract test**
 
 Create `tests/tauri/baseline-script.test.mjs`:
 
 ```js
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 test("legacy baseline script emits bounded machine-readable metrics", async () => {
-  const source = await readFile(new URL("../../scripts/measure-desktop-baseline.ps1", import.meta.url), "utf8");
-  for (const field of ["commit", "measuredAt", "installerBytes", "runtimeBytes", "startupMs", "idleWorkingSetBytes", "idleCpuPercent"]) {
-    assert.match(source, new RegExp(field));
+  const directory = await mkdtemp(path.join(tmpdir(), "desktop-baseline-"));
+  const outputPath = path.join(directory, "baseline.json");
+  try {
+    const result = spawnSync("powershell.exe", [
+      "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+      path.resolve("scripts/measure-desktop-baseline.ps1"),
+      "-OutputPath", outputPath,
+    ], { cwd: path.resolve("."), encoding: "utf8" });
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const stdout = JSON.parse(result.stdout.trim().replace(/^\uFEFF/, ""));
+    const persisted = JSON.parse((await readFile(outputPath, "utf8")).replace(/^\uFEFF/, ""));
+    assert.deepEqual(persisted, stdout);
+    assert.deepEqual(Object.keys(stdout), [
+      "commit", "measuredAt", "installerBytes", "runtimeBytes", "startupMs",
+      "idleWorkingSetBytes", "idleCpuPercent",
+    ]);
+    assert.match(stdout.commit, /^[0-9a-f]{40}$/);
+    assert.ok(Number.isFinite(Date.parse(stdout.measuredAt)));
+    for (const field of ["installerBytes", "runtimeBytes", "startupMs", "idleWorkingSetBytes", "idleCpuPercent"]) {
+      assert.equal(stdout[field], null);
+    }
+    assert.doesNotMatch(result.stdout, /API[_-]?KEY|PASSWORD|TOKEN/i);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
   }
-  assert.match(source, /ConvertTo-Json/);
-  assert.doesNotMatch(source, /CONTROL_API_PASSWORD|API_KEY=|TOKEN=/);
 });
 ```
 
-- [ ] **Step 2: Run the test and verify the missing script fails**
+- [x] **Step 2: Run the test and verify the missing script fails**
 
 Run: `node --test tests/tauri/baseline-script.test.mjs`
 
-Expected: FAIL with `ENOENT` for `scripts/measure-desktop-baseline.ps1`.
+Expected: FAIL because PowerShell exits non-zero while `scripts/measure-desktop-baseline.ps1` is missing.
 
-- [ ] **Step 3: Implement the measurement script**
+- [x] **Step 3: Implement the measurement script**
 
 Create a PowerShell script with parameters `ExecutablePath`, `InstallerPath`, `RuntimePath`, `WarmupSeconds = 8`, `SampleSeconds = 10`, and `OutputPath`. It must:
 
@@ -142,7 +165,7 @@ $json
 
 Use `try/finally` and `Stop-Process -Id $startedProcess.Id` only. Never search for or terminate processes by broad name.
 
-- [ ] **Step 4: Write the inventory and baseline documents**
+- [x] **Step 4: Write the inventory and baseline documents**
 
 Inventory every current management page, client page, Control API domain, Python Agent mode, Electron IPC group, AudioBridge command, local database table, packaging resource, and deployment service. For each row record `keep`, `migrate`, or `delete`, with its destination design section.
 
@@ -168,7 +191,7 @@ Populate `baseline-results.md` with:
 
 Do not invent missing measurements. Record `not-built` or `not-run` with the reason.
 
-- [ ] **Step 5: Add the package script and run verification**
+- [x] **Step 5: Add the package script and run verification**
 
 Add:
 
@@ -185,7 +208,7 @@ npm run measure:legacy
 
 Expected: test PASS; measurement exits 0 and emits valid JSON even when no executable is supplied.
 
-- [ ] **Step 6: Commit the baseline**
+- [x] **Step 6: Commit the baseline**
 
 ```powershell
 git add package.json scripts/measure-desktop-baseline.ps1 tests/tauri/baseline-script.test.mjs
