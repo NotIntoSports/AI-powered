@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="AI Virtual Assistant">
+  <rect width="512" height="512" rx="112" fill="#111827"/>
+  <path d="M144 346 231 148h50l87 198h-58l-17-44h-76l-17 44zm92-94h38l-19-51z" fill="#f8fafc"/>
+  <rect x="376" y="148" width="48" height="198" rx="24" fill="#38bdf8"/>
+</svg>

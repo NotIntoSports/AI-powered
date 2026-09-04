@@ -225,13 +225,18 @@ git commit -m "docs: capture desktop migration baseline"
 - Create: `src-tauri/Cargo.toml`
 - Create: `src-tauri/Cargo.lock`
 - Create: `src-tauri/build.rs`
+- Create: `src-tauri/tauri.conf.json`
+- Create: `src-tauri/icons/app-icon.svg`
+- Create: `src-tauri/icons/icon.ico`
+- Create: `src-tauri/src/lib.rs`
+- Create: `src-tauri/src/main.rs`
 - Create: `tests/tauri/dependency-contract.test.mjs`
 
 **Interfaces:**
 - Consumes: approved dependency choices in spec section 25.
 - Produces: exact npm and Cargo locks for the foundation; no application behavior.
 
-- [ ] **Step 1: Write the dependency contract test**
+- [x] **Step 1: Write the dependency contract test**
 
 The test must parse `package.json` and `src-tauri/Cargo.toml` and assert:
 
@@ -240,19 +245,19 @@ assert.equal(pkg.dependencies["@tauri-apps/api"], "2.11.1");
 assert.equal(pkg.devDependencies["@tauri-apps/cli"], "2.11.4");
 assert.equal(pkg.devDependencies.vite, "8.2.2");
 assert.equal(pkg.dependencies.react, "19.2.8");
-assert.match(cargo, /tauri\s*=\s*\{\s*version\s*=\s*"2"/);
+assert.match(cargo, /tauri\s*=\s*\{\s*version\s*=\s*"=?2/);
 assert.match(cargo, /keyring/);
 assert.match(cargo, /rusqlite/);
 assert.match(cargo, /ts-rs/);
 ```
 
-- [ ] **Step 2: Verify the test fails before manifests exist**
+- [x] **Step 2: Verify the test fails before manifests exist**
 
 Run: `node --test tests/tauri/dependency-contract.test.mjs`
 
 Expected: FAIL because `src-tauri/Cargo.toml` does not exist.
 
-- [ ] **Step 3: Complete the dependency investigation record**
+- [x] **Step 3: Complete the dependency investigation record**
 
 In `docs/dependency-decisions.md`, record the exact selected versions after querying npm/crates.io and official repositories. Include license, last release/commit, unresolved Windows issue summary, Windows/WebView2 compatibility, installed size measured from lock/install output, runtime cost, security/data flow, integration effort, and rejected alternatives for:
 
@@ -262,20 +267,22 @@ In `docs/dependency-decisions.md`, record the exact selected versions after quer
 
 Run `npm audit --omit=dev`, `npm audit`, `cargo tree`, and `cargo audit` if installed. If `cargo audit` is unavailable, record that fact and check the RustSec advisory database through its official tooling instructions before accepting the lock.
 
-- [ ] **Step 4: Install exact frontend packages without replacing legacy scripts**
+- [x] **Step 4: Install exact frontend packages without replacing legacy scripts**
 
 Run:
 
 ```powershell
 npm install --save-exact @tauri-apps/api@2.11.1 react@19.2.8 react-dom@19.2.8
-npm install --save-dev --save-exact @tauri-apps/cli@2.11.4 vite@8.2.2 @vitejs/plugin-react@6.1.1 vitest@5.0.0 @testing-library/react@16.3.3 @testing-library/jest-dom@7.0.1 jsdom@30.0.1
+npm install --save-dev --save-exact @tauri-apps/cli@2.11.4 vite@8.2.2 @vitejs/plugin-react@6.1.1 vitest@5.0.0 @testing-library/react@16.3.3 @testing-library/jest-dom@7.0.1 jsdom@29.0.0
 ```
+
+`jsdom` is pinned to 29.0.0 because 30.0.1 requires Node 24.15 or newer while the measured legacy baseline uses Node 24.14.0.
 
 Keep existing Next.js and Electron packages until their later deletion gates.
 
-- [ ] **Step 5: Create the Rust manifest and build hook**
+- [x] **Step 5: Create the Rust manifest and build hook**
 
-Create a package named `ai-virtual-assistant-desktop`, edition 2024, `rust-version = "1.96"`, library crate types `staticlib`, `cdylib`, and `rlib`, plus a binary calling the library. Use exact versions resolved by `cargo add` for:
+Create a package named `ai-virtual-assistant-desktop`, edition 2024, `rust-version = "1.96"`, library crate types `staticlib`, `cdylib`, and `rlib`, plus a minimal binary calling a placeholder library `run` function so this task's `cargo check` has real targets. Task 3 replaces the placeholder with Tauri composition. Use exact versions resolved by `cargo add` for:
 
 ```text
 tauri, serde, serde_json, thiserror, keyring, rusqlite, ts-rs,
@@ -292,7 +299,9 @@ fn main() {
 }
 ```
 
-- [ ] **Step 6: Run dependency and legacy regression checks**
+Also create the minimal valid `tauri.conf.json` required by `tauri-build`; Task 3 extends it with the Vite URL, frontend output, and window configuration. Add a repository-owned SVG icon source and use the official Tauri CLI icon generator to produce the Windows `.ico` required by `tauri-build`.
+
+- [x] **Step 6: Run dependency and legacy regression checks**
 
 Run:
 
@@ -305,7 +314,7 @@ npm run build
 
 Expected: contract PASS, no unaccepted audit finding, Cargo check PASS, legacy Next build PASS.
 
-- [ ] **Step 7: Commit locked dependencies**
+- [x] **Step 7: Commit locked dependencies**
 
 ```powershell
 git add package.json package-lock.json src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/build.rs tests/tauri/dependency-contract.test.mjs
@@ -323,9 +332,9 @@ git commit -m "build: lock Tauri foundation dependencies"
 - Create: `src/main.tsx`
 - Create: `src/app/app.tsx`
 - Create: `src/styles/foundation.css`
-- Create: `src-tauri/src/main.rs`
-- Create: `src-tauri/src/lib.rs`
-- Create: `src-tauri/tauri.conf.json`
+- Modify: `src-tauri/src/main.rs`
+- Modify: `src-tauri/src/lib.rs`
+- Modify: `src-tauri/tauri.conf.json`
 - Create: `src-tauri/capabilities/main.json`
 - Modify: `package.json`
 - Create: `tests/tauri/shell-contract.test.mjs`

@@ -1,0 +1,37 @@
+[package]
+name = "ai-virtual-assistant-desktop"
+version = "0.1.0"
+description = "Local-first AI Virtual Assistant desktop application"
+authors = ["AI Virtual Assistant contributors"]
+edition = "2024"
+rust-version = "1.96"
+license = "MIT"
+
+[lib]
+name = "ai_virtual_assistant_desktop"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "ai-virtual-assistant-desktop"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "=2.6.3", features = [] }
+
+[dependencies]
+chrono = { version = "=0.4.45", default-features = false, features = ["clock", "serde", "std"] }
+rusqlite = { version = "=0.40.2", features = ["bundled"] }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.151"
+tauri = { version = "=2.11.5", default-features = false, features = ["common-controls-v6", "compression", "wry"] }
+thiserror = "=2.0.20"
+tracing = "=0.1.44"
+tracing-subscriber = { version = "=0.3.23", features = ["env-filter", "fmt"] }
+ts-rs = { version = "=12.0.1", features = ["chrono-impl", "serde-json-impl", "uuid-impl"] }
+uuid = { version = "=1.26.0", features = ["serde", "v4"] }
+
+[target.'cfg(windows)'.dependencies]
+keyring = { version = "=4.2.0", default-features = false, features = ["v1", "windows-native-keyring-store"] }
+
+[dev-dependencies]
+tempfile = "=3.27.0"
