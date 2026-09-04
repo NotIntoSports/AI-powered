@@ -343,17 +343,17 @@ git commit -m "build: lock Tauri foundation dependencies"
 - Consumes: Task 2 manifests.
 - Produces: `npm run tauri:dev`, `npm run tauri:build`, and a static React shell displaying `Tauri Foundation`.
 
-- [ ] **Step 1: Write the failing shell contract test**
+- [x] **Step 1: Write the failing shell contract test**
 
 Assert that Vite output is `dist-tauri-ui`, Tauri `frontendDist` is `../dist-tauri-ui`, `devUrl` is `http://127.0.0.1:1420`, the Tauri identifier is `com.aivirtualassistant.desktop`, and the new package scripts do not modify existing `dev`, `build`, `build:desktop`, or `make:windows` values.
 
-- [ ] **Step 2: Run the test and confirm missing files fail**
+- [x] **Step 2: Run the test and confirm missing files fail**
 
 Run: `node --test tests/tauri/shell-contract.test.mjs`
 
 Expected: FAIL with missing `vite.config.ts` or `tauri.conf.json`.
 
-- [ ] **Step 3: Implement the isolated Vite SPA**
+- [x] **Step 3: Implement the isolated Vite SPA**
 
 Use a fixed development host/port and no environment variables exposed to the SPA:
 
@@ -369,11 +369,11 @@ export default defineConfig({
 
 The initial app renders a heading, current foundation status text, and no legacy iframe or remote URL.
 
-- [ ] **Step 4: Implement the minimum Tauri application**
+- [x] **Step 4: Implement the minimum Tauri application**
 
 `main.rs` calls `ai_virtual_assistant_desktop::run()`. `lib.rs` builds one window, prevents remote navigation, and contains no commands yet. Configure CSP with local scripts/styles/assets and `connect-src 'self' ipc: http://ipc.localhost`; do not allow arbitrary `http:` or `https:` in the foundation shell.
 
-- [ ] **Step 5: Add opt-in scripts**
+- [x] **Step 5: Add opt-in scripts**
 
 ```json
 "dev:tauri-ui": "vite --config vite.config.ts",
@@ -383,7 +383,7 @@ The initial app renders a heading, current foundation status text, and no legacy
 "tauri:build": "tauri build"
 ```
 
-- [ ] **Step 6: Verify both new and legacy builds**
+- [x] **Step 6: Verify both new and legacy builds**
 
 Run:
 
@@ -396,7 +396,7 @@ npm run build
 
 Expected: all commands PASS; `dist-tauri-ui/index.html` exists; legacy `.next` build still succeeds.
 
-- [ ] **Step 7: Commit the parallel shell**
+- [x] **Step 7: Commit the parallel shell**
 
 ```powershell
 git add index.html vite.config.ts tsconfig.tauri.json src src-tauri package.json tests/tauri/shell-contract.test.mjs

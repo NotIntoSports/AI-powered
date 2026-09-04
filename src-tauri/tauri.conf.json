@@ -3,10 +3,21 @@
   "productName": "AI Virtual Assistant",
   "version": "0.1.0",
   "identifier": "com.aivirtualassistant.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev:tauri-ui",
+    "beforeBuildCommand": "npm run build:tauri-ui",
+    "devUrl": "http://127.0.0.1:1420",
+    "frontendDist": "../dist-tauri-ui"
+  },
   "app": {
-    "windows": []
+    "windows": [],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: http://asset.localhost; font-src 'self'; connect-src 'self' ipc: http://ipc.localhost"
+    }
   },
   "bundle": {
-    "active": false
+    "active": true,
+    "targets": ["nsis"],
+    "icon": ["icons/icon.ico"]
   }
 }

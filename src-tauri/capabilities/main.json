@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-capability",
+  "description": "Minimum permissions for the local foundation window",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}
