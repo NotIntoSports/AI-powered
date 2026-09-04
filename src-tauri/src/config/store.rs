@@ -54,10 +54,10 @@ impl ConfigStore {
 
     pub fn save_patch(&self, patch: ConfigPatch) -> Result<AppConfigV1, ConfigError> {
         let mut config = self.load()?;
-        if let Some(diagnostics) = patch.diagnostics {
-            if let Some(days) = diagnostics.log_retention_days {
-                config.diagnostics.log_retention_days = days;
-            }
+        if let Some(diagnostics) = patch.diagnostics
+            && let Some(days) = diagnostics.log_retention_days
+        {
+            config.diagnostics.log_retention_days = days;
         }
         config.validate()?;
         let json = serde_json::to_vec_pretty(&config)

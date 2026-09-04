@@ -960,7 +960,7 @@ git commit -m "test: verify packaged Tauri foundation"
 - Consumes: all outputs and command evidence from Tasks 1–11.
 - Produces: a binary pass/fail decision for starting the React page-shell migration plan.
 
-- [ ] **Step 1: Run the complete fresh verification suite**
+- [x] **Step 1: Run the complete fresh verification suite**
 
 ```powershell
 npm run test:tauri
@@ -977,7 +977,7 @@ git diff --check
 
 Record command, timestamp, exit code, and concise result. A skipped command makes the acceptance gate fail unless the document identifies a concrete unavailable external prerequisite and the feature is not required by this plan.
 
-- [ ] **Step 2: Audit the architectural boundaries**
+- [x] **Step 2: Audit the architectural boundaries**
 
 Run searches and record zero violations:
 
@@ -990,7 +990,7 @@ rg -n "shell:allow-(execute|spawn)|\*" src-tauri/capabilities
 
 Expected: no boundary violation. Legitimate type/label matches must be documented line-by-line rather than ignored wholesale.
 
-- [ ] **Step 3: Write the acceptance decision**
+- [x] **Step 3: Write the acceptance decision**
 
 The document contains this checklist with evidence links/commands:
 
@@ -1010,7 +1010,7 @@ The document contains this checklist with evidence links/commands:
 
 Every item must be checked before declaring phases 0–1 accepted.
 
-- [ ] **Step 4: Commit the acceptance record**
+- [x] **Step 4: Commit the acceptance record**
 
 ```powershell
 git add -f docs/migration/phase-01-acceptance.md docs/migration/current-capability-inventory.md

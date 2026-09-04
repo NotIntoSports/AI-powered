@@ -1,6 +1,8 @@
 use std::{path::Path, sync::Mutex, time::Duration};
 
-use rusqlite::{Connection, OptionalExtension, params};
+#[cfg(test)]
+use rusqlite::OptionalExtension;
+use rusqlite::{Connection, params};
 use thiserror::Error;
 
 const LATEST_SCHEMA_VERSION: i64 = 1;
@@ -90,10 +92,12 @@ impl Database {
         self.pragma_string("integrity_check")
     }
 
+    #[cfg(test)]
     pub fn busy_timeout(&self) -> Duration {
         BUSY_TIMEOUT
     }
 
+    #[cfg(test)]
     fn schema_version(&self) -> Result<i64, DatabaseError> {
         let connection = self
             .connection
@@ -119,6 +123,7 @@ impl Database {
             .map_err(|_| DatabaseError::Operation)
     }
 
+    #[cfg(test)]
     fn pragma_i64(&self, name: &str) -> Result<i64, DatabaseError> {
         let connection = self
             .connection
@@ -129,6 +134,7 @@ impl Database {
             .map_err(|_| DatabaseError::Operation)
     }
 
+    #[cfg(test)]
     fn table_names(&self) -> Result<Vec<String>, DatabaseError> {
         let connection = self
             .connection
@@ -144,6 +150,7 @@ impl Database {
             .map_err(|_| DatabaseError::Operation)
     }
 
+    #[cfg(test)]
     fn column_names(&self) -> Result<Vec<String>, DatabaseError> {
         let connection = self
             .connection

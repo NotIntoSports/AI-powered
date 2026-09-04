@@ -2,6 +2,12 @@
 
 This inventory describes the legacy system at commit `5f8a86038112e5b3214938a9c60a2e2b47458bdf`. `keep` means retain the capability as-is during the parallel foundation phase, `migrate` means re-home it in the desktop monolith, and `delete` means remove it only after the replacement acceptance gate passes.
 
+## Phase 0–1 foundation status (accepted 2026-09-05)
+
+The parallel Tauri foundation is accepted for planning the React page-shell migration. It currently provides a local-only window, typed command adapter, versioned JSON configuration and repair mode, Windows Credential Manager secret storage, SQLite foundation migrations, bounded diagnostics, least-privilege capabilities, single-instance behavior, and a verified NSIS package. It does **not** change the default Electron/Next.js product path or authorize deletion of any legacy feature below.
+
+The packaged foundation starts without Node, Control API, Python, PostgreSQL, or Nginx descendants. Product capabilities remain subject to the per-row `keep`, `migrate`, and `delete` decisions and their later gates.
+
 ## Desktop client pages
 
 | Current route | Capability | Decision | Destination |

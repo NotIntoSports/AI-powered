@@ -100,6 +100,7 @@ impl SecretService {
         Ok(deleted)
     }
 
+    #[cfg(test)]
     pub(crate) fn read_internal(
         &self,
         reference: &str,

@@ -89,10 +89,7 @@ fn write_bindings(path: &Path) {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        CommandResult, DiagnosticsExportResult, FoundationStatus, PublicError, SecretStatus,
-        StartupState, generated_bindings, write_bindings,
-    };
+    use super::{CommandResult, FoundationStatus, PublicError, generated_bindings, write_bindings};
     use serde_json::json;
     use std::path::Path;
 

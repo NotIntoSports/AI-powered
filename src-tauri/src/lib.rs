@@ -2,12 +2,12 @@ use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
 mod app_state;
 mod commands;
-mod config;
-mod contracts;
-mod database;
-mod diagnostics;
-mod error;
-mod secrets;
+pub mod config;
+pub mod contracts;
+pub mod database;
+pub mod diagnostics;
+pub mod error;
+pub mod secrets;
 
 fn navigation_is_allowed(url: &tauri::Url) -> bool {
     if url.scheme() == "tauri" {

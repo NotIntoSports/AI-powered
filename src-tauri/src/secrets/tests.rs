@@ -34,7 +34,7 @@ fn memory_secret_lifecycle_supports_set_replace_status_and_delete() {
             .as_str(),
         "replacement-value"
     );
-    assert!(secrets.delete("providers/openai").unwrap().configured == false);
+    assert!(!secrets.delete("providers/openai").unwrap().configured);
     assert!(!secrets.delete("providers/openai").unwrap().configured);
 }
 

@@ -214,59 +214,55 @@ impl AppConfigV1 {
         if let Some(url) = &self.transport.livekit_url {
             validate_url(url, &["ws", "wss"])?;
         }
-        if let Some(active) = &self.models.active_provider_id {
-            if !self
+        if let Some(active) = &self.models.active_provider_id
+            && !self
                 .models
                 .providers
                 .iter()
                 .any(|provider| &provider.id == active)
-            {
-                return Err(ConfigError::new(
-                    "CONFIG_REFERENCE_MISSING",
-                    "Active provider does not exist",
-                ));
-            }
+        {
+            return Err(ConfigError::new(
+                "CONFIG_REFERENCE_MISSING",
+                "Active provider does not exist",
+            ));
         }
-        if let Some(active) = &self.speech.active_voice_route_id {
-            if !self
+        if let Some(active) = &self.speech.active_voice_route_id
+            && !self
                 .speech
                 .voice_routes
                 .iter()
                 .any(|route| &route.id == active)
-            {
-                return Err(ConfigError::new(
-                    "CONFIG_REFERENCE_MISSING",
-                    "Active voice route does not exist",
-                ));
-            }
+        {
+            return Err(ConfigError::new(
+                "CONFIG_REFERENCE_MISSING",
+                "Active voice route does not exist",
+            ));
         }
         for route in &self.speech.voice_routes {
-            if let Some(provider_id) = &route.provider_id {
-                if !self
+            if let Some(provider_id) = &route.provider_id
+                && !self
                     .models
                     .providers
                     .iter()
                     .any(|provider| &provider.id == provider_id)
-                {
-                    return Err(ConfigError::new(
-                        "CONFIG_REFERENCE_MISSING",
-                        "Voice route provider does not exist",
-                    ));
-                }
+            {
+                return Err(ConfigError::new(
+                    "CONFIG_REFERENCE_MISSING",
+                    "Voice route provider does not exist",
+                ));
             }
         }
-        if let Some(provider_id) = &self.knowledge.embedding_provider_id {
-            if !self
+        if let Some(provider_id) = &self.knowledge.embedding_provider_id
+            && !self
                 .models
                 .providers
                 .iter()
                 .any(|provider| &provider.id == provider_id)
-            {
-                return Err(ConfigError::new(
-                    "CONFIG_REFERENCE_MISSING",
-                    "Embedding provider does not exist",
-                ));
-            }
+        {
+            return Err(ConfigError::new(
+                "CONFIG_REFERENCE_MISSING",
+                "Embedding provider does not exist",
+            ));
         }
         if !(1..=365).contains(&self.diagnostics.log_retention_days) {
             return Err(ConfigError::new(
