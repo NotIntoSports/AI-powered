@@ -1,5 +1,9 @@
 use tauri::{WebviewUrl, WebviewWindowBuilder};
 
+mod contracts;
+mod commands;
+mod error;
+
 fn navigation_is_allowed(url: &tauri::Url) -> bool {
     if url.scheme() == "tauri" {
         return true;
@@ -14,6 +18,7 @@ fn navigation_is_allowed(url: &tauri::Url) -> bool {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .invoke_handler(tauri::generate_handler![commands::foundation_get_status])
         .setup(|app| {
             WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("AI Virtual Assistant")
