@@ -5,6 +5,8 @@
 **Commit range**: 4a578f6..4e537bb (Task 1–7, 7 commits on main)  
 **Baseline**: 1bc6bfb (Phase 0–1 acceptance)
 
+**Re-acceptance**: 2026-09-05, after the `test:tauri` fix (commit 157f5dc) — full gate re-run: 10/10 commands exit 0.
+
 ## Checklist
 
 - [x] 5 page shells render with sidebar navigation (workspace/materials/records/services/settings)
@@ -26,10 +28,10 @@ All timestamps use Asia/Shanghai (`+08:00`).
 
 | Command | Exit Code | Notes |
 |---------|-----------|-------|
-| `npm run test:tauri` | 1 (known non-blocking) | cargo test: 26 passed, 1 ignored; 2 security integration tests passed. vitest: 72 passed (12 files). node --test contracts: 20/21 passed (1 fail: rg ENOENT). `build:tauri-ui` not reached in chain; verified separately below. |
+| `npm run test:tauri` | 0 | cargo test: 28 passed, 1 ignored (including 2 security integration tests). vitest: 72 passed (12 files). node --test contracts: 21/21 passed. `build:tauri-ui`: 35 modules built successfully in chain. |
 | `npm run build:tauri-ui` | 0 | tsc + vite build: 35 modules, 197 kB JS (63 kB gzip), 2.64 kB CSS. Vite 8 native config loader warning in stderr. |
 | `npm run test:desktop-shell` | 0 | 183 passed, 0 failed, duration 3887 ms |
-| `npm run build` | 0 | Next 15.5.22 production build: 23 static pages generated. `.agents/skills/hyperframes` traced-file ENOENT warning (known). |
+| `npm run build` | 0 | Next 15.5.22 production build: 23 static pages generated. Broken-symlink traced-file ENOENT warning under `.agents/skills/` (known, see below). |
 | `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings` | 0 | No warnings |
 | `cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check` | 0 | No formatting drift |
 | `git diff --check` | 0 | No whitespace errors in working tree |
@@ -55,10 +57,11 @@ All timestamps use Asia/Shanghai (`+08:00`).
 
 ## Known Non-Blocking Issues
 
-1. `tests/tauri/frontend-contract.test.mjs` "only the command adapter imports the low-level Tauri invoke API" test fails locally with `spawnSync rg ENOENT` — ripgrep not in PATH on this Windows environment. Passes in CI (GitHub Actions has rg pre-installed). Not a regression. This causes `npm run test:tauri` to exit 1 locally; `build:tauri-ui` was verified separately.
-2. Vite 8 native config loader warning in stderr (`vite.config.ts` ESM syntax loaded as CommonJS).
-3. Next build `.agents/skills/hyperframes` traced-file ENOENT warning (broken symlink in workspace).
-4. CI gate (`ci.yml:17-26`) rejects tracked `docs/` files — push would fail. Pre-existing from Phase 0–1. Must be resolved before any push.
+1. RESOLVED — `tests/tauri/frontend-contract.test.mjs` "only the command adapter imports the low-level Tauri invoke API" previously failed locally with `spawnSync rg ENOENT` (ripgrep not in PATH on this Windows environment), making `npm run test:tauri` exit 1. Fixed by commit 157f5dc: the contract scan was changed from `execFileSync('rg', ...)` to a pure Node recursive `fs` scan; assertion semantics verified by mutation testing to be strictly bidirectionally equivalent to the original rg version (not weakened). `npm run test:tauri` now exits 0. Correction to the earlier record: the claim "Passes in CI (GitHub Actions has rg pre-installed)" was inaccurate — `.github/workflows/ci.yml` never runs `test:tauri` (it runs npm ci / docs gate / npm audit / `tsc --noEmit` / test:desktop-shell / test:obs / build only). `test:tauri` currently executes locally only; adding a CI guard would require extending `ci.yml` (cost to be evaluated).
+2. Vite 8 native config loader warning in stderr (`vite.config.ts` ESM syntax loaded as CommonJS, `configLoader: 'native'` notice).
+3. Next build traced-file ENOENT warning caused by a broken symlink under `.agents/skills/` (the specific symlink name varies between builds — `hyperframes` / `hyperframes-core` / `media-use` / `hyperframes-animation` have all been observed; `hyperframes-animation` at the 2026-09-05 re-acceptance build). Non-blocking: build exits 0.
+4. Node `ExperimentalWarning: SQLite is an experimental feature and might change at any time` observed during `npm run build` (Node 24 built-in SQLite). Non-blocking.
+5. CI gate (`ci.yml:17-26`) rejects tracked `docs/` files — push would fail. Pre-existing from Phase 0–1. Must be resolved before any push.
 
 ## Deferred to Future Phases
 
