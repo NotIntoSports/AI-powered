@@ -1,0 +1,21 @@
+{
+  "configVersion": 1,
+  "application": { "locale": "zh-CN" },
+  "models": {
+    "providers": [{
+      "id": "example-provider",
+      "baseUrl": "https://api.example.com/v1",
+      "credential": {
+        "reference": "providers/example-provider/api-key",
+        "configured": false
+      }
+    }],
+    "activeProviderId": "example-provider"
+  },
+  "speech": { "voiceRoutes": [], "activeVoiceRouteId": null },
+  "transport": { "livekitUrl": null },
+  "knowledge": { "embeddingProviderId": "example-provider" },
+  "storage": { "exportDirectory": null },
+  "roleProfiles": [],
+  "diagnostics": { "logRetentionDays": 14 }
+}

@@ -2,6 +2,7 @@ use tauri::{WebviewUrl, WebviewWindowBuilder};
 
 mod contracts;
 mod commands;
+mod config;
 mod error;
 
 fn navigation_is_allowed(url: &tauri::Url) -> bool {

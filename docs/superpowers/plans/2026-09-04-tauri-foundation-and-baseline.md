@@ -494,7 +494,7 @@ git commit -m "feat: add typed Tauri IPC contracts"
 **Interfaces:**
 - Produces: `AppConfigV1`, `PublicAppConfig`, `ConfigLocation`, `locate_config(args, env, dirs)`, `ConfigStore::load()`, and `ConfigStore::save_patch(ConfigPatch)`.
 
-- [ ] **Step 1: Write failing path-precedence tests**
+- [x] **Step 1: Write failing path-precedence tests**
 
 Test exact precedence:
 
@@ -507,17 +507,17 @@ release %APPDATA%/AI Virtual Assistant/config.json
 
 Reject relative CLI/env paths with `CONFIG_PATH_NOT_ABSOLUTE`. Do not inspect arbitrary environment keys.
 
-- [ ] **Step 2: Write failing validation tests**
+- [x] **Step 2: Write failing validation tests**
 
 Test empty valid defaults, unknown `configVersion`, duplicate provider IDs, active references to missing IDs, invalid URL schemes, secrets embedded in JSON, and invalid log retention. Expected codes include `CONFIG_VERSION_UNSUPPORTED`, `CONFIG_DUPLICATE_ID`, `CONFIG_REFERENCE_MISSING`, `CONFIG_URL_INVALID`, `CONFIG_SECRET_INLINE_FORBIDDEN`, and `CONFIG_FIELD_INVALID`.
 
-- [ ] **Step 3: Run focused tests and verify failure**
+- [x] **Step 3: Run focused tests and verify failure**
 
 Run: `cargo test --manifest-path src-tauri/Cargo.toml config::`
 
 Expected: compile failure because the config module is missing.
 
-- [ ] **Step 4: Implement typed V1 configuration**
+- [x] **Step 4: Implement typed V1 configuration**
 
 The example file contains only non-sensitive fields and secret references. Provider secrets are represented as:
 
@@ -530,11 +530,11 @@ pub struct SecretSlot {
 
 Deserialization must use `deny_unknown_fields` for leaf records and explicit defaults for optional sections. URL validation accepts `http`/`https`, with `ws`/`wss` only for realtime/LiveKit endpoints. Release defaults contain no author-controlled IP or domain.
 
-- [ ] **Step 5: Implement atomic load/save and last-good recovery**
+- [x] **Step 5: Implement atomic load/save and last-good recovery**
 
 Write to a sibling temporary file, `sync_all`, rename, then retain one last-good copy after successful validation. On Windows rename collisions, close the source handle before replacement. Never overwrite the main file when validation fails.
 
-- [ ] **Step 6: Harden Git ignores**
+- [x] **Step 6: Harden Git ignores**
 
 Add exact patterns:
 
@@ -547,7 +547,7 @@ config/*.tmp
 
 Keep `config/local.example.json` tracked. Add a test that fails when any tracked file matches the secret-config patterns.
 
-- [ ] **Step 7: Verify and commit config foundation**
+- [x] **Step 7: Verify and commit config foundation**
 
 Run:
 
