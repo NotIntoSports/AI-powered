@@ -1,0 +1,93 @@
+/* ─── Shell Layout & Navigation ─────────────────────────────────────── */
+
+.app-shell {
+  --shell-sidebar-bg: #1e1e2e;
+  --shell-main-bg: #11111b;
+  --shell-text: #cdd6f4;
+  --shell-text-muted: #a6adc8;
+  --shell-accent: #89b4fa;
+  --shell-hover: #313244;
+  --shell-border: #45475a;
+
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  min-height: 100vh;
+  color: var(--shell-text);
+  background: var(--shell-main-bg);
+}
+
+/* ─── Sidebar Navigation ────────────────────────────────────────────── */
+
+.app-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 24px 12px;
+  background: var(--shell-sidebar-bg);
+  border-right: 1px solid var(--shell-border);
+  overflow-y: auto;
+}
+
+.app-nav-item {
+  width: 100%;
+  padding: 10px 14px;
+  border: none;
+  border-left: 3px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font-size: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.app-nav-item:hover {
+  background: var(--shell-hover);
+}
+
+.app-nav-item[data-active="true"] {
+  border-left-color: var(--shell-accent);
+  background: var(--shell-hover);
+  color: var(--shell-accent);
+  font-weight: 600;
+}
+
+/* ─── Main Content Area ─────────────────────────────────────────────── */
+
+.app-main {
+  padding: 2rem;
+  overflow-y: auto;
+}
+
+/* ─── Page Placeholder (shell-only screens) ─────────────────────────── */
+
+.page-placeholder {
+  max-width: 720px;
+  margin: 0;
+}
+
+.page-eyebrow {
+  margin: 0 0 8px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--shell-text-muted);
+}
+
+.page-capabilities {
+  margin: 16px 0;
+  padding-left: 1.25em;
+  list-style: disc;
+  color: var(--shell-text-muted);
+  line-height: 1.8;
+}
+
+.page-status {
+  margin: 20px 0 0;
+  font-style: italic;
+  color: var(--shell-text-muted);
+  opacity: 0.8;
+}
