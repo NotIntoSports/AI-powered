@@ -1,7 +1,28 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import { execFileSync } from "node:child_process";
+import { readFile, readdir } from "node:fs/promises";
+import { join, extname } from "node:path";
 import test from "node:test";
+
+/**
+ * Recursively collect all .ts/.tsx source files under `dir`.
+ * Pure-Node replacement for `rg -l <pattern> src --glob '*.ts' --glob '*.tsx'`:
+ * it skips node_modules and hidden (dot-prefixed) directories, mirroring ripgrep's
+ * default .gitignore/hidden handling, so no non-source directory is ever scanned.
+ */
+async function collectSourceFiles(dir) {
+  const results = [];
+  const entries = await readdir(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const fullPath = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
+      results.push(...(await collectSourceFiles(fullPath)));
+    } else if ([".ts", ".tsx"].includes(extname(entry.name))) {
+      results.push(fullPath);
+    }
+  }
+  return results;
+}
 
 test("generated bindings have a deterministic warning header", async () => {
   const bindings = await readFile("src/generated/bindings.ts", "utf8");
@@ -13,12 +34,16 @@ test("generated bindings have a deterministic warning header", async () => {
   assert.doesNotMatch(bindings, /secret(Value|Contents)|apiKey|password/i);
 });
 
-test("only the command adapter imports the low-level Tauri invoke API", () => {
-  const output = execFileSync(
-    "rg",
-    ["-l", "@tauri-apps/api/core", "src", "--glob", "*.ts", "--glob", "*.tsx"],
-    { encoding: "utf8" },
-  );
-  const files = output.trim().split(/\r?\n/).map((file) => file.replaceAll("\\", "/"));
+test("only the command adapter imports the low-level Tauri invoke API", async () => {
+  // Same contract the previous `rg -l` scan enforced: the set of .ts/.tsx files under
+  // src importing "@tauri-apps/api/core" must be exactly { src/api/commands.ts }.
+  const files = [];
+  for (const file of await collectSourceFiles("src")) {
+    const content = await readFile(file, "utf8");
+    if (content.includes("@tauri-apps/api/core")) {
+      files.push(file.replaceAll("\\", "/"));
+    }
+  }
+  files.sort();
   assert.deepEqual(files, ["src/api/commands.ts"]);
 });
