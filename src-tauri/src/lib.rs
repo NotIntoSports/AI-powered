@@ -5,6 +5,7 @@ mod commands;
 mod config;
 mod contracts;
 mod database;
+mod diagnostics;
 mod error;
 mod secrets;
 
@@ -27,6 +28,7 @@ pub fn run() {
             commands::secret_set,
             commands::secret_delete,
             commands::secret_status,
+            commands::diagnostics_export,
         ])
         .setup(|app| {
             let data_directory = app.path().app_data_dir()?;

@@ -714,17 +714,17 @@ git commit -m "feat: add Rust-owned SQLite migrations"
 **Interfaces:**
 - Produces: `DiagnosticEvent`, `DiagnosticWriter::record`, `DiagnosticWriter::export`, and command `diagnostics_export`.
 
-- [ ] **Step 1: Write failing redaction and retention tests**
+- [x] **Step 1: Write failing redaction and retention tests**
 
 Test redaction for Bearer headers, API keys, tokens, secrets, passwords, URL user info, sensitive query keys, and JSON fields. Test message maximum 2000 characters, file maximum 5 MiB, retention 14 days, and no transcript/audio/document fields in exported events.
 
-- [ ] **Step 2: Verify tests fail**
+- [x] **Step 2: Verify tests fail**
 
 Run: `cargo test --manifest-path src-tauri/Cargo.toml diagnostics::`
 
 Expected: compile failure because the diagnostics module is missing.
 
-- [ ] **Step 3: Implement structured diagnostics**
+- [x] **Step 3: Implement structured diagnostics**
 
 Persist newline-delimited JSON with exact public fields:
 
@@ -734,11 +734,11 @@ timestamp, level, area, code, requestId, sessionId?, snapshotId?, providerId?, d
 
 Raw third-party bodies and arbitrary maps are not accepted by `record`. Rotate before exceeding the file limit. Cleanup operates only inside the resolved application logs directory.
 
-- [ ] **Step 4: Implement safe export**
+- [x] **Step 4: Implement safe export**
 
 Export application/toolchain versions, public configuration, service status, and bounded diagnostic events to a user-selected path. Read public config through `ConfigStore`; never serialize internal config or SecretStore.
 
-- [ ] **Step 5: Verify diagnostics and secret scans**
+- [x] **Step 5: Verify diagnostics and secret scans**
 
 Run:
 
@@ -750,7 +750,7 @@ rg -n "Authorization|apiKey|api_key|accessToken|access_token|password" src-tauri
 
 Expected: tests PASS; matches are limited to explicit redaction tests/rules, not logged fields.
 
-- [ ] **Step 6: Commit diagnostics**
+- [x] **Step 6: Commit diagnostics**
 
 ```powershell
 git add src-tauri/src/diagnostics src-tauri/src/app_state.rs src-tauri/src/commands.rs src-tauri/src/contracts.rs src-tauri/src/lib.rs src/generated/bindings.ts

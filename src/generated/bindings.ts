@@ -6,4 +6,6 @@ export type FoundationStatus = { ready: boolean, };
 
 export type SecretStatus = { reference: string, configured: boolean, };
 
+export type DiagnosticsExportResult = { exported: boolean, };
+
 export type CommandResult<T> = { ok: true; data: T } | { ok: false; error: PublicError };
