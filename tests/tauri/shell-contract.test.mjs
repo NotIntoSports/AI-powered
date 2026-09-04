@@ -14,6 +14,21 @@ test("parallel Tauri shell preserves legacy entry points", async () => {
   assert.equal(tauri.build.frontendDist, "../dist-tauri-ui");
   assert.equal(tauri.build.devUrl, "http://127.0.0.1:1420");
   assert.equal(tauri.identifier, "com.aivirtualassistant.desktop");
+  const capability = JSON.parse(await readFile("src-tauri/capabilities/main.json", "utf8"));
+  assert.deepEqual(capability.windows, ["main"]);
+  assert.deepEqual(capability.permissions, [
+    "core:default",
+    "allow-foundation-get-status",
+    "allow-secret-set",
+    "allow-secret-delete",
+    "allow-secret-status",
+    "allow-diagnostics-export",
+    "allow-config-get-startup-state",
+    "allow-config-restore-last-good",
+    "allow-config-restore-defaults",
+    "allow-open-app-directory",
+  ]);
+  assert.doesNotMatch(JSON.stringify(capability), /shell:allow-(?:execute|spawn)|fs:|https?:\/\/|"\*"/i);
   assert.equal(pkg.scripts.dev, "next dev -H 127.0.0.1");
   assert.equal(pkg.scripts.build, "next build");
   assert.equal(pkg.scripts["build:desktop"], "tsc -p tsconfig.desktop.json");

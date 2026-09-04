@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { getStartupState, restoreDefaultConfig, restoreLastGoodConfig } from "../api/commands";
+import { getStartupState, openAppDirectory, restoreDefaultConfig, restoreLastGoodConfig } from "../api/commands";
 import type { StartupState } from "../generated/bindings";
 import { ConfigRepair } from "../features/config-repair/config-repair";
 
@@ -28,7 +28,7 @@ export function App() {
     return <main className="foundation-shell"><p role="status">正在检查本地配置…</p></main>;
   }
   if (startup.kind === "recoverable" || startup.kind === "invalid") {
-    return <ConfigRepair state={startup} busy={busy} onRestoreLastGood={() => void repair(restoreLastGoodConfig)} onRestoreDefaults={() => void repair(restoreDefaultConfig)} />;
+    return <ConfigRepair state={startup} busy={busy} onRestoreLastGood={() => void repair(restoreLastGoodConfig)} onRestoreDefaults={() => void repair(restoreDefaultConfig)} onOpenConfig={() => void openAppDirectory("config")} />;
   }
   return (
     <main className="foundation-shell">

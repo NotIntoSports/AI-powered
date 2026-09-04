@@ -23,6 +23,12 @@ fn navigation_is_allowed(url: &tauri::Url) -> bool {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .invoke_handler(tauri::generate_handler![
             commands::foundation_get_status,
             commands::secret_set,
@@ -32,6 +38,7 @@ pub fn run() {
             commands::config_get_startup_state,
             commands::config_restore_last_good,
             commands::config_restore_defaults,
+            commands::open_app_directory,
         ])
         .setup(|app| {
             let data_directory = app.path().app_data_dir()?;
@@ -61,6 +68,7 @@ pub fn run() {
                 .inner_size(1180.0, 760.0)
                 .min_inner_size(900.0, 620.0)
                 .on_navigation(navigation_is_allowed)
+                .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
                 .build()?;
             Ok(())
         })

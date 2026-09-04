@@ -3,5 +3,16 @@
   "identifier": "main-capability",
   "description": "Minimum permissions for the local foundation window",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": [
+    "core:default",
+    "allow-foundation-get-status",
+    "allow-secret-set",
+    "allow-secret-delete",
+    "allow-secret-status",
+    "allow-diagnostics-export",
+    "allow-config-get-startup-state",
+    "allow-config-restore-last-good",
+    "allow-config-restore-defaults",
+    "allow-open-app-directory"
+  ]
 }

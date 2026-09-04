@@ -90,6 +90,75 @@ pub fn config_restore_defaults(state: State<'_, AppState>) -> CommandResult<Star
     }
 }
 
+#[tauri::command]
+pub fn open_app_directory(
+    state: State<'_, AppState>,
+    kind: String,
+) -> CommandResult<FoundationStatus> {
+    let directory = match kind.as_str() {
+        "config" => state
+            .paths
+            .config_path
+            .parent()
+            .map(std::path::Path::to_path_buf),
+        "data" => Some(state.paths.data_directory.clone()),
+        _ => None,
+    };
+    let Some(directory) = directory else {
+        return CommandResult::Err {
+            error: PublicError::new(
+                "APP_DIRECTORY_INVALID",
+                "Unsupported application directory",
+                false,
+            ),
+        };
+    };
+    match open_directory(&directory) {
+        Ok(()) => CommandResult::Ok {
+            data: FoundationStatus { ready: true },
+        },
+        Err(()) => CommandResult::Err {
+            error: PublicError::new(
+                "APP_DIRECTORY_OPEN_FAILED",
+                "Application directory could not be opened",
+                false,
+            ),
+        },
+    }
+}
+
+#[cfg(windows)]
+fn open_directory(path: &std::path::Path) -> Result<(), ()> {
+    use std::{os::windows::ffi::OsStrExt, ptr};
+    use windows_sys::Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL};
+    let operation = "open".encode_utf16().chain(Some(0)).collect::<Vec<_>>();
+    let path = path
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect::<Vec<_>>();
+    let result = unsafe {
+        ShellExecuteW(
+            ptr::null_mut(),
+            operation.as_ptr(),
+            path.as_ptr(),
+            ptr::null(),
+            ptr::null(),
+            SW_SHOWNORMAL,
+        )
+    };
+    if result as isize > 32 {
+        Ok(())
+    } else {
+        Err(())
+    }
+}
+
+#[cfg(not(windows))]
+fn open_directory(_: &std::path::Path) -> Result<(), ()> {
+    Err(())
+}
+
 fn secret_failure(error: SecretError) -> CommandResult<SecretStatus> {
     CommandResult::Err {
         error: PublicError::new(error.code(), error.to_string(), false),

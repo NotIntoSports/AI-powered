@@ -1,0 +1,44 @@
+[[permission]]
+identifier = "allow-foundation-get-status"
+description = "Allows reading the local foundation readiness state."
+commands.allow = ["foundation_get_status"]
+
+[[permission]]
+identifier = "allow-secret-set"
+description = "Allows writing a named secret to Windows Credential Manager."
+commands.allow = ["secret_set"]
+
+[[permission]]
+identifier = "allow-secret-delete"
+description = "Allows deleting a named secret from Windows Credential Manager."
+commands.allow = ["secret_delete"]
+
+[[permission]]
+identifier = "allow-secret-status"
+description = "Allows checking whether named secrets are configured without reading them."
+commands.allow = ["secret_status"]
+
+[[permission]]
+identifier = "allow-diagnostics-export"
+description = "Allows exporting a bounded redacted diagnostic report to a selected path."
+commands.allow = ["diagnostics_export"]
+
+[[permission]]
+identifier = "allow-config-get-startup-state"
+description = "Allows reading the public configuration startup state."
+commands.allow = ["config_get_startup_state"]
+
+[[permission]]
+identifier = "allow-config-restore-last-good"
+description = "Allows restoring the validated last-good local configuration."
+commands.allow = ["config_restore_last_good"]
+
+[[permission]]
+identifier = "allow-config-restore-defaults"
+description = "Allows replacing invalid configuration with safe local defaults."
+commands.allow = ["config_restore_defaults"]
+
+[[permission]]
+identifier = "allow-open-app-directory"
+description = "Allows opening only the resolved application config or data directory."
+commands.allow = ["open_app_directory"]

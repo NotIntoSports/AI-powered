@@ -833,7 +833,7 @@ git commit -m "feat: add Tauri configuration repair mode"
 **Interfaces:**
 - Produces: a single-instance, local-content-only window with explicitly enumerated commands and no generic shell/filesystem permission.
 
-- [ ] **Step 1: Write failing security contract tests**
+- [x] **Step 1: Write failing security contract tests**
 
 Assert:
 
@@ -844,7 +844,7 @@ Assert:
 - navigation and new-window requests are denied unless they are local application content;
 - application uses one-instance behavior.
 
-- [ ] **Step 2: Run tests and verify current shell fails hardening checks**
+- [x] **Step 2: Run tests and verify current shell fails hardening checks**
 
 Run:
 
@@ -855,13 +855,13 @@ node --test tests/tauri/shell-contract.test.mjs
 
 Expected: FAIL on missing single-instance and incomplete command allowlist.
 
-- [ ] **Step 3: Implement least privilege**
+- [x] **Step 3: Implement least privilege**
 
 Use official Tauri capability entries for only the commands implemented in Tasks 4–9. Open config/data directories through a dedicated Rust command that resolves the fixed app directory and calls the OS opener; do not grant generic opener paths to the WebView.
 
 Prevent navigation before commit, deny child WebViews/windows, and ensure development URLs are enabled only in debug builds.
 
-- [ ] **Step 4: Verify security, Cargo, and frontend boundaries**
+- [x] **Step 4: Verify security, Cargo, and frontend boundaries**
 
 Run:
 
@@ -873,7 +873,7 @@ npm run build:tauri-ui
 
 Expected: all PASS.
 
-- [ ] **Step 5: Commit hardening**
+- [x] **Step 5: Commit hardening**
 
 ```powershell
 git add src-tauri tests/tauri

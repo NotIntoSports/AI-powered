@@ -27,6 +27,7 @@ pub struct AppState {
     database_path: PathBuf,
     secret_backend_ready: bool,
     startup: RwLock<StartupState>,
+    pub paths: AppPaths,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -45,11 +46,11 @@ impl AppState {
         secret_store: Arc<dyn SecretStore>,
     ) -> Result<Self, AppStateError> {
         std::fs::create_dir_all(&paths.data_directory).map_err(|_| DiagnosticError::Operation)?;
-        let diagnostics = DiagnosticWriter::new(paths.logs_directory)?;
+        let diagnostics = DiagnosticWriter::new(paths.logs_directory.clone())?;
         let secrets =
             SecretService::new("default", secret_store).expect("static namespace is valid");
         let secret_backend_ready = secrets.status("system/startup-probe").is_ok();
-        let config = ConfigStore::new(paths.config_path);
+        let config = ConfigStore::new(paths.config_path.clone());
         let mut startup = if secret_backend_ready {
             match config.load_for_startup() {
                 Ok(ConfigLoadOutcome::Ready(_)) => StartupState::Ready,
@@ -93,6 +94,7 @@ impl AppState {
             database_path,
             secret_backend_ready,
             startup: RwLock::new(startup),
+            paths,
         })
     }
 

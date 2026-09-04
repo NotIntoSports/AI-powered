@@ -5,9 +5,10 @@ type RepairProps = {
   busy: boolean;
   onRestoreLastGood: () => void;
   onRestoreDefaults: () => void;
+  onOpenConfig: () => void;
 };
 
-export function ConfigRepair({ state, busy, onRestoreLastGood, onRestoreDefaults }: RepairProps) {
+export function ConfigRepair({ state, busy, onRestoreLastGood, onRestoreDefaults, onOpenConfig }: RepairProps) {
   const error: PublicError = state.error;
   return (
     <main className="foundation-shell">
@@ -25,7 +26,7 @@ export function ConfigRepair({ state, busy, onRestoreLastGood, onRestoreDefaults
           ) : null}
           <button type="button" disabled={busy} onClick={onRestoreDefaults}>恢复默认配置</button>
           <button type="button" disabled title="安全文件选择器将在权限收紧任务接入">导入配置</button>
-          <button type="button" disabled title="目录打开命令将在权限收紧任务接入">打开配置文件</button>
+          <button type="button" disabled={busy} onClick={onOpenConfig}>打开配置文件</button>
         </div>
       </section>
     </main>

@@ -33,3 +33,7 @@ export function restoreLastGoodConfig() {
 export function restoreDefaultConfig() {
   return invoke<CommandResult<StartupState>>("config_restore_defaults");
 }
+
+export function openAppDirectory(kind: "config" | "data") {
+  return invoke<CommandResult<FoundationStatus>>("open_app_directory", { kind });
+}
