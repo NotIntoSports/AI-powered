@@ -58,9 +58,6 @@ function Stop-RecordedProcess(
 Stop-RecordedProcess -PidPath (Join-Path $toolsRoot 'next.pid') -Label 'Next.js' `
     -AllowedProcessNames @('node') -FallbackPort 3000 `
     -RequiredCommandPattern ([regex]::Escape($workspace))
-Stop-RecordedProcess -PidPath (Join-Path $toolsRoot 'whisper-server.pid') -Label 'whisper-server' `
-    -AllowedProcessNames @('whisper-server') -FallbackPort 8080 `
-    -RequiredCommandPattern ([regex]::Escape((Join-Path $toolsRoot 'whisper.cpp')))
 
 if ($IncludeObs) {
     $obsProcesses = @(Get-Process 'obs64' -ErrorAction SilentlyContinue)

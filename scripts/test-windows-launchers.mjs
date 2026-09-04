@@ -15,23 +15,9 @@ assert.match(start, /scripts\\start-windows\.ps1/i);
 assert.match(start, /AI Virtual Assistant/i);
 assert.match(check, /scripts\\check-environment\.ps1/i);
 assert.match(check, /AI Virtual Assistant/i);
-assert.match(setup, /choice \/C MFLQ/i);
-assert.match(setup, /scripts\\setup-windows\.ps1" -SkipWhisper/i);
-assert.match(setup, /scripts\\setup-windows\.ps1"\r?\n/i);
-assert.match(setup, /scripts\\setup-ollama\.ps1/i);
-assert.match(setup, /about 3\.4GB model download/i);
-assert.match(setup, /manual reply input/i);
-assert.ok(setup.indexOf("choice /C MFLQ") < setup.indexOf("scripts\\setup-windows.ps1"));
-assert.ok(setup.indexOf(":local") < setup.indexOf("scripts\\setup-ollama.ps1"));
-assert.ok(
-  setup.indexOf("scripts\\setup-windows.ps1", setup.indexOf(":local")) <
-    setup.indexOf("scripts\\setup-ollama.ps1"),
-  "local setup must install the shared Windows prerequisites before Ollama"
-);
-assert.match(
-  setup.slice(setup.indexOf(":local"), setup.indexOf(":finished")),
-  /if errorlevel 1 goto failed/i
-);
+assert.match(setup, /choice \/C YQ/i);
+assert.match(setup, /scripts\\setup-windows\.ps1/i);
+assert.doesNotMatch(setup, /whisper|ollama|local model|model download|SkipWhisper/i);
 assert.match(legacyStart, /Start-AI-Virtual-Assistant\.cmd/i);
 assert.match(legacyCheck, /Check-AI-Virtual-Assistant\.cmd/i);
 
@@ -51,8 +37,10 @@ assert.match(windowsStart, /obs-secret-store\.mjs/i);
 assert.match(windowsStart, /Node\.js 22\.13\.0 or newer/i);
 assert.match(windowsStart, /AI Virtual Assistant/i);
 assert.doesNotMatch(windowsStart, /Stop-Process[^\r\n]*obs64/i);
+assert.doesNotMatch(windowsStart, /whisper|TRANSCRIPTION_PROVIDER/i);
 
 const windowsStop = await readFile("scripts/stop-windows.ps1", "utf8");
+assert.doesNotMatch(windowsStop, /whisper/i);
 const stopFunction = windowsStop.slice(
   windowsStop.indexOf("function Stop-RecordedProcess"),
   windowsStop.indexOf("Stop-RecordedProcess -PidPath")

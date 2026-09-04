@@ -12,17 +12,6 @@ $logsRoot = Join-Path $toolsRoot 'logs'
 $nextPidPath = Join-Path $toolsRoot 'next.pid'
 $legacyObsPasswordPath = Join-Path $toolsRoot 'obs-websocket-password.protected'
 $obsSecretStore = Join-Path $PSScriptRoot 'obs-secret-store.mjs'
-$envPath = Join-Path $workspace '.env.local'
-
-function Get-EnvFileValue([string]$Key) {
-    if (-not (Test-Path -LiteralPath $envPath)) { return $null }
-    $prefix = "$Key="
-    $line = Get-Content -LiteralPath $envPath |
-        Where-Object { $_.StartsWith($prefix, [StringComparison]::Ordinal) } |
-        Select-Object -Last 1
-    if ($line) { return $line.Substring($prefix.Length).Trim() }
-    return $null
-}
 
 function Test-AppReady([int]$TargetPort) {
     try {
@@ -62,12 +51,6 @@ if (-not (Test-Path -LiteralPath (Join-Path $workspace 'node_modules\next\packag
 New-Item -ItemType Directory -Force -Path $toolsRoot, $logsRoot | Out-Null
 $env:AI_INTERVIEW_OBS_MANAGED = '0'
 $env:AI_INTERVIEW_OBS_PASSWORD = ''
-
-$provider = Get-EnvFileValue 'TRANSCRIPTION_PROVIDER'
-if ($provider -eq 'whisper-cpp') {
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'start-whisper.ps1') -Background
-    if ($LASTEXITCODE -ne 0) { throw 'Could not start whisper-server.' }
-}
 
 if (-not $SkipObs) {
     $obsPath = @(

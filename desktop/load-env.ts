@@ -5,11 +5,7 @@ const LOCAL_ENV_PREFIXES = [
   "CONTROL_API_",
   "SPEECH_",
   "ALIYUN_",
-  "VOLCENGINE_",
-  "TRANSCRIPTION_",
-  "WHISPER_",
-  "OPENAI_",
-  "MODEL_"
+  "VOLCENGINE_"
 ];
 
 function shouldImportKey(key: string) {

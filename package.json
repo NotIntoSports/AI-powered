@@ -22,9 +22,6 @@
     "test:livekit-smoke": "node scripts/smoke-livekit.mjs",
     "test:livekit-load": "node scripts/load-livekit-audio.mjs",
     "start": "next start -H 127.0.0.1",
-    "test:transcription": "node scripts/smoke-transcription.mjs",
-    "test:transcription-security": "node --no-warnings --experimental-strip-types scripts/test-transcription-security.mjs",
-    "test:transcription-security-route": "node scripts/smoke-transcription-security-route.mjs",
     "test:transcription-turn": "node scripts/test-transcription-turn.mjs",
     "test:auto-answer-submit": "node scripts/test-auto-answer-submit.mjs",
     "test:audio": "node scripts/test-audio-devices.mjs",
@@ -38,10 +35,6 @@
     "test:windows-stdio": "node scripts/test-windows-stdio.mjs",
     "test:launchers": "node scripts/test-windows-launchers.mjs",
     "test:node-setup": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test-ensure-node.ps1",
-    "test:ollama-setup": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test-setup-ollama.ps1",
-    "test:model-output": "node scripts/test-model-output.mjs",
-    "test:prompt-transcript": "node scripts/test-prompt-transcript.mjs",
-    "test:question-dedup": "node scripts/test-question-dedup.mjs",
     "test:request-timeout": "node scripts/test-request-timeout.mjs",
     "test:export": "node scripts/test-interview-export.mjs",
     "test:obs": "node scripts/test-obs-service.mjs",
@@ -54,11 +47,8 @@
     "test:session": "node scripts/smoke-session-persistence.mjs",
     "check:environment": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/check-environment.ps1",
     "setup:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/setup-windows.ps1",
-    "setup:ollama": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/setup-ollama.ps1",
     "start:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/start-windows.ps1",
-    "stop:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/stop-windows.ps1",
-    "setup:whisper": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/setup-whisper.ps1",
-    "start:whisper": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/start-whisper.ps1 -Background"
+    "stop:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/stop-windows.ps1"
   },
   "dependencies": {
     "@ricky0123/vad-web": "^0.0.30",

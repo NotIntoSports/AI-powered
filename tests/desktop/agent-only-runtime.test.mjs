@@ -12,6 +12,8 @@ test("workspace records Agent turns without selecting a local pipeline", async (
 test("session route does not call a model for answer retry correction or report", async () => {
   const route = await readFile(new URL("../../app/api/session/route.ts", import.meta.url), "utf8");
   assert.doesNotMatch(route, /generateRoleResponse|generateInterviewReport|getModelRuntimeConfig|probeConfiguredModel/);
+  assert.doesNotMatch(route, /MODEL_TIMEOUT|MISSING_API_KEY|MODEL_ERROR|本机模型|远程模型密钥/);
+  assert.match(route, /AGENT_ACTION_REQUIRED/);
 });
 
 test("desktop health does not load model or transcription credentials", async () => {
@@ -27,7 +29,13 @@ test("desktop no longer exposes legacy model pipeline or transcription routes", 
     "../../app/api/transcribe/route.ts",
     "../../lib/llm.ts",
     "../../lib/model-probe.ts",
-    "../../lib/transcription.ts"
+    "../../lib/transcription.ts",
+    "../../lib/model-output.ts",
+    "../../lib/prompt-transcript.ts",
+    "../../lib/question-dedup.ts",
+    "../../scripts/setup-whisper.ps1",
+    "../../scripts/start-whisper.ps1",
+    "../../scripts/setup-ollama.ps1"
   ]) {
     await assert.rejects(access(new URL(path, import.meta.url)));
   }

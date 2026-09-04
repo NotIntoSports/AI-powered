@@ -65,7 +65,6 @@ export async function GET() {
 
 export async function POST(request: Request) {
   const startedAt = Date.now();
-  let pipelineTraceId: string | undefined;
   const parsed = actionSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     console.warn("[session] invalid action payload");
@@ -86,7 +85,6 @@ export async function POST(request: Request) {
       }
       const roleProfile = await getRoleProfile(parsed.data.assistantRole);
       const started = await resetSession({ ...parsed.data, roleProfile });
-      pipelineTraceId = started.sessionId;
       console.log(`[session] started sessionId=${started.sessionId} elapsedMs=${Date.now() - startedAt}`);
       console.log(formatPipelineLog({
         event: "session.started",
@@ -126,7 +124,6 @@ export async function POST(request: Request) {
 
     if (parsed.data.action === "e2e_turn") {
       const session = await getSession();
-      pipelineTraceId = session.sessionId;
       const updated = await appendAnswerAndQuestion({
         answer: parsed.data.answer,
         question: parsed.data.question,
@@ -151,59 +148,26 @@ export async function POST(request: Request) {
     return NextResponse.json({ code: "INVALID_INPUT", message: "不支持的操作" }, { status: 422 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "UNKNOWN";
-    if (parsed.data.action === "answer") {
-      console.warn(formatPipelineLog({
-        event: "ai.failed",
-        traceId: pipelineTraceId,
-        fields: { code: message, durationMs: Date.now() - startedAt }
-      }));
-    }
     console.warn(`[session] action failed action=${parsed.data.action} code=${message} elapsedMs=${Date.now() - startedAt}`);
-    const missingKey = message === "MISSING_API_KEY";
-    const noAnswers = message === "NO_CANDIDATE_ANSWERS";
-    const modelTimeout = message === "MODEL_TIMEOUT";
     const invalidState = [
       "SESSION_NOT_RUNNING",
       "SESSION_ALREADY_RUNNING",
       "NO_RETRYABLE_QUESTION",
+      "NO_CORRECTABLE_ANSWER",
       "SESSION_CHANGED"
     ].includes(message);
     return NextResponse.json(
       {
-        code: modelTimeout
-          ? "MODEL_TIMEOUT"
-          : missingKey
-          ? "NOT_CONFIGURED"
-          : noAnswers
-            ? "NO_ANSWERS"
-            : invalidState
-              ? "INVALID_SESSION_STATE"
-              : "MODEL_ERROR",
-        message: modelTimeout
-          ? "模型响应超时，请检查本机模型负载或网络后重试"
-          : missingKey
-          ? "请先在控制台配置远程模型密钥，或使用本机无密钥模型"
-          : noAnswers
-            ? "没有对方回答，无法生成纪要"
-            : invalidState
-              ? message === "SESSION_ALREADY_RUNNING"
-                ? "请先结束当前互动，再开始新互动"
-                : message === "SESSION_CHANGED"
-                ? "会话已发生变化，请刷新后重试"
-                : "当前会话状态不允许此操作"
-              : "模型暂时无法完成本次操作"
+        code: invalidState ? "INVALID_SESSION_STATE" : "SESSION_ERROR",
+        message: invalidState
+          ? message === "SESSION_ALREADY_RUNNING"
+            ? "请先结束当前互动，再开始新互动"
+            : message === "SESSION_CHANGED"
+              ? "会话已发生变化，请刷新后重试"
+              : "当前会话状态不允许此操作"
+          : "会话操作暂时无法完成"
       },
-      {
-        status: modelTimeout
-          ? 504
-          : missingKey
-            ? 503
-            : noAnswers
-              ? 422
-              : invalidState
-                ? 409
-                : 502
-      }
+      { status: invalidState ? 409 : 500 }
     );
   }
 }

@@ -1,9 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('tiny', 'base', 'small')]
-    [string]$WhisperModel = 'base',
-    [switch]$SkipObs,
-    [switch]$SkipWhisper
+    [switch]$SkipObs
 )
 
 $ErrorActionPreference = 'Stop'
@@ -43,12 +40,6 @@ if (-not $SkipObs) {
     } else {
         Write-Host "OBS Studio is already installed: $obsInstalled" -ForegroundColor Green
     }
-}
-
-if (-not $SkipWhisper) {
-    Write-Host "==> Installing local whisper.cpp model: $WhisperModel" -ForegroundColor Cyan
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'setup-whisper.ps1') -Model $WhisperModel
-    if ($LASTEXITCODE -ne 0) { throw "whisper.cpp setup failed with exit code $LASTEXITCODE." }
 }
 
 Write-Host '==> Building the production application' -ForegroundColor Cyan

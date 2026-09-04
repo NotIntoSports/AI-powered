@@ -33,7 +33,7 @@ Windows 客户端安装、接线、OBS/VB-CABLE 与已知限制见下方「OBS �
 
 ```powershell
 Copy-Item .env.example .env.local
-# 桌面会话连管理端后，语音线路由 LiveKit Agent 读取；本机 .env.local 不作为生产模型主路径
+# 桌面会话连管理端后，语音线路由 LiveKit Agent 读取；本机只保留设备和声音刻录配置
 npm install
 npm run dev
 ```
@@ -80,15 +80,13 @@ OBS 自动配置会将舞台源设为“仅监听”；使用 OBS 监听时同�
 
 不想使用命令行时，可以直接双击：
 
-- `First-Time-Setup.cmd`：首次安装，会先选择最小安装、完整安装、本机离线安装或退出；
+- `First-Time-Setup.cmd`：首次安装，可确认安装或直接退出；
 - `Check-AI-Virtual-Assistant.cmd`：只检查环境，不安装；
 - `Start-AI-Virtual-Assistant.cmd`：日常启动并打开工作台。
   （旧名 `Check-AI-Interviewer.cmd` / `Start-AI-Interviewer.cmd` 仍可调用，会转发到新入口。）
 
-源码启动的最小安装会安装项目依赖和系统 OBS、跳过 Whisper，可先人工输入对方回答；完整安装额外配置
-本地 whisper.cpp；本机离线安装再额外安装 Ollama 并下载约 3.4GB 的 `qwen3.5:4b`，
-完成后模型设置会自动指向本机。所有安装都必须先由用户在菜单中主动选择，且都不会自动
-安装虚拟音频驱动。若电脑没有 Node.js 22.13.0+，安装器会在选定档位后通过 winget 的
+源码安装会安装项目依赖和系统 OBS，但不会安装本地模型或转写服务，也不会自动安装
+虚拟音频驱动。若电脑没有 Node.js 22.13.0+，安装器会在用户确认后通过 winget 的
 `OpenJS.NodeJS.LTS` 精确包安装当前 Node LTS，再继续 npm 安装；已有兼容版本不会改动。
 
 首次安装：
@@ -98,9 +96,8 @@ npm run setup:windows
 npm run check:environment
 ```
 
-`setup:windows` 会安装 npm 依赖、通过 winget 安装 OBS，并复用官方 whisper.cpp
-Release 完成本地转写配置。若已经自行安装某项，可直接运行
-`scripts/setup-windows.ps1 -SkipObs` 或 `-SkipWhisper`。
+`setup:windows` 会安装 npm 依赖、通过 winget 安装 OBS。若已经自行安装 OBS，可运行
+`scripts/setup-windows.ps1 -SkipObs`。
 
 日常使用：
 
@@ -108,7 +105,7 @@ Release 完成本地转写配置。若已经自行安装某项，可直接运行
 npm run start:windows
 ```
 
-该命令会按配置启动 whisper-server、系统 OBS、Next.js，并打开工作台。这是源码脚本流程；
+该命令会启动系统 OBS、Next.js，并打开工作台。这是源码脚本流程；
 打包后的 Windows 客户端使用内置的专用 OBS，密码由 Electron `safeStorage` 以当前用户 DPAPI
 保护主副本，并同步到专用 OBS 配置。密码不会进入 OBS 命令行、渲染页面、IPC 或日志。
 OBS 上游必须读取明文配置，因此专用运行目录的 `obs-websocket\config.json` 中仍有明文密码；
@@ -125,19 +122,14 @@ OBS 上游必须读取明文配置，因此专用运行目录的 `obs-websocket\
 已向对方说明 AI 协助、记录保存和人工复核；开场白也会再次说明。历史记录支持
 逐条永久删除，删除前会要求确认。
 所有修改型 API 还会校验浏览器 `Origin` 和 `Sec-Fetch-Site`，外部网页不能通过普通表单
-替换本机助手素材或触发音频转写；本机命令行安装与检查脚本不受影响。
+替换本机助手素材或触发客户端操作；本机命令行安装与检查脚本不受影响。
 控制台、OBS 舞台和 API 统一返回 CSP、防嵌入、`nosniff`、无 Referrer 和浏览器能力限制
 响应头；CSP 只允许同源资源、本机 OBS WebSocket，以及 VAD 所需的 WebAssembly/Blob。
 页面不能被外部网站 iframe 嵌入诱导点击。
 
-AI 模型可直接在控制台的“AI 模型设置”中配置，无需手改文件或重启。Windows 下
-API 密钥使用当前用户的 DPAPI 加密，磁盘只保存密文，页面读取接口不会返回密钥。
-若使用本机 Ollama、llama.cpp server 或 LocalAI，可填写其 `http://127.0.0.1:端口/v1`
-地址并将密钥留空；无密钥模式只对本机回环地址开放。远程模型仍必须使用 HTTPS 和密钥。
-把配置切换为本机回环地址并留空密钥时，会删除此前保存的远程密钥，避免将它发送给
-本机模型进程。
-AI 模型未配置时不能开始新互动；OBS 和自动转写未就绪时仍可先使用舞台预览与人工输入，
-不会被错误当作模型必需项。
+AI 模型、转写、播报和 Realtime 线路统一在管理端配置，凭据只由服务端保存和使用；
+Windows 客户端不会读取模型密钥，也不提供本机模型回退。新互动开始后，LiveKit Agent
+读取当前启用的语音线路快照；线路未就绪时会明确拒绝会话。
 
 本机设置、当前会话、历史记录和头像元数据统一保存在 `data/app.sqlite`。SQLite 使用 WAL
 和事务保证整轮写入；头像图片或视频本体仍保存在 `data/avatar/media`。升级旧版本时会
@@ -155,27 +147,10 @@ Virtual Camera、最终摄像头画面预览通过且虚拟麦克风线路已检
 ToDesk 等远控软件的音频端点会显示提示，但不会被误认为通用会议回传线路。
 识别到配对后还会让舞台播放测试语音，并直接读取对应虚拟麦克风的本地音量；只有实际
 检测到信号才通过，因此 OBS 监听设备或“仅监听”设置错误时不会误显示为就绪。
-点击开始时还会通过 `GET /models` 做一次最多 5 秒的无推理检查；模型服务不可达或填写的
-模型不存在时不会创建会话，也不会发送对方数据。
-追问默认最多等待 60 秒，纪要最多等待 180 秒；可用
-`MODEL_QUESTION_TIMEOUT_MS` 和 `MODEL_REPORT_TIMEOUT_MS` 调整，超时后可直接重试。
 Windows SAPI 合成默认最多等待 30 秒、声音枚举最多 10 秒，超时会清理子进程；
 可用 `SAPI_SYNTHESIS_TIMEOUT_MS` 和 `SAPI_VOICE_LIST_TIMEOUT_MS` 调整。
 
-可选的一键本机模型（会安装 Ollama 并下载约 3.4GB 的 `qwen3.5:4b`，仅在你主动执行时发生）：
-
-```powershell
-npm run setup:ollama
-```
-
-只查看将执行什么、不安装或下载：
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/setup-ollama.ps1 -DryRun
-```
-远程 OpenAI-compatible 地址必须使用 HTTPS；本机模型地址可以使用 HTTP。
-
-使用结束后可停止本项目和本地转写服务：
+使用结束后可停止本项目：
 
 ```powershell
 npm run stop:windows
