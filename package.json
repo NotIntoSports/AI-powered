@@ -13,6 +13,8 @@
     "test:tauri-ui": "vitest run --config vite.config.ts",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
+    "test:tauri": "cargo test --manifest-path src-tauri/Cargo.toml && node --test tests/tauri/*.test.mjs && npm run build:tauri-ui",
+    "test:tauri-package": "node scripts/test-tauri-package.mjs",
     "predev": "npm run prepare:vad",
     "dev": "next dev -H 127.0.0.1",
     "prebuild": "npm run prepare:vad",

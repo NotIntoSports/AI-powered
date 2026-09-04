@@ -892,7 +892,7 @@ git commit -m "security: constrain Tauri foundation capabilities"
 **Interfaces:**
 - Produces: `npm run test:tauri-package` and evidence that the packaged Tauri foundation starts without Node, Go, Python, PostgreSQL, or Nginx.
 
-- [ ] **Step 1: Write the failing package contract test**
+- [x] **Step 1: Write the failing package contract test**
 
 Assert the smoke script checks:
 
@@ -902,17 +902,17 @@ Assert the smoke script checks:
 - application can exit cleanly;
 - no `.env`, `config/local.json`, database, log, or credential fixture exists inside the bundle.
 
-- [ ] **Step 2: Verify the contract fails**
+- [x] **Step 2: Verify the contract fails**
 
 Run: `node --test tests/tauri/package-contract.test.mjs`
 
 Expected: FAIL because `scripts/test-tauri-package.mjs` is missing.
 
-- [ ] **Step 3: Implement package smoke without broad process termination**
+- [x] **Step 3: Implement package smoke without broad process termination**
 
 Start the exact packaged executable, capture its PID, inspect only that process tree, communicate readiness through a test-only command or window enumeration, and terminate only the captured PID in `finally`. Redact all collected command lines before printing.
 
-- [ ] **Step 4: Add scripts and documentation**
+- [x] **Step 4: Add scripts and documentation**
 
 Add:
 
@@ -923,7 +923,7 @@ Add:
 
 README labels Tauri as an experimental foundation and keeps Electron as the normal start path. Document Rust 1.96, Node 24, WebView2, `npm run tauri:dev`, and the absence of migrated product features.
 
-- [ ] **Step 5: Build and smoke the package**
+- [x] **Step 5: Build and smoke the package**
 
 Run:
 
@@ -937,11 +937,11 @@ npm run build
 
 Expected: all PASS. Tauri smoke reports no forbidden child process. Existing Electron tests and Next build remain green.
 
-- [ ] **Step 6: Measure the Tauri foundation**
+- [x] **Step 6: Measure the Tauri foundation**
 
 Run the baseline script against the Tauri executable/bundle and append a clearly labeled foundation comparison to `baseline-results.md`. Do not claim product-level performance because business features are not migrated.
 
-- [ ] **Step 7: Commit packaging evidence**
+- [x] **Step 7: Commit packaging evidence**
 
 ```powershell
 git add package.json scripts/test-tauri-package.mjs tests/tauri/package-contract.test.mjs README.md

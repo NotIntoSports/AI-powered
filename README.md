@@ -2,6 +2,31 @@
 
 本地 **AI虚拟助手**：可用于面试官 / 候选人辅助、会议主持、虚拟直播互动等场景。
 
+## Tauri 实验性基础
+
+仓库正在验证一个 Rust + Tauri 2 的单体桌面基础，但它目前只包含本地配置修复、Windows
+凭据保管、SQLite 初始化和诊断导出等基础能力，尚未迁移工作台、语音、OBS、会话和资料管理。
+日常使用与完整功能仍请走现有 Electron 启动和打包路径。
+
+开发 Tauri 基础需要 Windows、Rust 1.96、Node.js 24 和 Microsoft Edge WebView2 Runtime：
+
+```powershell
+npm install
+npm run tauri:dev
+```
+
+验证与打包：
+
+```powershell
+npm run test:tauri
+npm run tauri:build
+npm run test:tauri-package
+```
+
+打包冒烟测试会在隔离的临时配置目录中启动成品，等待最多 15 秒确认主窗口可见，检查其
+进程树没有 Node、Control API、Python、PostgreSQL 或 Nginx，并确认安装包目录未混入本地
+配置、数据库、日志或凭据测试文件。
+
 > 当前版本是 Windows x64 内部试用版。使用前须告知对方 AI 参与和记录方式，并由人工复核；不得用于隐蔽冒充或未经复核的自动决策。
 
 - `/`：虚拟助手工作台；
