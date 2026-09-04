@@ -6,6 +6,12 @@ use std::{
 
 use super::{AppConfigV1, ConfigError, ConfigPatch};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfigLoadOutcome {
+    Ready(AppConfigV1),
+    Migrated(AppConfigV1),
+}
+
 #[derive(Debug, Clone)]
 pub struct ConfigStore {
     path: PathBuf,
@@ -25,6 +31,27 @@ impl ConfigStore {
         AppConfigV1::from_json(&json)
     }
 
+    pub fn load_for_startup(&self) -> Result<ConfigLoadOutcome, ConfigError> {
+        if !self.path.exists() {
+            return self.restore_defaults().map(ConfigLoadOutcome::Migrated);
+        }
+        let json = fs::read_to_string(&self.path)
+            .map_err(|error| ConfigError::new("CONFIG_READ_FAILED", error.to_string()))?;
+        let mut value: serde_json::Value = serde_json::from_str(&json)
+            .map_err(|error| ConfigError::new("CONFIG_INVALID", error.to_string()))?;
+        if value
+            .get("configVersion")
+            .and_then(serde_json::Value::as_u64)
+            == Some(0)
+        {
+            value["configVersion"] = serde_json::json!(1);
+            let config = AppConfigV1::from_json(&value.to_string())?;
+            self.write_validated(&config)?;
+            return Ok(ConfigLoadOutcome::Migrated(config));
+        }
+        AppConfigV1::from_json(&json).map(ConfigLoadOutcome::Ready)
+    }
+
     pub fn save_patch(&self, patch: ConfigPatch) -> Result<AppConfigV1, ConfigError> {
         let mut config = self.load()?;
         if let Some(diagnostics) = patch.diagnostics {
@@ -42,6 +69,32 @@ impl ConfigStore {
 
     pub fn last_good_path(&self) -> PathBuf {
         self.path.with_extension("backup.json")
+    }
+
+    pub fn restore_last_good(&self) -> Result<AppConfigV1, ConfigError> {
+        let config = self.load_last_good()?;
+        self.write_validated(&config)?;
+        Ok(config)
+    }
+
+    pub fn load_last_good(&self) -> Result<AppConfigV1, ConfigError> {
+        let json = fs::read_to_string(self.last_good_path())
+            .map_err(|error| ConfigError::new("CONFIG_BACKUP_READ_FAILED", error.to_string()))?;
+        AppConfigV1::from_json(&json)
+    }
+
+    pub fn restore_defaults(&self) -> Result<AppConfigV1, ConfigError> {
+        let config = AppConfigV1::default();
+        self.write_validated(&config)?;
+        Ok(config)
+    }
+
+    fn write_validated(&self, config: &AppConfigV1) -> Result<(), ConfigError> {
+        config.validate()?;
+        let json = serde_json::to_vec_pretty(config)
+            .map_err(|error| ConfigError::new("CONFIG_WRITE_FAILED", error.to_string()))?;
+        atomic_write(&self.path, &json)?;
+        atomic_write(&self.last_good_path(), &json)
     }
 }
 

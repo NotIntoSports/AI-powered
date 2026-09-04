@@ -11,7 +11,7 @@ use serde_json::Value;
 use thiserror::Error;
 
 pub use locator::{ConfigDirs, ConfigLocation, ConfigSource, locate_config};
-pub use store::ConfigStore;
+pub use store::{ConfigLoadOutcome, ConfigStore};
 
 const CONFIG_VERSION: u32 = 1;
 

@@ -56,3 +56,12 @@ h1 {
   font-size: 17px;
   line-height: 1.7;
 }
+
+.repair-card h1 { font-size: clamp(30px, 5vw, 48px); }
+.repair-error { display: grid; gap: 12px; margin: 28px 0; }
+.repair-error div { display: grid; grid-template-columns: 96px 1fr; gap: 16px; }
+.repair-error dt { color: #94a3b8; }
+.repair-error dd { margin: 0; overflow-wrap: anywhere; }
+.repair-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+.repair-actions button { border: 1px solid #38bdf8; border-radius: 10px; padding: 10px 16px; color: #e5eef8; background: #0c4a6e; font: inherit; cursor: pointer; }
+.repair-actions button:disabled { opacity: 0.45; cursor: not-allowed; }

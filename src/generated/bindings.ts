@@ -8,4 +8,6 @@ export type SecretStatus = { reference: string, configured: boolean, };
 
 export type DiagnosticsExportResult = { exported: boolean, };
 
+export type StartupState = { "kind": "ready" } | { "kind": "migrated" } | { "kind": "recoverable", error: PublicError, } | { "kind": "invalid", error: PublicError, };
+
 export type CommandResult<T> = { ok: true; data: T } | { ok: false; error: PublicError };

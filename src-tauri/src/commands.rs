@@ -2,7 +2,9 @@ use tauri::State;
 
 use crate::{
     app_state::AppState,
-    contracts::{CommandResult, DiagnosticsExportResult, FoundationStatus, SecretStatus},
+    contracts::{
+        CommandResult, DiagnosticsExportResult, FoundationStatus, SecretStatus, StartupState,
+    },
     error::PublicError,
     secrets::SecretError,
 };
@@ -34,13 +36,25 @@ pub fn diagnostics_export(
         },
         Err(error) => {
             return CommandResult::Err {
-                error: PublicError::new(error.code(), error.to_string(), false),
+                error: PublicError::new(
+                    error.code(),
+                    "Configuration is unavailable for export",
+                    false,
+                ),
             };
         }
     };
-    let service_status = serde_json::json!({
-        "database": state.database.integrity_check().unwrap_or_else(|_| "unavailable".to_owned()),
-    });
+    let database_status = state
+        .database
+        .lock()
+        .ok()
+        .and_then(|database| {
+            database
+                .as_ref()
+                .and_then(|database| database.integrity_check().ok())
+        })
+        .unwrap_or_else(|| "unavailable".to_owned());
+    let service_status = serde_json::json!({ "database": database_status });
     match state.diagnostics.export(
         std::path::Path::new(&destination),
         public_config,
@@ -52,6 +66,27 @@ pub fn diagnostics_export(
         Err(error) => CommandResult::Err {
             error: PublicError::new(error.code(), error.to_string(), false),
         },
+    }
+}
+
+#[tauri::command]
+pub fn config_get_startup_state(state: State<'_, AppState>) -> CommandResult<StartupState> {
+    CommandResult::Ok {
+        data: state.startup_state(),
+    }
+}
+
+#[tauri::command]
+pub fn config_restore_last_good(state: State<'_, AppState>) -> CommandResult<StartupState> {
+    CommandResult::Ok {
+        data: state.restore_last_good(),
+    }
+}
+
+#[tauri::command]
+pub fn config_restore_defaults(state: State<'_, AppState>) -> CommandResult<StartupState> {
+    CommandResult::Ok {
+        data: state.restore_defaults(),
     }
 }
 

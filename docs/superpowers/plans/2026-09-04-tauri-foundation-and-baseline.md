@@ -773,15 +773,15 @@ git commit -m "feat: add bounded local diagnostics"
 **Interfaces:**
 - Produces: `StartupState::{Ready, Migrated, Recoverable, Invalid}`, commands `config_get_startup_state`, `config_restore_last_good`, `config_restore_defaults`, and a repair-mode screen.
 
-- [ ] **Step 1: Write failing Rust startup-state tests**
+- [x] **Step 1: Write failing Rust startup-state tests**
 
 Cover valid config, migrated config, malformed main with valid last-good, malformed both, unreadable config, database migration failure, and missing secret backend. Missing optional provider secrets must not block foundation startup.
 
-- [ ] **Step 2: Write failing React repair-mode tests**
+- [x] **Step 2: Write failing React repair-mode tests**
 
 Mock only `src/api/commands.ts`. Verify field errors render, ready state renders foundation shell, recoverable state offers last-good restore, invalid state offers defaults/import/open-file, and no component imports Tauri core/plugins directly.
 
-- [ ] **Step 3: Verify tests fail**
+- [x] **Step 3: Verify tests fail**
 
 Run:
 
@@ -792,15 +792,15 @@ npm run test:tauri-ui -- src/features/config-repair/config-repair.test.tsx
 
 Expected: missing state/command/component failures.
 
-- [ ] **Step 4: Implement fail-closed app-state composition**
+- [x] **Step 4: Implement fail-closed app-state composition**
 
 Initialize services in this order: directories, diagnostics, secret backend, config, database. Preserve structured failures and expose only public startup state. Do not panic for user-repairable configuration errors.
 
-- [ ] **Step 5: Implement the repair UI**
+- [x] **Step 5: Implement the repair UI**
 
 The screen displays stable error code, field, localized message, and buttons for allowed commands. It must not display raw Rust errors, stack traces, configuration contents, or credential references.
 
-- [ ] **Step 6: Verify Rust, frontend, and binding drift**
+- [x] **Step 6: Verify Rust, frontend, and binding drift**
 
 Run:
 
@@ -814,7 +814,7 @@ git diff --exit-code -- src/generated/bindings.ts
 
 Expected: all PASS.
 
-- [ ] **Step 7: Commit repair mode**
+- [x] **Step 7: Commit repair mode**
 
 ```powershell
 git add src src-tauri
