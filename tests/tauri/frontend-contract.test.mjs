@@ -5,9 +5,10 @@ import test from "node:test";
 
 /**
  * Recursively collect all .ts/.tsx source files under `dir`.
- * Pure-Node replacement for `rg -l <pattern> src --glob '*.ts' --glob '*.tsx'`:
- * it skips node_modules and hidden (dot-prefixed) directories, mirroring ripgrep's
- * default .gitignore/hidden handling, so no non-source directory is ever scanned.
+ * This is a pure-Node replacement for `rg -l <pattern> src --glob '*.ts' --glob '*.tsx'`.
+ * Every divergence from ripgrep is in the STRICTER direction, so the contract can never be
+ * silently weakened: it does NOT read .gitignore (it scans all non-node_modules dirs), and it
+ * DOES scan dot-prefixed files (it only skips node_modules and dot-prefixed directories).
  */
 async function collectSourceFiles(dir) {
   const results = [];
@@ -17,7 +18,10 @@ async function collectSourceFiles(dir) {
     if (entry.isDirectory()) {
       if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
       results.push(...(await collectSourceFiles(fullPath)));
-    } else if ([".ts", ".tsx"].includes(extname(entry.name))) {
+    } else if (entry.isFile() && [".ts", ".tsx"].includes(extname(entry.name))) {
+      // entry.isFile() guard: avoids EISDIR from a directory literally named *.ts, and
+      // excludes symlinks (Dirent reports isFile()=false for them), matching rg's default
+      // of not following symlinks.
       results.push(fullPath);
     }
   }
