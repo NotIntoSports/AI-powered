@@ -1,9 +1,14 @@
 # LiveKit subtitle agent
 
-Joins LiveKit rooms, subscribes to meeting audio, and is the **only** runtime
-that executes ASR, LLM, TTS, or Realtime. Each new room loads the currently
-active voice-route snapshot once from control-api; in-progress rooms keep that
-snapshot when an administrator switches routes.
+This Python worker is leftover, not the product default. It is not started
+unless someone explicitly uses the `livekit` Docker Compose profile
+(`docker compose --profile livekit`). Daily product execution is the Tauri
+Direct Runtime (`npm run tauri:dev`).
+
+When started, it joins LiveKit rooms, subscribes to meeting audio, and can
+execute ASR, LLM, TTS, or Realtime from a control-api voice-route snapshot.
+Each new room loads the currently active snapshot once; in-progress rooms
+keep that snapshot when an administrator switches routes.
 
 ## Cascaded mode
 

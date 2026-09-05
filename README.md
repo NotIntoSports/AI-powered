@@ -4,9 +4,9 @@
 
 ## Tauri 实验性基础
 
-仓库正在验证一个 Rust + Tauri 2 的单体桌面基础，但它目前只包含本地配置修复、Windows
-凭据保管、SQLite 初始化和诊断导出等基础能力，尚未迁移工作台、语音、OBS、会话和资料管理。
-日常使用与完整功能仍请走现有 Electron 启动和打包路径。
+日常产品路径是 `npm run tauri:dev` / Tauri Direct Runtime：本机 Rust Runtime 执行
+转写、Realtime 与会话命令。Python LiveKit Agent 与 `docker compose --profile livekit`
+仅为遗留实验，默认不启动。Electron / Next.js 仍留在仓库，但不是日常产品入口。
 
 开发 Tauri 基础需要 Windows、Rust 1.96、Node.js 24 和 Microsoft Edge WebView2 Runtime：
 
@@ -41,7 +41,7 @@ Pages display migration roadmaps and capability placeholders. Business commands 
 
 Launch with `npm run tauri:dev` (development) or `npm run tauri:build` (packaging).
 
-The Electron/Next.js product path remains the default and is unaffected by this work.
+Electron/Next.js remains in the tree as leftover packaging; it is not the daily product path.
 
 > 当前版本是 Windows x64 内部试用版。使用前须告知对方 AI 参与和记录方式，并由人工复核；不得用于隐蔽冒充或未经复核的自动决策。
 
@@ -49,12 +49,12 @@ The Electron/Next.js product path remains the default and is unaffected by this 
 - `/stage`：给 OBS 采集的助手舞台；
 - 支持上传自己的 JPEG、PNG、WebP、MP4 或 WebM 助手出镜素材；
 - 支持上传多份 PDF/Word 参考资料（可拖入文件夹），本场可勾选多份参与追问参考；
-- 追问、转写和播报由 LiveKit Agent 按启用语音线路执行，不在 Windows 客户端直连模型。
+- 日常路径下，追问、转写和播报由 Tauri Direct Runtime 在本机执行；Python LiveKit Agent 仅为遗留实验。
 - OBS Virtual Camera 将舞台作为摄像头提供给腾讯会议、飞书、钉钉、Zoom、Teams 等软件。
 - Windows 客户端内置官方 OBS 32.2.1，并由 Electron 主进程通过 OBS WebSocket 一键创建场景、浏览器源并启停虚拟摄像头。
-- 会议系统音频经桌面桥接进入 LiveKit，由 Agent 转写并回复。
+- 日常路径下会议音频由 Tauri Direct Runtime 转写；遗留 Electron 路径才经桌面桥接进入 LiveKit 并由 Python Agent 回复。
 - Windows 客户端通过统一字幕接口显示实时字幕；**实时会议字幕 / RTC 仅走自建 LiveKit**（火山 RTC 已下线）。
-- AI、ASR、TTS 由管理端「语音线路」统一配置，**LiveKit Agent 是唯一执行端**；客户端只传房间音频和版本化会话上下文，不再拉取模型密钥或本地跑 ASR/LLM/TTS。
+- 日常路径下，ASR/LLM/TTS/Realtime 由 Tauri Direct Runtime 执行，凭据只走 Windows 凭据保管。Python LiveKit Agent 不再是默认或唯一执行端。
 - 按住说话可暂停 AI，并由 OBS 将本机默认麦克风切入同一虚拟麦克风线路。
 
 Windows 客户端安装、接线、OBS/VB-CABLE 与已知限制见下方「OBS 设置」「Windows 快速启动」章节。
@@ -68,13 +68,13 @@ Windows 客户端安装、接线、OBS/VB-CABLE 与已知限制见下方「OBS �
 - **语音凭据**（阿里云 NLS/CosyVoice 与豆包、系统音色试听）；
 - 账户、资料、对象存储、角色话术。
 
-自建 LiveKit + Agent 默认不随基础 compose 启动；需要字幕时在 `server/deploy`（或开发用 `server/control-api`）执行 `docker compose --profile livekit up -d`，再用 `npm run test:livekit-smoke` / `npm run test:livekit-load` 做 1 路和 10 路纯音频检查。
+自建 LiveKit + Python Agent 是遗留实验，默认不随基础 compose 启动。仅在显式需要实验室字幕时，在 `server/deploy`（或开发用 `server/control-api`）执行 `docker compose --profile livekit up -d`，再用 `npm run test:livekit-smoke` / `npm run test:livekit-load` 做 1 路和 10 路纯音频检查。
 
 ## 运行
 
 ```powershell
 Copy-Item .env.example .env.local
-# 桌面会话连管理端后，语音线路由 LiveKit Agent 读取；本机只保留设备和声音刻录配置
+# 日常产品走 npm run tauri:dev（Direct Runtime）。以下 Electron / Next 为遗留启动路径
 npm install
 npm run dev
 ```
@@ -90,7 +90,10 @@ npm run dev
 
 ## 对方语音转写
 
-会议音频由桌面桥接发布到 LiveKit 房间，**LiveKit Agent** 按当前启用的语音线路执行转写与回复：
+日常产品路径由 Tauri Direct Runtime 在本机执行转写与回复，不启动 Python Agent。
+以下描述的是遗留 Electron + LiveKit Agent 实验室路径（需 `docker compose --profile livekit`）：
+
+会议音频由桌面桥接发布到 LiveKit 房间，遗留 **LiveKit Agent** 可按当时启用的语音线路执行转写与回复：
 
 - 级联线路：房间 PCM → ASR → 带会话上下文的 LLM → TTS → 再发布回房间；
 - 端到端线路：房间 PCM 进入 Realtime WebSocket（含阿里云 Qwen Audio Realtime），返回音频与字幕。
@@ -168,9 +171,9 @@ OBS 上游必须读取明文配置，因此专用运行目录的 `obs-websocket\
 响应头；CSP 只允许同源资源、本机 OBS WebSocket，以及 VAD 所需的 WebAssembly/Blob。
 页面不能被外部网站 iframe 嵌入诱导点击。
 
-AI 模型、转写、播报和 Realtime 线路统一在管理端配置，凭据只由服务端保存和使用；
-Windows 客户端不会读取模型密钥，也不提供本机模型回退。新互动开始后，LiveKit Agent
-读取当前启用的语音线路快照；线路未就绪时会明确拒绝会话。
+日常产品路径由 Tauri Direct Runtime 本机执行模型调用，凭据只走 Windows 凭据保管。
+以下 Electron / 管理端路径仍把密钥留在服务端；遗留 Python LiveKit Agent 仅在显式
+`--profile livekit` 时读取语音线路快照，默认不会启动。
 
 本机设置、当前会话、历史记录和头像元数据统一保存在 `data/app.sqlite`。SQLite 使用 WAL
 和事务保证整轮写入；头像图片或视频本体仍保存在 `data/avatar/media`。升级旧版本时会

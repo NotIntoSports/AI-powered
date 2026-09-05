@@ -132,6 +132,8 @@ services:
       - "7882:7882/udp"
     restart: unless-stopped
 
+  # Leftover lab worker. Must not be in default `docker compose up`.
+  # Start only with: docker compose --profile livekit up -d
   livekit-agent:
     image: livekit-agent:local
     build: ../livekit-agent
