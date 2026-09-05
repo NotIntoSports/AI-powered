@@ -7,6 +7,7 @@ pub mod contracts;
 pub mod database;
 pub mod diagnostics;
 pub mod error;
+pub mod materials;
 pub mod providers;
 pub mod secrets;
 pub mod services;
