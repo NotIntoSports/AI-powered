@@ -1,13 +1,14 @@
 use std::{path::Path, sync::Mutex, time::Duration};
 
-#[cfg(test)]
-use rusqlite::OptionalExtension;
-use rusqlite::{Connection, params};
+use rusqlite::{params, Connection, OptionalExtension};
 use thiserror::Error;
 
-const LATEST_SCHEMA_VERSION: i64 = 1;
+const MIGRATIONS: &[(i64, &str)] = &[
+    (1, include_str!("../../migrations/0001_foundation.sql")),
+    (2, include_str!("../../migrations/0002_materials.sql")),
+];
+const LATEST_SCHEMA_VERSION: i64 = MIGRATIONS[MIGRATIONS.len() - 1].0;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
-const FOUNDATION_MIGRATION: &str = include_str!("../../migrations/0001_foundation.sql");
 
 #[derive(Debug, Error)]
 pub enum DatabaseError {
@@ -24,6 +25,27 @@ impl DatabaseError {
             Self::Operation => "DATABASE_OPERATION_FAILED",
         }
     }
+}
+
+fn current_schema_version(connection: &Connection) -> Result<i64, DatabaseError> {
+    let has_migrations: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name='schema_migrations')",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| DatabaseError::Operation)?;
+    if !has_migrations {
+        return Ok(0);
+    }
+    Ok(connection
+        .query_row("SELECT MAX(version) FROM schema_migrations", [], |row| {
+            row.get::<_, Option<i64>>(0)
+        })
+        .optional()
+        .map_err(|_| DatabaseError::Operation)?
+        .flatten()
+        .unwrap_or(0))
 }
 
 pub struct Database {
@@ -52,35 +74,24 @@ impl Database {
             .connection
             .lock()
             .map_err(|_| DatabaseError::Operation)?;
-        let has_migrations: bool = connection.query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name='schema_migrations')",
-            [],
-            |row| row.get(0),
-        ).map_err(|_| DatabaseError::Operation)?;
-        let current = if has_migrations {
-            connection
-                .query_row("SELECT MAX(version) FROM schema_migrations", [], |row| {
-                    row.get::<_, Option<i64>>(0)
-                })
-                .map_err(|_| DatabaseError::Operation)?
-                .unwrap_or(0)
-        } else {
-            0
-        };
+        let current = current_schema_version(&connection)?;
         if current > LATEST_SCHEMA_VERSION {
             return Err(DatabaseError::NewerVersion);
         }
-        if current == 0 {
+        for &(version, sql) in MIGRATIONS {
+            if version <= current {
+                continue;
+            }
             let transaction = connection
                 .transaction()
                 .map_err(|_| DatabaseError::Operation)?;
             transaction
-                .execute_batch(FOUNDATION_MIGRATION)
+                .execute_batch(sql)
                 .map_err(|_| DatabaseError::Operation)?;
             transaction
                 .execute(
                     "INSERT INTO schema_migrations(version, applied_at) VALUES (?1, ?2)",
-                    params![LATEST_SCHEMA_VERSION, chrono::Utc::now().to_rfc3339()],
+                    params![version, chrono::Utc::now().to_rfc3339()],
                 )
                 .map_err(|_| DatabaseError::Operation)?;
             transaction.commit().map_err(|_| DatabaseError::Operation)?;
@@ -103,14 +114,12 @@ impl Database {
             .connection
             .lock()
             .map_err(|_| DatabaseError::Operation)?;
-        connection
-            .query_row("SELECT MAX(version) FROM schema_migrations", [], |row| {
-                row.get::<_, Option<i64>>(0)
-            })
-            .optional()
-            .map_err(|_| DatabaseError::Operation)?
-            .flatten()
-            .ok_or(DatabaseError::Operation)
+        let version = current_schema_version(&connection)?;
+        if version == 0 {
+            Err(DatabaseError::Operation)
+        } else {
+            Ok(version)
+        }
     }
 
     fn pragma_string(&self, name: &str) -> Result<String, DatabaseError> {
@@ -135,14 +144,47 @@ impl Database {
     }
 
     #[cfg(test)]
-    fn table_names(&self) -> Result<Vec<String>, DatabaseError> {
+    fn application_table_names(&self) -> Result<Vec<String>, DatabaseError> {
+        self.query_strings(
+            "SELECT name FROM sqlite_schema
+             WHERE type='table'
+               AND name NOT LIKE 'sqlite_%'
+               AND name NOT LIKE '%_fts_%'
+             ORDER BY name",
+        )
+    }
+
+    #[cfg(test)]
+    fn execute_batch(&self, sql: &str) -> Result<(), DatabaseError> {
         let connection = self
             .connection
             .lock()
             .map_err(|_| DatabaseError::Operation)?;
-        let mut statement = connection.prepare(
-            "SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
-        ).map_err(|_| DatabaseError::Operation)?;
+        connection
+            .execute_batch(sql)
+            .map_err(|_| DatabaseError::Operation)
+    }
+
+    #[cfg(test)]
+    fn query_string(&self, sql: &str) -> Result<String, DatabaseError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| DatabaseError::Operation)?;
+        connection
+            .query_row(sql, [], |row| row.get(0))
+            .map_err(|_| DatabaseError::Operation)
+    }
+
+    #[cfg(test)]
+    fn query_strings(&self, sql: &str) -> Result<Vec<String>, DatabaseError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| DatabaseError::Operation)?;
+        let mut statement = connection
+            .prepare(sql)
+            .map_err(|_| DatabaseError::Operation)?;
         let rows = statement
             .query_map([], |row| row.get(0))
             .map_err(|_| DatabaseError::Operation)?;
