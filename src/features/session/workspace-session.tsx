@@ -264,10 +264,10 @@ export function WorkspaceSession({
         <button disabled={busy || active} type="button" onClick={() => void start()}>
           开始
         </button>
-        <button disabled={busy || !active} type="button" onClick={() => void stop()}>
+        <button disabled={!active} type="button" onClick={() => void stop()}>
           停止
         </button>
-        <button disabled={busy || !active} type="button" onClick={() => void setModeName("operator_speaking")}>
+        <button disabled={!active} type="button" onClick={() => void setModeName("operator_speaking")}>
           接管
         </button>
         <button disabled={busy || !active} type="button" onClick={() => void setModeName("ai_active")}>

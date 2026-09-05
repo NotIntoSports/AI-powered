@@ -177,7 +177,9 @@ fn is_legal_transition(from: SessionPhase, to: SessionPhase) -> bool {
         | (SessionPhase::Preparing, SessionPhase::Listening)
         | (SessionPhase::Listening, SessionPhase::Thinking)
         | (SessionPhase::Thinking, SessionPhase::Speaking)
+        | (SessionPhase::Thinking, SessionPhase::Listening)
         | (SessionPhase::Speaking, SessionPhase::Listening)
+        | (SessionPhase::Recovering, SessionPhase::Listening)
         | (SessionPhase::Stopping, SessionPhase::Completed) => true,
         (_, SessionPhase::Stopping) => from != SessionPhase::Stopping,
         (_, SessionPhase::Recovering | SessionPhase::Blocked | SessionPhase::Failed) => {
@@ -226,7 +228,6 @@ mod tests {
             (SessionPhase::Idle, SessionPhase::Listening),
             (SessionPhase::Listening, SessionPhase::Idle),
             (SessionPhase::Speaking, SessionPhase::Thinking),
-            (SessionPhase::Thinking, SessionPhase::Listening),
             (SessionPhase::Completed, SessionPhase::Listening),
             (SessionPhase::Completed, SessionPhase::Stopping),
             (SessionPhase::Failed, SessionPhase::Listening),
@@ -241,6 +242,16 @@ mod tests {
             assert_eq!(error.code(), "SESSION_STATE_INVALID");
             assert_eq!(runtime.phase(), from);
         }
+    }
+
+    #[test]
+    fn thinking_can_return_to_listening_after_a_failed_turn() {
+        let mut runtime = SessionRuntime::new();
+        force_phase(&mut runtime, SessionPhase::Thinking);
+        runtime
+            .transition(SessionPhase::Listening)
+            .expect("thinking -> listening");
+        assert_eq!(runtime.phase(), SessionPhase::Listening);
     }
 
     #[test]

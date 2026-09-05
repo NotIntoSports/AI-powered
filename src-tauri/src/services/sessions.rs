@@ -1,4 +1,7 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, AtomicU8, Ordering},
+};
 
 use crate::{
     audio::{ASR_SAMPLE_RATE, AudioCapture, AudioError, NoopSink, PlaybackSink, SidecarPoll},
@@ -79,12 +82,96 @@ pub struct SessionProbes<'a> {
     pub embed: &'a dyn EmbeddingProbe,
 }
 
+/// Flags stop / takeover can set without waiting for `SessionService`.
+pub struct SessionControl {
+    cancel: AtomicBool,
+    stop_requested: AtomicBool,
+    stop_tts: AtomicBool,
+    mode: AtomicU8,
+    session_id: Mutex<Option<String>>,
+}
+
+impl SessionControl {
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self {
+            cancel: AtomicBool::new(false),
+            stop_requested: AtomicBool::new(false),
+            stop_tts: AtomicBool::new(false),
+            mode: AtomicU8::new(mode_u8(AgentMode::AiActive)),
+            session_id: Mutex::new(None),
+        })
+    }
+
+    pub fn request_cancel(&self) {
+        self.cancel.store(true, Ordering::SeqCst);
+    }
+
+    pub fn request_stop(&self) {
+        self.stop_requested.store(true, Ordering::SeqCst);
+        self.cancel.store(true, Ordering::SeqCst);
+        self.stop_tts.store(true, Ordering::SeqCst);
+    }
+
+    pub fn set_mode(&self, mode: AgentMode) {
+        self.mode.store(mode_u8(mode), Ordering::SeqCst);
+        if mode == AgentMode::AiActive {
+            self.stop_tts.store(false, Ordering::SeqCst);
+        } else {
+            self.stop_tts.store(true, Ordering::SeqCst);
+            self.cancel.store(true, Ordering::SeqCst);
+        }
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.cancel.load(Ordering::SeqCst)
+    }
+
+    pub fn stop_requested(&self) -> bool {
+        self.stop_requested.load(Ordering::SeqCst)
+    }
+
+    pub fn mode(&self) -> AgentMode {
+        mode_from_u8(self.mode.load(Ordering::SeqCst))
+    }
+
+    pub fn session_id(&self) -> Option<String> {
+        self.session_id.lock().ok().and_then(|guard| guard.clone())
+    }
+
+    pub fn take_stop_tts(&self) -> bool {
+        self.stop_tts.swap(false, Ordering::SeqCst)
+    }
+
+    fn cancel_flag(&self) -> &AtomicBool {
+        &self.cancel
+    }
+
+    fn clear_cancel(&self) {
+        self.cancel.store(false, Ordering::SeqCst);
+    }
+
+    fn set_session_id(&self, session_id: Option<String>) {
+        if let Ok(mut guard) = self.session_id.lock() {
+            *guard = session_id;
+        }
+    }
+
+    fn reset(&self) {
+        self.cancel.store(false, Ordering::SeqCst);
+        self.stop_requested.store(false, Ordering::SeqCst);
+        self.stop_tts.store(false, Ordering::SeqCst);
+        self.mode
+            .store(mode_u8(AgentMode::AiActive), Ordering::SeqCst);
+        self.set_session_id(None);
+    }
+}
+
 pub struct SessionService<S: PlaybackSink = NoopSink> {
     runtime: SessionRuntime,
     session_id: Option<String>,
     capture: AudioCapture,
     sink: S,
-    cancel: AtomicBool,
+    control: Arc<SessionControl>,
     turn_index: i64,
     unused_materials: bool,
     last_error_code: Option<String>,
@@ -109,11 +196,15 @@ impl<S: PlaybackSink> SessionService<S> {
             session_id: None,
             capture: AudioCapture::from_injected(),
             sink,
-            cancel: AtomicBool::new(false),
+            control: SessionControl::new(),
             turn_index: 0,
             unused_materials: false,
             last_error_code: None,
         }
+    }
+
+    pub fn control(&self) -> Arc<SessionControl> {
+        Arc::clone(&self.control)
     }
 
     pub fn phase(&self) -> SessionPhase {
@@ -121,7 +212,7 @@ impl<S: PlaybackSink> SessionService<S> {
     }
 
     pub fn mode(&self) -> AgentMode {
-        self.runtime.mode()
+        self.control.mode()
     }
 
     pub fn session_id(&self) -> Option<&str> {
@@ -182,6 +273,7 @@ impl<S: PlaybackSink> SessionService<S> {
         self.unused_materials = false;
         self.last_error_code = None;
         let session_id = uuid::Uuid::new_v4().to_string();
+        self.control.set_session_id(Some(session_id.clone()));
         let role_profile_id = active_role_profile(config)
             .map(|profile| profile.id.as_str())
             .unwrap_or_default();
@@ -208,29 +300,9 @@ impl<S: PlaybackSink> SessionService<S> {
     }
 
     pub fn stop(&mut self, database: &Database) -> Result<SessionRecord, SessionServiceError> {
-        let session_id = self
-            .session_id
-            .clone()
-            .ok_or(SessionServiceError::NotFound)?;
-        self.cancel.store(true, Ordering::SeqCst);
+        self.control.request_stop();
         self.sink.cancel();
-        let store = SessionStore::new(database);
-        let row = store
-            .get(&session_id)?
-            .ok_or(SessionServiceError::NotFound)?;
-        if is_terminal_phase(self.runtime.phase()) || is_terminal_status(&row.status) {
-            return Ok(row);
-        }
-        self.runtime.transition(SessionPhase::Stopping)?;
-        persist_phase(&store, &session_id, SessionPhase::Stopping)?;
-        self.runtime.transition(SessionPhase::Completed)?;
-        store.finish(&session_id, "completed")?;
-        store.append_event(
-            &session_id,
-            "status",
-            &status_payload(SessionPhase::Completed),
-        )?;
-        store.get(&session_id)?.ok_or(SessionServiceError::NotFound)
+        self.finish_stop(database)
     }
 
     pub fn set_mode(
@@ -238,8 +310,9 @@ impl<S: PlaybackSink> SessionService<S> {
         database: &Database,
         mode: AgentMode,
     ) -> Result<AgentMode, SessionServiceError> {
+        self.control.set_mode(mode);
         self.runtime.set_mode(mode);
-        if self.runtime.take_stop_tts() {
+        if self.control.take_stop_tts() || self.runtime.take_stop_tts() {
             self.sink.cancel();
         }
         if let Some(session_id) = &self.session_id {
@@ -249,7 +322,7 @@ impl<S: PlaybackSink> SessionService<S> {
                 &serde_json::json!({ "mode": mode_name(mode) }).to_string(),
             )?;
         }
-        Ok(self.runtime.mode())
+        Ok(self.control.mode())
     }
 
     pub fn push_pcm(&mut self, pcm: &[u8]) {
@@ -265,9 +338,18 @@ impl<S: PlaybackSink> SessionService<S> {
         text: Option<&str>,
     ) -> Result<Option<CascadeTurn>, SessionServiceError> {
         self.poll_sidecar(database)?;
+        self.runtime.set_mode(self.control.mode());
+        if self.control.take_stop_tts() {
+            self.sink.cancel();
+        }
         if !self.runtime.can_answer() {
             return Ok(None);
         }
+        if self.control.stop_requested() {
+            self.finish_stop(database)?;
+            return Ok(None);
+        }
+        self.control.clear_cancel();
         let session_id = self
             .session_id
             .clone()
@@ -287,7 +369,7 @@ impl<S: PlaybackSink> SessionService<S> {
             .collect::<Vec<_>>();
         let pcm = self.capture.pcm_for_asr();
         let user_text = text.map(str::trim).filter(|value| !value.is_empty());
-        let turn = {
+        let cascade = {
             let deps = CascadeTurnDeps {
                 asr: probes.asr,
                 llm: probes.llm,
@@ -307,8 +389,14 @@ impl<S: PlaybackSink> SessionService<S> {
                     user_text,
                     history: &history,
                 },
-                &self.cancel,
-            )?
+                self.control.cancel_flag(),
+            )
+        };
+        let turn = match cascade {
+            Ok(turn) => turn,
+            Err(error) => {
+                return self.recover_from_cascade_error(database, &session_id, error);
+            }
         };
 
         let turn_id = uuid::Uuid::new_v4().to_string();
@@ -349,10 +437,17 @@ impl<S: PlaybackSink> SessionService<S> {
 
         self.runtime.transition(SessionPhase::Speaking)?;
         persist_phase(&store, &session_id, SessionPhase::Speaking)?;
-        if !turn.tts_pcm.is_empty() {
+        if self.control.take_stop_tts() || self.control.is_cancelled() {
+            self.sink.cancel();
+        } else if !turn.tts_pcm.is_empty() {
             self.sink.play_pcm(&turn.tts_pcm, 24_000);
         }
-        if self.cancel.load(Ordering::SeqCst) {
+        if self.control.stop_requested() {
+            self.finish_stop(database)?;
+            return Ok(Some(turn));
+        }
+        if self.control.is_cancelled() {
+            self.return_to_listening(database, &session_id)?;
             return Ok(Some(turn));
         }
         self.runtime.transition(SessionPhase::Listening)?;
@@ -387,8 +482,71 @@ impl<S: PlaybackSink> SessionService<S> {
         self.turn_index = 0;
         self.unused_materials = false;
         self.last_error_code = None;
-        self.cancel.store(false, Ordering::SeqCst);
+        self.control.reset();
         self.capture = AudioCapture::from_injected();
+    }
+
+    fn recover_from_cascade_error(
+        &mut self,
+        database: &Database,
+        session_id: &str,
+        error: CascadeError,
+    ) -> Result<Option<CascadeTurn>, SessionServiceError> {
+        self.last_error_code = Some(error.code().to_owned());
+        if self.control.take_stop_tts() {
+            self.sink.cancel();
+        }
+        if self.control.stop_requested() {
+            self.finish_stop(database)?;
+            return Err(error.into());
+        }
+        if is_fatal_cascade(&error) {
+            self.fail_session(database)?;
+            return Err(error.into());
+        }
+        self.return_to_listening(database, session_id)?;
+        Err(error.into())
+    }
+
+    fn return_to_listening(
+        &mut self,
+        database: &Database,
+        session_id: &str,
+    ) -> Result<(), SessionServiceError> {
+        if self.runtime.phase() == SessionPhase::Listening {
+            return Ok(());
+        }
+        self.runtime.transition(SessionPhase::Listening)?;
+        persist_phase(
+            &SessionStore::new(database),
+            session_id,
+            SessionPhase::Listening,
+        )?;
+        Ok(())
+    }
+
+    fn finish_stop(&mut self, database: &Database) -> Result<SessionRecord, SessionServiceError> {
+        let session_id = self
+            .session_id
+            .clone()
+            .ok_or(SessionServiceError::NotFound)?;
+        let store = SessionStore::new(database);
+        let row = store
+            .get(&session_id)?
+            .ok_or(SessionServiceError::NotFound)?;
+        if is_terminal_phase(self.runtime.phase()) || is_terminal_status(&row.status) {
+            return Ok(row);
+        }
+        self.runtime.transition(SessionPhase::Stopping)?;
+        persist_phase(&store, &session_id, SessionPhase::Stopping)?;
+        self.runtime.transition(SessionPhase::Completed)?;
+        store.finish(&session_id, "completed")?;
+        store.append_event(
+            &session_id,
+            "status",
+            &status_payload(SessionPhase::Completed),
+        )?;
+        store.get(&session_id)?.ok_or(SessionServiceError::NotFound)
     }
 
     fn fail_session(&mut self, database: &Database) -> Result<(), SessionServiceError> {
@@ -445,6 +603,31 @@ fn status_payload(phase: SessionPhase) -> String {
 
 fn mode_name(mode: AgentMode) -> &'static str {
     mode.as_str()
+}
+
+fn mode_u8(mode: AgentMode) -> u8 {
+    match mode {
+        AgentMode::AiActive => 0,
+        AgentMode::OperatorSpeaking => 1,
+        AgentMode::Paused => 2,
+        AgentMode::Muted => 3,
+    }
+}
+
+fn mode_from_u8(value: u8) -> AgentMode {
+    match value {
+        1 => AgentMode::OperatorSpeaking,
+        2 => AgentMode::Paused,
+        3 => AgentMode::Muted,
+        _ => AgentMode::AiActive,
+    }
+}
+
+fn is_fatal_cascade(error: &CascadeError) -> bool {
+    matches!(
+        error,
+        CascadeError::Unauthorized(_) | CascadeError::EndpointInvalid(_)
+    )
 }
 
 fn is_terminal_status(status: &str) -> bool {
@@ -546,6 +729,57 @@ mod tests {
             _: &[ChatMessage],
         ) -> Result<String, CascadeError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(self.reply.clone())
+        }
+    }
+
+    struct FailingLlm {
+        error: CascadeError,
+        calls: AtomicU32,
+    }
+
+    impl FailingLlm {
+        fn new(error: CascadeError) -> Self {
+            Self {
+                error,
+                calls: AtomicU32::new(0),
+            }
+        }
+    }
+
+    impl ChatModel for FailingLlm {
+        fn complete(
+            &self,
+            _: &ProviderEndpoint,
+            _: Option<&str>,
+            _: &str,
+            _: &[ChatMessage],
+        ) -> Result<String, CascadeError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Err(self.error)
+        }
+    }
+
+    struct GateLlm {
+        reply: String,
+        entered: Arc<std::sync::atomic::AtomicBool>,
+        proceed: Arc<std::sync::atomic::AtomicBool>,
+        calls: AtomicU32,
+    }
+
+    impl ChatModel for GateLlm {
+        fn complete(
+            &self,
+            _: &ProviderEndpoint,
+            _: Option<&str>,
+            _: &str,
+            _: &[ChatMessage],
+        ) -> Result<String, CascadeError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            self.entered.store(true, Ordering::SeqCst);
+            while !self.proceed.load(Ordering::SeqCst) {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
             Ok(self.reply.clone())
         }
     }
@@ -877,6 +1111,151 @@ mod tests {
             tts.voices.lock().expect("voices").as_slice(),
             ["alloy".to_string()]
         );
+    }
+
+    #[test]
+    fn finalize_llm_error_returns_to_listening_and_second_finalize_succeeds() {
+        let (_directory, database) = opened();
+        let mut service = SessionService::new();
+        let id = start_ready(&mut service, &database);
+        let asr = ScriptedAsr::ok("ignored");
+        let fail_llm = FailingLlm::new(CascadeError::RequestFailed(
+            crate::providers::CascadeStage::Llm,
+        ));
+        let tts = ScriptedTts::ok(&[0x01]);
+        let embed = UnusedEmbed;
+        let fail_probes = SessionProbes {
+            asr: &asr,
+            llm: &fail_llm,
+            tts: &tts,
+            embed: &embed,
+        };
+
+        let error = service
+            .finalize_utterance(
+                &database,
+                &ready_public_config(),
+                &fail_probes,
+                credentials(),
+                Some("第一轮"),
+            )
+            .expect_err("llm fail");
+        assert_eq!(error.code(), "LLM_REQUEST_FAILED");
+        assert_eq!(service.last_error_code(), Some("LLM_REQUEST_FAILED"));
+        assert_eq!(service.phase(), SessionPhase::Listening);
+        let row = SessionStore::new(&database).get(&id).unwrap().unwrap();
+        assert_eq!(row.status, "listening");
+        assert!(
+            SessionStore::new(&database)
+                .list_turns(&id)
+                .unwrap()
+                .is_empty()
+        );
+
+        let ok_llm = ScriptedLlm::ok("第二轮回复");
+        let ok_probes = SessionProbes {
+            asr: &asr,
+            llm: &ok_llm,
+            tts: &tts,
+            embed: &embed,
+        };
+        let turn = service
+            .finalize_utterance(
+                &database,
+                &ready_public_config(),
+                &ok_probes,
+                credentials(),
+                Some("第二轮"),
+            )
+            .unwrap()
+            .expect("second turn");
+        assert_eq!(turn.assistant_text, "第二轮回复");
+        assert_eq!(service.phase(), SessionPhase::Listening);
+        assert_eq!(service.last_error_code(), None);
+        assert_eq!(ok_llm.calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn finalize_unauthorized_fails_session() {
+        let (_directory, database) = opened();
+        let mut service = SessionService::new();
+        let id = start_ready(&mut service, &database);
+        let asr = ScriptedAsr::ok("ignored");
+        let llm = FailingLlm::new(CascadeError::Unauthorized(
+            crate::providers::CascadeStage::Llm,
+        ));
+        let tts = ScriptedTts::ok(&[0x01]);
+        let embed = UnusedEmbed;
+        let probes = SessionProbes {
+            asr: &asr,
+            llm: &llm,
+            tts: &tts,
+            embed: &embed,
+        };
+
+        let error = service
+            .finalize_utterance(
+                &database,
+                &ready_public_config(),
+                &probes,
+                credentials(),
+                Some("密钥失效"),
+            )
+            .expect_err("unauthorized");
+        assert_eq!(error.code(), "LLM_UNAUTHORIZED");
+        assert_eq!(service.last_error_code(), Some("LLM_UNAUTHORIZED"));
+        assert_eq!(service.phase(), SessionPhase::Failed);
+        let row = SessionStore::new(&database).get(&id).unwrap().unwrap();
+        assert_eq!(row.status, "failed");
+        assert!(row.finished_at.is_some());
+    }
+
+    #[test]
+    fn request_cancel_during_slow_llm_skips_tts() {
+        let (_directory, database) = opened();
+        let mut service = SessionService::new();
+        start_ready(&mut service, &database);
+        let entered = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let proceed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let asr = ScriptedAsr::ok("ignored");
+        let llm = GateLlm {
+            reply: "不应播报".into(),
+            entered: Arc::clone(&entered),
+            proceed: Arc::clone(&proceed),
+            calls: AtomicU32::new(0),
+        };
+        let tts = ScriptedTts::ok(&[0x22]);
+        let embed = UnusedEmbed;
+        let probes = SessionProbes {
+            asr: &asr,
+            llm: &llm,
+            tts: &tts,
+            embed: &embed,
+        };
+        let control = service.control();
+        let waiter = std::thread::spawn(move || {
+            while !entered.load(Ordering::SeqCst) {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            control.request_cancel();
+            proceed.store(true, Ordering::SeqCst);
+        });
+
+        let error = service
+            .finalize_utterance(
+                &database,
+                &ready_public_config(),
+                &probes,
+                credentials(),
+                Some("取消"),
+            )
+            .expect_err("cancelled");
+        waiter.join().expect("cancel thread");
+        assert_eq!(error.code(), "SESSION_CANCELLED");
+        assert_eq!(llm.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(tts.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(service.phase(), SessionPhase::Listening);
+        assert_eq!(service.last_error_code(), Some("SESSION_CANCELLED"));
     }
 
     #[test]

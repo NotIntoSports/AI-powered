@@ -1,4 +1,4 @@
-use std::sync::atomic::Ordering;
+use std::sync::{TryLockError, atomic::Ordering};
 
 use tauri::{AppHandle, Emitter, State};
 
@@ -386,7 +386,7 @@ fn secrets_backend_ready(state: &AppState) -> bool {
 
 fn runtime_status_from_state(state: &AppState) -> RuntimeStatus {
     let seq = state.event_seq.load(Ordering::SeqCst);
-    match state.sessions.lock() {
+    match state.sessions.try_lock() {
         Ok(sessions) => RuntimeStatus {
             phase: sessions.phase().as_str().to_owned(),
             mode: sessions.mode().as_str().to_owned(),
@@ -394,7 +394,14 @@ fn runtime_status_from_state(state: &AppState) -> RuntimeStatus {
             unused_materials: sessions.unused_materials(),
             last_error_code: sessions.last_error_code().map(str::to_owned),
         },
-        Err(_) => RuntimeStatus {
+        Err(TryLockError::WouldBlock) => RuntimeStatus {
+            phase: "thinking".into(),
+            mode: state.session_control.mode().as_str().to_owned(),
+            seq,
+            unused_materials: false,
+            last_error_code: None,
+        },
+        Err(TryLockError::Poisoned(_)) => RuntimeStatus {
             phase: "idle".into(),
             mode: "ai_active".into(),
             seq,
@@ -417,7 +424,7 @@ fn bump_runtime_status(state: &AppState) -> RuntimeStatus {
 fn emit_runtime(app: &AppHandle, state: &AppState) {
     let status = bump_runtime_status(state);
     let _ = app.emit(EVENT_RUNTIME_STATUS, &status);
-    if let Ok(sessions) = state.sessions.lock() {
+    if let Ok(sessions) = state.sessions.try_lock() {
         let _ = app.emit(
             EVENT_AUDIO_LEVEL,
             AudioLevelEvent {
@@ -592,18 +599,21 @@ fn session_start_cmd(state: &AppState) -> CommandResult<SessionStartResult> {
 }
 
 fn session_stop_cmd(state: &AppState) -> CommandResult<SessionSummary> {
-    let database = match state.database.lock() {
+    state.session_control.request_stop();
+    let database = match state.database.try_lock() {
         Ok(guard) => guard,
-        Err(_) => {
+        Err(TryLockError::WouldBlock) => return session_stop_pending(state),
+        Err(TryLockError::Poisoned(_)) => {
             return service_error("DATABASE_OPERATION_FAILED", "Database is unavailable");
         }
     };
     let Some(database) = database.as_ref() else {
         return service_error("DATABASE_OPERATION_FAILED", "Database is unavailable");
     };
-    let mut sessions = match state.sessions.lock() {
+    let mut sessions = match state.sessions.try_lock() {
         Ok(guard) => guard,
-        Err(_) => {
+        Err(TryLockError::WouldBlock) => return session_stop_pending(state),
+        Err(TryLockError::Poisoned(_)) => {
             return service_error(
                 "SERVICE_BUSY",
                 "Service configuration is temporarily unavailable",
@@ -618,6 +628,24 @@ fn session_stop_cmd(state: &AppState) -> CommandResult<SessionSummary> {
     }
 }
 
+fn session_stop_pending(state: &AppState) -> CommandResult<SessionSummary> {
+    let Some(id) = state.session_control.session_id() else {
+        return session_service_error(SessionServiceError::NotFound);
+    };
+    CommandResult::Ok {
+        data: SessionSummary {
+            id,
+            status: "stopping".into(),
+            role_profile_id: String::new(),
+            voice_route_id: String::new(),
+            transport_mode: "direct".into(),
+            started_at: None,
+            finished_at: None,
+            updated_at: String::new(),
+        },
+    }
+}
+
 fn session_set_mode_cmd(state: &AppState, mode: String) -> CommandResult<RuntimeStatus> {
     let Some(mode) = AgentMode::from_name(&mode) else {
         return CommandResult::Err {
@@ -625,27 +653,30 @@ fn session_set_mode_cmd(state: &AppState, mode: String) -> CommandResult<Runtime
                 .with_field("mode"),
         };
     };
-    {
-        let database = match state.database.lock() {
-            Ok(guard) => guard,
-            Err(_) => {
+    state.session_control.set_mode(mode);
+    match state.database.try_lock() {
+        Ok(database) => {
+            let Some(database) = database.as_ref() else {
                 return service_error("DATABASE_OPERATION_FAILED", "Database is unavailable");
+            };
+            match state.sessions.try_lock() {
+                Ok(mut sessions) => {
+                    if let Err(error) = sessions.set_mode(database, mode) {
+                        return session_service_error(error);
+                    }
+                }
+                Err(TryLockError::WouldBlock) => {}
+                Err(TryLockError::Poisoned(_)) => {
+                    return service_error(
+                        "SERVICE_BUSY",
+                        "Service configuration is temporarily unavailable",
+                    );
+                }
             }
-        };
-        let Some(database) = database.as_ref() else {
+        }
+        Err(TryLockError::WouldBlock) => {}
+        Err(TryLockError::Poisoned(_)) => {
             return service_error("DATABASE_OPERATION_FAILED", "Database is unavailable");
-        };
-        let mut sessions = match state.sessions.lock() {
-            Ok(guard) => guard,
-            Err(_) => {
-                return service_error(
-                    "SERVICE_BUSY",
-                    "Service configuration is temporarily unavailable",
-                );
-            }
-        };
-        if let Err(error) = sessions.set_mode(database, mode) {
-            return session_service_error(error);
         }
     }
     CommandResult::Ok {
@@ -838,8 +869,16 @@ pub fn session_start(
 
 #[tauri::command]
 pub fn session_stop(app: AppHandle, state: State<'_, AppState>) -> CommandResult<SessionSummary> {
-    let _guard = match service_guard(&state) {
-        Ok(guard) => guard,
+    state.session_control.request_stop();
+    let _guard = match service_guard_try(&state) {
+        Ok(Some(guard)) => guard,
+        Ok(None) => {
+            let result = session_stop_pending(&state);
+            if matches!(result, CommandResult::Ok { .. }) {
+                emit_runtime(&app, &state);
+            }
+            return result;
+        }
         Err(error) => return error,
     };
     let result = session_stop_cmd(&state);
@@ -978,8 +1017,8 @@ pub fn session_finalize_utterance(
     );
     if let CommandResult::Ok { data } = &result {
         emit_transcript_and_reply(&app, &state, &data.user_text, &data.assistant_text);
-        emit_runtime(&app, &state);
     }
+    emit_runtime(&app, &state);
     result
 }
 
@@ -997,6 +1036,19 @@ fn service_guard<T: ts_rs::TS>(
             "Service configuration is temporarily unavailable",
         )
     })
+}
+
+fn service_guard_try<T: ts_rs::TS>(
+    state: &AppState,
+) -> Result<Option<std::sync::MutexGuard<'_, ()>>, CommandResult<T>> {
+    match state.service_lock.try_lock() {
+        Ok(guard) => Ok(Some(guard)),
+        Err(TryLockError::WouldBlock) => Ok(None),
+        Err(TryLockError::Poisoned(_)) => Err(service_error(
+            "SERVICE_BUSY",
+            "Service configuration is temporarily unavailable",
+        )),
+    }
 }
 
 #[tauri::command(async)]
@@ -2041,6 +2093,59 @@ mod tests {
         }
     }
 
+    struct FailingLlm(crate::providers::CascadeError);
+    struct GateLlm {
+        entered: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        proceed: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        calls: std::sync::atomic::AtomicU32,
+    }
+
+    impl crate::providers::ChatModel for FailingLlm {
+        fn complete(
+            &self,
+            _: &crate::providers::ProviderEndpoint,
+            _: Option<&str>,
+            _: &str,
+            _: &[crate::providers::ChatMessage],
+        ) -> Result<String, crate::providers::CascadeError> {
+            Err(self.0)
+        }
+    }
+
+    impl crate::providers::ChatModel for GateLlm {
+        fn complete(
+            &self,
+            _: &crate::providers::ProviderEndpoint,
+            _: Option<&str>,
+            _: &str,
+            _: &[crate::providers::ChatMessage],
+        ) -> Result<String, crate::providers::CascadeError> {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.entered
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            while !self.proceed.load(std::sync::atomic::Ordering::SeqCst) {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            Ok("慢回复".into())
+        }
+    }
+
+    struct CountingTts(std::sync::Arc<std::sync::atomic::AtomicU32>);
+
+    impl crate::providers::TextToSpeech for CountingTts {
+        fn synthesize(
+            &self,
+            _: &crate::providers::ProviderEndpoint,
+            _: Option<&str>,
+            _: &str,
+            _: &str,
+            _: &str,
+        ) -> Result<Vec<u8>, crate::providers::CascadeError> {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(vec![0x01])
+        }
+    }
+
     impl crate::providers::TextToSpeech for ScriptedTts {
         fn synthesize(
             &self,
@@ -2120,5 +2225,111 @@ mod tests {
         .unwrap();
         assert_eq!(missing["ok"], false);
         assert_eq!(missing["error"]["code"], "SESSION_NOT_FOUND");
+    }
+
+    #[test]
+    fn session_finalize_after_llm_error_is_not_state_invalid() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = session_state(&directory, &ready_session_config());
+        assert_eq!(
+            serde_json::to_value(super::session_start_cmd(&state)).unwrap()["ok"],
+            true
+        );
+        let asr = ScriptedAsr;
+        let fail = FailingLlm(crate::providers::CascadeError::RequestFailed(
+            crate::providers::CascadeStage::Llm,
+        ));
+        let tts = ScriptedTts;
+        let embed = UnusedEmbed;
+        let failed = serde_json::to_value(super::session_finalize_utterance_cmd(
+            &state,
+            &crate::services::SessionProbes {
+                asr: &asr,
+                llm: &fail,
+                tts: &tts,
+                embed: &embed,
+            },
+            crate::runtime::CascadeCredentials::default(),
+            Some("第一轮"),
+        ))
+        .unwrap();
+        assert_eq!(failed["ok"], false, "{failed}");
+        assert_eq!(failed["error"]["code"], "LLM_REQUEST_FAILED");
+        assert_ne!(failed["error"]["code"], "SESSION_STATE_INVALID");
+
+        let ok_llm = ScriptedLlm("第二轮回复");
+        let second = serde_json::to_value(super::session_finalize_utterance_cmd(
+            &state,
+            &crate::services::SessionProbes {
+                asr: &asr,
+                llm: &ok_llm,
+                tts: &tts,
+                embed: &embed,
+            },
+            crate::runtime::CascadeCredentials::default(),
+            Some("第二轮"),
+        ))
+        .unwrap();
+        assert_eq!(second["ok"], true, "{second}");
+        assert_eq!(second["data"]["assistantText"], "第二轮回复");
+    }
+
+    #[test]
+    fn session_stop_sets_cancel_while_finalize_holds_locks() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = session_state(&directory, &ready_session_config());
+        assert_eq!(
+            serde_json::to_value(super::session_start_cmd(&state)).unwrap()["ok"],
+            true
+        );
+        let entered = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let proceed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let tts_calls = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let asr = ScriptedAsr;
+        let llm = GateLlm {
+            entered: std::sync::Arc::clone(&entered),
+            proceed: std::sync::Arc::clone(&proceed),
+            calls: std::sync::atomic::AtomicU32::new(0),
+        };
+        let tts = CountingTts(std::sync::Arc::clone(&tts_calls));
+        let embed = UnusedEmbed;
+
+        std::thread::scope(|scope| {
+            let finalize = scope.spawn(|| {
+                serde_json::to_value(super::session_finalize_utterance_cmd(
+                    &state,
+                    &crate::services::SessionProbes {
+                        asr: &asr,
+                        llm: &llm,
+                        tts: &tts,
+                        embed: &embed,
+                    },
+                    crate::runtime::CascadeCredentials::default(),
+                    Some("慢轮"),
+                ))
+                .unwrap()
+            });
+            while !entered.load(std::sync::atomic::Ordering::SeqCst) {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            let started = std::time::Instant::now();
+            let stopped = serde_json::to_value(super::session_stop_cmd(&state)).unwrap();
+            assert!(
+                started.elapsed() < std::time::Duration::from_millis(200),
+                "stop waited for finalize: {:?}",
+                started.elapsed()
+            );
+            assert_eq!(stopped["ok"], true, "{stopped}");
+            assert!(state.session_control.is_cancelled());
+            proceed.store(true, std::sync::atomic::Ordering::SeqCst);
+            let finalized = finalize.join().expect("finalize thread");
+            assert_eq!(finalized["ok"], false, "{finalized}");
+            assert_eq!(finalized["error"]["code"], "SESSION_CANCELLED");
+            assert_eq!(
+                tts_calls.load(std::sync::atomic::Ordering::SeqCst),
+                0,
+                "tts must not run after cancel"
+            );
+        });
     }
 }

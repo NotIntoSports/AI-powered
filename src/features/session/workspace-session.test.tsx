@@ -207,6 +207,37 @@ describe("WorkspaceSession", () => {
     expect(document.body.textContent).not.toContain("本轮未使用资料");
   });
 
+  it("keeps 停止 and 接管 enabled while finalize is in flight", async () => {
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.mocked(commands.finalizeSessionUtterance).mockImplementation(async () => {
+      await blocked;
+      return { ok: true, data: turn() };
+    });
+    vi.mocked(commands.getRuntimeStatus).mockResolvedValue({
+      ok: true,
+      data: status({ phase: "listening", seq: 2 }),
+    });
+
+    render(<WorkspaceSession />);
+    fireEvent.click(await screen.findByRole("button", { name: "开始" }));
+    await waitFor(() => expect(document.body.textContent).toContain("listening"));
+    fireEvent.change(screen.getByLabelText("测试语句"), { target: { value: "慢轮" } });
+    fireEvent.click(screen.getByRole("button", { name: "提交语句" }));
+    await waitFor(() => {
+      expect((screen.getByRole("button", { name: "提交语句" }) as HTMLButtonElement).disabled).toBe(
+        true,
+      );
+    });
+    expect((screen.getByRole("button", { name: "停止" }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole("button", { name: "接管" }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole("button", { name: "开始" }) as HTMLButtonElement).disabled).toBe(true);
+    release();
+    await waitFor(() => expect(commands.finalizeSessionUtterance).toHaveBeenCalledWith("慢轮"));
+  });
+
   it("shows 本轮未使用资料 after finalize when materials_used is false", async () => {
     vi.mocked(commands.finalizeSessionUtterance).mockImplementation(async () => {
       vi.mocked(commands.getSession).mockResolvedValue({

@@ -22,7 +22,9 @@ pub use providers::{
 pub use roles::{
     RoleProfileCopyInput, RoleProfileSaveInput, RoleProfileService, RoleProfileServiceError,
 };
-pub use sessions::{SessionProbes, SessionService, SessionServiceError, SessionStartOutcome};
+pub use sessions::{
+    SessionControl, SessionProbes, SessionService, SessionServiceError, SessionStartOutcome,
+};
 pub use voice_routes::{
     VoiceRouteSaveInput, VoiceRouteService, VoiceRouteServiceError, VoiceRouteTestResult,
 };
