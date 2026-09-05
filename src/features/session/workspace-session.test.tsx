@@ -19,6 +19,7 @@ vi.mock("../../api/commands", () => ({
   getRuntimeStatus: vi.fn(),
   getSession: vi.fn(),
   finalizeSessionUtterance: vi.fn(),
+  sessionAgentCommand: vi.fn(),
 }));
 
 function summary(overrides: Partial<SessionSummary> = {}): SessionSummary {
@@ -42,6 +43,26 @@ function status(overrides: Partial<RuntimeStatus> = {}): RuntimeStatus {
     seq: 1,
     unusedMaterials: false,
     lastErrorCode: null,
+    revision: 0,
+    ...overrides,
+  };
+}
+
+function commandResult(
+  overrides: Partial<{
+    commandId: string;
+    action: string;
+    ok: boolean;
+    result: Record<string, unknown>;
+    error: string;
+  }> = {},
+) {
+  return {
+    commandId: "cmd-1",
+    action: "say",
+    ok: true,
+    result: {},
+    error: "",
     ...overrides,
   };
 }
@@ -88,6 +109,10 @@ describe("WorkspaceSession", () => {
     vi.mocked(commands.finalizeSessionUtterance).mockResolvedValue({
       ok: true,
       data: turn(),
+    });
+    vi.mocked(commands.sessionAgentCommand).mockResolvedValue({
+      ok: true,
+      data: commandResult(),
     });
   });
 
@@ -323,11 +348,25 @@ describe("WorkspaceSession", () => {
     await waitFor(() => expect(listen).toHaveBeenCalledTimes(3));
 
     act(() => {
-      listeners.status?.({ phase: "thinking", mode: "ai_active", seq: 3, unusedMaterials: false, lastErrorCode: null });
+      listeners.status?.({
+        phase: "thinking",
+        mode: "ai_active",
+        seq: 3,
+        unusedMaterials: false,
+        lastErrorCode: null,
+        revision: 0,
+      });
     });
     expect(document.body.textContent).toContain("thinking");
     act(() => {
-      listeners.status?.({ phase: "idle", mode: "ai_active", seq: 2, unusedMaterials: false, lastErrorCode: null });
+      listeners.status?.({
+        phase: "idle",
+        mode: "ai_active",
+        seq: 2,
+        unusedMaterials: false,
+        lastErrorCode: null,
+        revision: 0,
+      });
     });
     expect(document.body.textContent).toContain("thinking");
     expect(document.body.textContent).not.toMatch(/idle/);
@@ -364,5 +403,150 @@ describe("WorkspaceSession", () => {
     expect(container.innerHTML).not.toContain("@tauri-apps/api");
     expect(container.textContent).not.toContain("会议桥接");
     fetchSpy.mockRestore();
+  });
+
+  it("keeps command buttons disabled while the session is inactive", async () => {
+    render(<WorkspaceSession />);
+    expect((await screen.findByRole("button", { name: "朗读" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    expect((screen.getByRole("button", { name: "重试" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "纠正" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "报告" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(commands.sessionAgentCommand).not.toHaveBeenCalled();
+  });
+
+  it("sends say with the dedicated input and current expectedRevision", async () => {
+    vi.mocked(commands.getRuntimeStatus).mockResolvedValue({
+      ok: true,
+      data: status({ phase: "listening", seq: 2, revision: 3 }),
+    });
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("cmd-1");
+
+    render(<WorkspaceSession />);
+    await screen.findByText(/listening/);
+    fireEvent.change(screen.getByLabelText("朗读文本"), { target: { value: "请开始自我介绍" } });
+    fireEvent.click(screen.getByRole("button", { name: "朗读" }));
+    await waitFor(() =>
+      expect(commands.sessionAgentCommand).toHaveBeenCalledWith({
+        id: "cmd-1",
+        action: "say",
+        text: "请开始自我介绍",
+        answer: null,
+        mode: null,
+        expectedRevision: 3,
+      }),
+    );
+    expect(screen.getByLabelText("测试语句")).toBeTruthy();
+    expect((screen.getByLabelText("测试语句") as HTMLInputElement).value).toBe("");
+    vi.mocked(globalThis.crypto.randomUUID).mockRestore();
+  });
+
+  it("sends retry, correct, and report with the expected fields", async () => {
+    vi.mocked(commands.getRuntimeStatus).mockResolvedValue({
+      ok: true,
+      data: status({ phase: "listening", seq: 2, revision: 4 }),
+    });
+    vi.mocked(commands.sessionAgentCommand)
+      .mockResolvedValueOnce({ ok: true, data: commandResult({ action: "retry" }) })
+      .mockResolvedValueOnce({ ok: true, data: commandResult({ action: "correct" }) })
+      .mockResolvedValueOnce({
+        ok: true,
+        data: commandResult({
+          action: "report",
+          result: {
+            summary: "本轮表现稳定",
+            report: { summary: "本轮表现稳定", strengths: ["表达清晰"] },
+          },
+        }),
+      });
+    const uuid = vi.spyOn(globalThis.crypto, "randomUUID");
+    uuid.mockReturnValueOnce("cmd-1").mockReturnValueOnce("cmd-2").mockReturnValueOnce("cmd-3");
+
+    render(<WorkspaceSession />);
+    await screen.findByText(/listening/);
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    await waitFor(() =>
+      expect(commands.sessionAgentCommand).toHaveBeenCalledWith({
+        id: "cmd-1",
+        action: "retry",
+        text: null,
+        answer: null,
+        mode: null,
+        expectedRevision: 4,
+      }),
+    );
+
+    fireEvent.change(screen.getByLabelText("纠正内容"), { target: { value: "改成这句" } });
+    fireEvent.click(screen.getByRole("button", { name: "纠正" }));
+    await waitFor(() =>
+      expect(commands.sessionAgentCommand).toHaveBeenCalledWith({
+        id: "cmd-2",
+        action: "correct",
+        text: null,
+        answer: "改成这句",
+        mode: null,
+        expectedRevision: 4,
+      }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "报告" }));
+    await waitFor(() =>
+      expect(commands.sessionAgentCommand).toHaveBeenCalledWith({
+        id: "cmd-3",
+        action: "report",
+        text: null,
+        answer: null,
+        mode: null,
+        expectedRevision: 4,
+      }),
+    );
+    expect(screen.getByText(/本轮表现稳定/).textContent).toContain("本轮表现稳定");
+    expect(document.body.textContent).toContain("表达清晰");
+    uuid.mockRestore();
+  });
+
+  it("shows SESSION_CHANGED when the command result is not ok", async () => {
+    vi.mocked(commands.getRuntimeStatus).mockResolvedValue({
+      ok: true,
+      data: status({ phase: "listening", seq: 2, revision: 1 }),
+    });
+    vi.mocked(commands.sessionAgentCommand).mockResolvedValue({
+      ok: true,
+      data: commandResult({ action: "retry", ok: false, error: "SESSION_CHANGED" }),
+    });
+
+    render(<WorkspaceSession />);
+    await screen.findByText(/listening/);
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    expect((await screen.findByRole("status")).textContent).toContain("SESSION_CHANGED");
+    expect(screen.getByRole("status").textContent).not.toContain("pcm");
+  });
+
+  it("keeps 停止 and 接管 enabled while a command is in flight", async () => {
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.mocked(commands.getRuntimeStatus).mockResolvedValue({
+      ok: true,
+      data: status({ phase: "listening", seq: 2, revision: 2 }),
+    });
+    vi.mocked(commands.sessionAgentCommand).mockImplementation(async () => {
+      await blocked;
+      return { ok: true, data: commandResult({ action: "retry" }) };
+    });
+
+    render(<WorkspaceSession />);
+    await screen.findByText(/listening/);
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    await waitFor(() => {
+      expect((screen.getByRole("button", { name: "朗读" }) as HTMLButtonElement).disabled).toBe(true);
+      expect((screen.getByRole("button", { name: "重试" }) as HTMLButtonElement).disabled).toBe(true);
+    });
+    expect((screen.getByRole("button", { name: "停止" }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole("button", { name: "接管" }) as HTMLButtonElement).disabled).toBe(false);
+    release();
+    await waitFor(() => expect(commands.sessionAgentCommand).toHaveBeenCalled());
   });
 });

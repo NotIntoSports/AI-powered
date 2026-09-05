@@ -2,6 +2,7 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
 import * as api from "../../api/commands";
 import type {
+  AgentCommandInput,
   CommandResult,
   RuntimeStatus,
   SessionReplyEvent,
@@ -63,6 +64,11 @@ export function WorkspaceSession({
   const [message, setMessage] = useState("正在读取会话状态…");
   const [busy, setBusy] = useState(false);
   const [utterance, setUtterance] = useState("");
+  const [sayText, setSayText] = useState("");
+  const [correctText, setCorrectText] = useState("");
+  const [revision, setRevision] = useState(0);
+  const [reportSummary, setReportSummary] = useState("");
+  const [reportDetail, setReportDetail] = useState("");
   const statusSeq = useRef(0);
   const transcriptSeq = useRef(0);
   const replySeq = useRef(0);
@@ -74,6 +80,7 @@ export function WorkspaceSession({
     setPhase(next.phase);
     setMode(next.mode);
     setUnusedMaterials(next.unusedMaterials);
+    setRevision(next.revision);
     if (next.lastErrorCode) {
       setMessage(`runtime：${next.lastErrorCode}：会话运行时错误`);
     }
@@ -209,6 +216,10 @@ export function WorkspaceSession({
       setReply("");
       setUnusedMaterials(false);
       setUtterance("");
+      setSayText("");
+      setCorrectText("");
+      setReportSummary("");
+      setReportDetail("");
       setMessage("");
       await refresh(result.data.session.id);
     } catch {
@@ -231,6 +242,98 @@ export function WorkspaceSession({
       setMode(next);
       await refresh();
     }
+  }
+
+  function commandId() {
+    return crypto.randomUUID();
+  }
+
+  function reportLines(result: Record<string, unknown>) {
+    const report = result.report;
+    if (!report || typeof report !== "object") return "";
+    const parts: string[] = [];
+    const record = report as Record<string, unknown>;
+    for (const key of ["strengths", "followUps", "limitations"] as const) {
+      const value = record[key];
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          if (typeof item === "string" && item.trim()) parts.push(item);
+        }
+      }
+    }
+    return parts.join("；");
+  }
+
+  async function runAgentCommand(input: AgentCommandInput) {
+    setBusy(true);
+    try {
+      const result = await api.sessionAgentCommand(input);
+      if (!result.ok) {
+        setMessage(errorText(result.error));
+        return;
+      }
+      if (!result.data.ok) {
+        setMessage(result.data.error);
+        return;
+      }
+      setMessage("");
+      if (input.action === "report") {
+        const summary =
+          typeof result.data.result.summary === "string" ? result.data.result.summary : "";
+        setReportSummary(summary);
+        setReportDetail(reportLines(result.data.result));
+      }
+      await refresh();
+    } catch {
+      setMessage("IPC_UNAVAILABLE：本地操作失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitSay(event: FormEvent) {
+    event.preventDefault();
+    await runAgentCommand({
+      id: commandId(),
+      action: "say",
+      text: sayText.trim() || null,
+      answer: null,
+      mode: null,
+      expectedRevision: revision,
+    });
+  }
+
+  async function submitCorrect() {
+    await runAgentCommand({
+      id: commandId(),
+      action: "correct",
+      text: null,
+      answer: correctText.trim() || null,
+      mode: null,
+      expectedRevision: revision,
+    });
+  }
+
+  async function submitRetry() {
+    await runAgentCommand({
+      id: commandId(),
+      action: "retry",
+      text: null,
+      answer: null,
+      mode: null,
+      expectedRevision: revision,
+    });
+  }
+
+  async function submitReport() {
+    await runAgentCommand({
+      id: commandId(),
+      action: "report",
+      text: null,
+      answer: null,
+      mode: null,
+      expectedRevision: revision,
+    });
   }
 
   async function submitFinalize(event: FormEvent) {
@@ -289,6 +392,32 @@ export function WorkspaceSession({
           提交语句
         </button>
       </form>
+      <form className="service-form" onSubmit={submitSay}>
+        <label>
+          朗读文本
+          <input value={sayText} onChange={(event) => setSayText(event.target.value)} />
+        </label>
+        <label>
+          纠正内容
+          <input value={correctText} onChange={(event) => setCorrectText(event.target.value)} />
+        </label>
+        <div className="service-actions">
+          <button disabled={busy || !active} type="submit">
+            朗读
+          </button>
+          <button disabled={busy || !active} type="button" onClick={() => void submitRetry()}>
+            重试
+          </button>
+          <button disabled={busy || !active} type="button" onClick={() => void submitCorrect()}>
+            纠正
+          </button>
+          <button disabled={busy || !active} type="button" onClick={() => void submitReport()}>
+            报告
+          </button>
+        </div>
+      </form>
+      {reportSummary && <p>纪要 {reportSummary}</p>}
+      {reportDetail && <p>{reportDetail}</p>}
     </section>
   );
 }

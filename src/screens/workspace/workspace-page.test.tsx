@@ -11,13 +11,21 @@ vi.mock("../../api/commands", () => ({
   getRuntimeStatus: vi.fn(),
   getSession: vi.fn(),
   finalizeSessionUtterance: vi.fn(),
+  sessionAgentCommand: vi.fn(),
 }));
 
 describe("WorkspacePage", () => {
   beforeEach(() => {
     vi.mocked(commands.getRuntimeStatus).mockResolvedValue({
       ok: true,
-      data: { phase: "idle", mode: "ai_active", seq: 0, unusedMaterials: false, lastErrorCode: null },
+      data: {
+        phase: "idle",
+        mode: "ai_active",
+        seq: 0,
+        unusedMaterials: false,
+        lastErrorCode: null,
+        revision: 0,
+      },
     });
   });
   afterEach(() => {

@@ -138,6 +138,8 @@ pub struct RuntimeStatus {
     pub seq: u64,
     pub unused_materials: bool,
     pub last_error_code: Option<String>,
+    #[ts(type = "number")]
+    pub revision: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -399,8 +401,10 @@ mod tests {
             "public bindings must not expose PCM:\n{bindings}"
         );
         assert!(
-            bindings.contains("unusedMaterials") && bindings.contains("lastErrorCode"),
-            "RuntimeStatus must expose unusedMaterials and lastErrorCode:\n{bindings}"
+            bindings.contains("unusedMaterials")
+                && bindings.contains("lastErrorCode")
+                && bindings.contains("revision"),
+            "RuntimeStatus must expose unusedMaterials, lastErrorCode, and revision:\n{bindings}"
         );
         write_bindings(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/generated/bindings.ts"));
     }

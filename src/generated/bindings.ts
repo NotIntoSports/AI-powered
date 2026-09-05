@@ -78,7 +78,7 @@ export type SessionSummary = { id: string, status: string, roleProfileId: string
 
 export type SessionStartResult = { "kind": "started", session: SessionSummary, livekit: LiveKitJoinToken | null, } | { "kind": "blocked", issues: Array<PreflightIssue>, };
 
-export type RuntimeStatus = { phase: string, mode: string, seq: number, unusedMaterials: boolean, lastErrorCode: string | null, };
+export type RuntimeStatus = { phase: string, mode: string, seq: number, unusedMaterials: boolean, lastErrorCode: string | null, revision: number, };
 
 export type SessionExportResult = { path: string, };
 

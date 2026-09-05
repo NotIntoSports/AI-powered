@@ -404,6 +404,7 @@ fn runtime_status_from_state(state: &AppState) -> RuntimeStatus {
             seq,
             unused_materials: sessions.unused_materials(),
             last_error_code: sessions.last_error_code().map(str::to_owned),
+            revision: sessions.revision(),
         },
         Err(TryLockError::WouldBlock) => RuntimeStatus {
             phase: "thinking".into(),
@@ -411,6 +412,7 @@ fn runtime_status_from_state(state: &AppState) -> RuntimeStatus {
             seq,
             unused_materials: false,
             last_error_code: None,
+            revision: 0,
         },
         Err(TryLockError::Poisoned(_)) => RuntimeStatus {
             phase: "idle".into(),
@@ -418,6 +420,7 @@ fn runtime_status_from_state(state: &AppState) -> RuntimeStatus {
             seq,
             unused_materials: false,
             last_error_code: Some("SERVICE_BUSY".into()),
+            revision: 0,
         },
     }
 }
@@ -453,6 +456,7 @@ fn runtime_status_event(
     mode: &str,
     unused_materials: bool,
     last_error_code: Option<&str>,
+    revision: u64,
 ) -> serde_json::Value {
     serde_json::to_value(RuntimeStatus {
         phase: phase.to_owned(),
@@ -460,6 +464,7 @@ fn runtime_status_event(
         seq,
         unused_materials,
         last_error_code: last_error_code.map(str::to_owned),
+        revision,
     })
     .expect("runtime status")
 }
@@ -2329,6 +2334,7 @@ mod tests {
         assert!(status["data"]["seq"].as_u64().is_some());
         assert_eq!(status["data"]["unusedMaterials"], false);
         assert!(status["data"]["lastErrorCode"].is_null());
+        assert_eq!(status["data"]["revision"], 0);
 
         let mode = serde_json::to_value(super::session_set_mode_cmd(
             &state,
@@ -2370,7 +2376,7 @@ mod tests {
 
     #[test]
     fn session_event_payloads_carry_incrementing_seq_without_pcm() {
-        let first = super::runtime_status_event(1, "listening", "ai_active", false, None);
+        let first = super::runtime_status_event(1, "listening", "ai_active", false, None, 0);
         let second = super::transcript_event(2, "hello");
         let third = super::reply_event(3, "world");
         let level = super::audio_level_event(4, 0.42);
@@ -2724,6 +2730,8 @@ mod tests {
             .unwrap()["ok"],
             true
         );
+        let after_finalize = serde_json::to_value(super::runtime_get_status_cmd(&state)).unwrap();
+        assert_eq!(after_finalize["data"]["revision"], 1);
 
         let say = serde_json::to_value(super::session_agent_command_cmd(
             &state,
