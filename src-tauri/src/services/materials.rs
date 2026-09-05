@@ -752,6 +752,21 @@ mod tests {
         }
     }
 
+    struct FailingProbe;
+
+    impl crate::providers::EmbeddingProbe for FailingProbe {
+        fn embed(
+            &self,
+            _: &crate::providers::ProviderEndpoint,
+            _: Option<&str>,
+            _: &str,
+            _: u32,
+            _: &str,
+        ) -> Result<Vec<f32>, crate::providers::EmbeddingError> {
+            Err(crate::providers::EmbeddingError::RequestFailed)
+        }
+    }
+
     struct FailOnMarkerProbe;
 
     impl crate::providers::EmbeddingProbe for FailOnMarkerProbe {
@@ -878,6 +893,39 @@ mod tests {
         assert_eq!(
             service.search_hybrid("订单服务", None, Some(0)).unwrap(),
             service.search_text("订单服务", Some(0)).unwrap()
+        );
+    }
+
+    #[test]
+    fn search_hybrid_empty_same_dim_vec_table_matches_search_text() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = opened(&directory);
+        let service = MaterialService::new(&database, directory.path());
+        service
+            .import_file(write_import(
+                &directory,
+                "note.txt",
+                "负责订单服务与 Kafka 链路，完整句子用于检索。",
+            ))
+            .unwrap();
+        database
+            .with_connection(|connection| {
+                connection.execute_batch(
+                    "CREATE VIRTUAL TABLE material_chunk_vectors USING vec0(
+                        chunk_id TEXT PRIMARY KEY,
+                        embedding float[4] distance_metric=cosine
+                    )",
+                )
+            })
+            .unwrap();
+
+        let text = service.search_text("订单服务", None).unwrap();
+        assert!(!text.is_empty());
+        assert_eq!(
+            service
+                .search_hybrid("订单服务", Some(&[1.0, 0.0, 0.0, 0.0]), None)
+                .unwrap(),
+            text
         );
     }
 
@@ -1106,6 +1154,51 @@ mod tests {
             service.search_hybrid("订单服务", None, None).unwrap().len(),
             2
         );
+    }
+
+    #[test]
+    fn index_chunks_same_dim_rebuild_failure_keeps_old_vectors() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = opened(&directory);
+        let service = MaterialService::new(&database, directory.path());
+        let imported = service
+            .import_file(write_import(
+                &directory,
+                "alpha.txt",
+                "向量甲 负责订单服务与 Kafka 链路，完整句子用于检索。",
+            ))
+            .unwrap();
+
+        service
+            .index_chunks(&space("embed-4", 4), &Fake4dProbe)
+            .unwrap();
+        assert_eq!(material_status(&database, &imported.id), "vector_ready");
+        let indexed = service
+            .search_hybrid("订单服务", Some(&[1.0, 0.0, 0.0, 0.0]), None)
+            .unwrap();
+        assert_eq!(indexed[0].material_id, imported.id);
+
+        service
+            .index_chunks(&space("embed-4", 4), &FailingProbe)
+            .unwrap();
+
+        assert_eq!(material_status(&database, &imported.id), "text_ready");
+        assert_eq!(
+            active_space_fingerprint(&database),
+            "fake|embed-4|4|cosine|true"
+        );
+        assert!(
+            chunk_embedding_rows(&database)
+                .iter()
+                .all(|(_, status, space_id)| status == "ready" && space_id.is_some())
+        );
+        let sql = vec_table_sql(&database).expect("vec0 table");
+        assert!(sql.contains("float[4]"), "{sql}");
+        let after = service
+            .search_hybrid("订单服务", Some(&[1.0, 0.0, 0.0, 0.0]), None)
+            .unwrap();
+        assert_eq!(after[0].material_id, imported.id);
+        assert_ne!(after, service.search_text("订单服务", None).unwrap());
     }
 
     #[test]

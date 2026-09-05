@@ -1,6 +1,6 @@
 use std::{
     path::Path,
-    sync::{Mutex, Once},
+    sync::{Mutex, OnceLock},
     time::Duration,
 };
 
@@ -14,7 +14,7 @@ const MIGRATIONS: &[(i64, &str)] = &[
 const LATEST_SCHEMA_VERSION: i64 = MIGRATIONS[MIGRATIONS.len() - 1].0;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
-#[derive(Debug, Error)]
+#[derive(Debug, Clone, Error)]
 pub enum DatabaseError {
     #[error("Database schema is newer than this application")]
     NewerVersion,
@@ -242,12 +242,8 @@ impl Database {
 }
 
 fn register_sqlite_vec() -> Result<(), DatabaseError> {
-    static REGISTER: Once = Once::new();
-    let mut result = Ok(());
-    REGISTER.call_once(|| {
-        result = register_sqlite_vec_once();
-    });
-    result
+    static REGISTER: OnceLock<Result<(), DatabaseError>> = OnceLock::new();
+    REGISTER.get_or_init(register_sqlite_vec_once).clone()
 }
 
 fn register_sqlite_vec_once() -> Result<(), DatabaseError> {

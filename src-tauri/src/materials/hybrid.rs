@@ -43,7 +43,7 @@ pub fn index_chunks(
     }
     let fingerprint = space_fingerprint(space);
     let space_id = upsert_space(database, space, &fingerprint)?;
-    prepare_vector_table(database, space.dimensions, &space_id)?;
+    let table_plan = prepare_vector_table(database, space.dimensions)?;
 
     let chunks = load_indexable_chunks(database)?;
     let endpoint = ProviderEndpoint {
@@ -68,6 +68,39 @@ pub fn index_chunks(
     }
 
     database.with_transaction(|transaction| {
+        let ready_count = outcomes
+            .iter()
+            .filter(|(_, outcome)| matches!(outcome, ChunkOutcome::Ready(_)))
+            .count();
+
+        if ready_count > 0 {
+            match table_plan {
+                VecTablePlan::DimensionChange => {
+                    transaction.execute(
+                        "UPDATE material_chunks
+                         SET embedding_status = 'stale'
+                         WHERE embedding_status = 'ready'",
+                        [],
+                    )?;
+                    transaction.execute("DROP TABLE IF EXISTS material_chunk_vectors", [])?;
+                    transaction.execute_batch(&create_vec_table_sql(space.dimensions))?;
+                }
+                VecTablePlan::Missing => {
+                    transaction.execute_batch(&create_vec_table_sql(space.dimensions))?;
+                }
+                VecTablePlan::SameDimension => {
+                    transaction.execute("DELETE FROM material_chunk_vectors", [])?;
+                }
+            }
+            transaction.execute(
+                "UPDATE material_chunks
+                 SET embedding_status = 'stale'
+                 WHERE embedding_status = 'ready'
+                   AND (embedding_space_id IS NULL OR embedding_space_id != ?1)",
+                params![space_id],
+            )?;
+        }
+
         for (chunk, outcome) in &outcomes {
             match outcome {
                 ChunkOutcome::Ready(vector) => {
@@ -85,12 +118,22 @@ pub fn index_chunks(
                     )?;
                 }
                 ChunkOutcome::Failed => {
-                    transaction.execute(
-                        "UPDATE material_chunks
-                         SET embedding_status = 'failed', embedding_space_id = NULL
-                         WHERE id = ?1",
-                        params![chunk.id],
-                    )?;
+                    if ready_count > 0 {
+                        transaction.execute(
+                            "UPDATE material_chunks
+                             SET embedding_status = 'failed', embedding_space_id = NULL
+                             WHERE id = ?1",
+                            params![chunk.id],
+                        )?;
+                    } else {
+                        transaction.execute(
+                            "UPDATE material_chunks
+                             SET embedding_status = 'failed', embedding_space_id = NULL
+                             WHERE id = ?1
+                               AND embedding_status != 'ready'",
+                            params![chunk.id],
+                        )?;
+                    }
                 }
             }
         }
@@ -122,11 +165,13 @@ pub fn index_chunks(
             }
         }
 
-        transaction.execute("UPDATE embedding_spaces SET active = 0", [])?;
-        transaction.execute(
-            "UPDATE embedding_spaces SET active = 1 WHERE id = ?1",
-            params![space_id],
-        )?;
+        if ready_count > 0 {
+            transaction.execute("UPDATE embedding_spaces SET active = 0", [])?;
+            transaction.execute(
+                "UPDATE embedding_spaces SET active = 1 WHERE id = ?1",
+                params![space_id],
+            )?;
+        }
         Ok(())
     })
 }
@@ -156,8 +201,11 @@ pub fn search_hybrid(
         return store.search_text(query, top_k);
     }
 
-    let fts = store.search_text(query, CANDIDATE_K)?;
     let vectors = search_vectors(database, query_vector)?;
+    if vectors.is_empty() {
+        return store.search_text(query, top_k);
+    }
+    let fts = store.search_text(query, CANDIDATE_K)?;
     let fused = reciprocal_rank_fusion(fts, vectors);
     let mut merged = merge_adjacent(fused);
     merged.truncate(top_k as usize);
@@ -203,10 +251,9 @@ fn upsert_space(
 fn prepare_vector_table(
     database: &Database,
     dimensions: u32,
-    space_id: &str,
-) -> Result<(), DatabaseError> {
-    database.with_transaction(|transaction| {
-        let existing = transaction
+) -> Result<VecTablePlan, DatabaseError> {
+    database.with_connection(|connection| {
+        let existing = connection
             .query_row(
                 "SELECT sql FROM sqlite_schema WHERE name = ?1",
                 params![VEC_TABLE],
@@ -214,32 +261,11 @@ fn prepare_vector_table(
             )
             .optional()?
             .flatten();
-        match existing.as_deref().and_then(parse_vec_dimensions) {
-            Some(current) if current == dimensions => {
-                transaction.execute("DELETE FROM material_chunk_vectors", [])?;
-            }
-            Some(_) => {
-                transaction.execute(
-                    "UPDATE material_chunks
-                     SET embedding_status = 'stale'
-                     WHERE embedding_status = 'ready'",
-                    [],
-                )?;
-                transaction.execute("DROP TABLE IF EXISTS material_chunk_vectors", [])?;
-                transaction.execute_batch(&create_vec_table_sql(dimensions))?;
-            }
-            None => {
-                transaction.execute_batch(&create_vec_table_sql(dimensions))?;
-            }
-        }
-        transaction.execute(
-            "UPDATE material_chunks
-             SET embedding_status = 'stale'
-             WHERE embedding_status = 'ready'
-               AND (embedding_space_id IS NULL OR embedding_space_id != ?1)",
-            params![space_id],
-        )?;
-        Ok(())
+        Ok(match existing.as_deref().and_then(parse_vec_dimensions) {
+            Some(current) if current == dimensions => VecTablePlan::SameDimension,
+            Some(_) => VecTablePlan::DimensionChange,
+            None => VecTablePlan::Missing,
+        })
     })
 }
 
@@ -452,4 +478,11 @@ struct IndexChunk {
 enum ChunkOutcome {
     Ready(Vec<f32>),
     Failed,
+}
+
+#[derive(Clone, Copy)]
+enum VecTablePlan {
+    SameDimension,
+    DimensionChange,
+    Missing,
 }
