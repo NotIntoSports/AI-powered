@@ -1,4 +1,8 @@
-use std::{path::Path, sync::Mutex, time::Duration};
+use std::{
+    path::Path,
+    sync::{Mutex, Once},
+    time::Duration,
+};
 
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use thiserror::Error;
@@ -54,6 +58,7 @@ pub struct Database {
 
 impl Database {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, DatabaseError> {
+        register_sqlite_vec()?;
         if let Some(parent) = path.as_ref().parent() {
             std::fs::create_dir_all(parent).map_err(|_| DatabaseError::Operation)?;
         }
@@ -233,6 +238,26 @@ impl Database {
             .map_err(|_| DatabaseError::Operation)?;
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(|_| DatabaseError::Operation)
+    }
+}
+
+fn register_sqlite_vec() -> Result<(), DatabaseError> {
+    static REGISTER: Once = Once::new();
+    let mut result = Ok(());
+    REGISTER.call_once(|| {
+        result = register_sqlite_vec_once();
+    });
+    result
+}
+
+fn register_sqlite_vec_once() -> Result<(), DatabaseError> {
+    use rusqlite::auto_extension::{RawAutoExtension, register_auto_extension};
+    use sqlite_vec::sqlite3_vec_init;
+    // sqlite-vec exports a 0-arg init; rusqlite 0.40 requires the 3-arg RawAutoExtension.
+    #[allow(clippy::missing_transmute_annotations)]
+    unsafe {
+        let raw_ext: RawAutoExtension = std::mem::transmute(sqlite3_vec_init as *const () as usize);
+        register_auto_extension(raw_ext).map_err(|_| DatabaseError::Operation)
     }
 }
 

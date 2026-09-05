@@ -116,6 +116,17 @@ fn foundation_database_migrates_to_materials_schema() {
 }
 
 #[test]
+fn migrate_exposes_sqlite_vec_version_0_1_9() {
+    let (_directory, database) = database();
+    database.migrate().unwrap();
+    let version = database.query_string("SELECT vec_version()").unwrap();
+    assert!(
+        version.starts_with("v0.1.9"),
+        "expected sqlite-vec 0.1.9, got {version:?}"
+    );
+}
+
+#[test]
 fn materials_fts5_matches_chinese_trigrams() {
     let (_directory, database) = database();
     database.migrate().unwrap();

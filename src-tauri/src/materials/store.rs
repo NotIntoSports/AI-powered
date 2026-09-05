@@ -144,6 +144,18 @@ impl<'a> MaterialStore<'a> {
 
     pub fn delete_indexed_rows(&self, id: &str) -> Result<(), DatabaseError> {
         self.database.with_transaction(|transaction| {
+            let has_vectors: bool = transaction.query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name = 'material_chunk_vectors')",
+                [],
+                |row| row.get(0),
+            )?;
+            if has_vectors {
+                transaction.execute(
+                    "DELETE FROM material_chunk_vectors
+                     WHERE chunk_id IN (SELECT id FROM material_chunks WHERE material_id = ?1)",
+                    params![id],
+                )?;
+            }
             transaction.execute(
                 "DELETE FROM material_chunks_fts WHERE material_id = ?1",
                 params![id],
