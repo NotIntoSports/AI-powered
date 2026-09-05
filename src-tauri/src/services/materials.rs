@@ -4,9 +4,11 @@ use serde::Serialize;
 use ts_rs::TS;
 
 use crate::{
+    config::ConfigStore,
     database::{Database, DatabaseError},
     materials::{
-        CHUNKER_VERSION, MaterialStore, NewMaterial, ParseError, chunk_text, extract_text, hybrid,
+        BackupError, BackupService, CHUNKER_VERSION, MaterialStore, NewMaterial, ParseError,
+        chunk_text, extract_text, hybrid,
         parse::{MEDIA_DOCX, MEDIA_MARKDOWN, MEDIA_PDF, MEDIA_PLAIN},
         parser_version,
         store::sha256_hex,
@@ -212,6 +214,24 @@ impl<'a> MaterialService<'a> {
             query_vector,
             top_k,
         )?)
+    }
+
+    pub fn backup_library(
+        &self,
+        config_store: &ConfigStore,
+        archive_directory: impl AsRef<Path>,
+    ) -> Result<(), BackupError> {
+        BackupService::new(self.database, self.data_directory, config_store)
+            .create(archive_directory)
+    }
+
+    pub fn restore_library(
+        &self,
+        config_store: &ConfigStore,
+        archive_directory: impl AsRef<Path>,
+    ) -> Result<(), BackupError> {
+        BackupService::new(self.database, self.data_directory, config_store)
+            .restore(archive_directory)
     }
 }
 

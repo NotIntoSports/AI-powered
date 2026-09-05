@@ -119,6 +119,17 @@ impl Database {
         work(&connection).map_err(|_| DatabaseError::Operation)
     }
 
+    pub fn with_connection_mut<T>(
+        &self,
+        work: impl FnOnce(&mut Connection) -> rusqlite::Result<T>,
+    ) -> Result<T, DatabaseError> {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| DatabaseError::Operation)?;
+        work(&mut connection).map_err(|_| DatabaseError::Operation)
+    }
+
     pub fn with_transaction<T>(
         &self,
         work: impl FnOnce(&Transaction<'_>) -> rusqlite::Result<T>,
