@@ -56,7 +56,7 @@ describe("LiveKitEditor", () => {
     render(<LiveKitEditor />);
     expect(await screen.findByText(/默认关闭。媒体只会在以后明确使用 LiveKit/)).toBeTruthy();
     expect(screen.getByText(/媒体只会在以后明确使用 LiveKit 时发送到该服务/)).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("服务 URL"), { target: { value: "wss://livekit.example.test" } });
+    fireEvent.change(screen.getByLabelText("服务 URL"), { target: { value: "ws://127.0.0.1:7880" } });
     const key = screen.getByLabelText(/API Key/) as HTMLInputElement;
     const secret = screen.getByLabelText(/API Secret/) as HTMLInputElement;
     fireEvent.change(key, { target: { value: "transient-key" } });
@@ -64,7 +64,7 @@ describe("LiveKitEditor", () => {
     fireEvent.click(screen.getByRole("button", { name: "保存 LiveKit" }));
     await waitFor(() =>
       expect(commands.saveLiveKitSettings).toHaveBeenCalledWith({
-        url: "wss://livekit.example.test",
+        url: "ws://127.0.0.1:7880",
         apiKey: "transient-key",
         apiSecret: "transient-secret",
       }),

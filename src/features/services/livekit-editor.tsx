@@ -86,7 +86,9 @@ export function LiveKitEditor() {
         <label>
           服务 URL
           <input
-            type="url"
+            type="text"
+            inputMode="url"
+            spellCheck={false}
             placeholder="wss://livekit.example.com"
             value={url}
             onChange={(event) => setUrl(event.target.value)}
