@@ -67,6 +67,16 @@ impl ConfigStore {
         Ok(config)
     }
 
+    pub fn update<F>(&self, mutation: F) -> Result<AppConfigV1, ConfigError>
+    where
+        F: FnOnce(&mut AppConfigV1) -> Result<(), ConfigError>,
+    {
+        let mut config = self.load()?;
+        mutation(&mut config)?;
+        self.write_validated(&config)?;
+        Ok(config)
+    }
+
     pub fn last_good_path(&self) -> PathBuf {
         self.path.with_extension("backup.json")
     }

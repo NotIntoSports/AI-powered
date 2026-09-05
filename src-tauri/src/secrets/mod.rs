@@ -100,12 +100,16 @@ impl SecretService {
         Ok(deleted)
     }
 
+    pub(crate) fn read(&self, reference: &str) -> Result<Option<Zeroizing<String>>, SecretError> {
+        self.store.get(&self.qualified(reference)?)
+    }
+
     #[cfg(test)]
     pub(crate) fn read_internal(
         &self,
         reference: &str,
     ) -> Result<Option<Zeroizing<String>>, SecretError> {
-        self.store.get(&self.qualified(reference)?)
+        self.read(reference)
     }
 
     fn qualified(&self, reference: &str) -> Result<String, SecretError> {

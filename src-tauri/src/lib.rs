@@ -9,6 +9,7 @@ pub mod diagnostics;
 pub mod error;
 pub mod providers;
 pub mod secrets;
+pub mod services;
 
 fn navigation_is_allowed(url: &tauri::Url) -> bool {
     if url.scheme() == "tauri" {
