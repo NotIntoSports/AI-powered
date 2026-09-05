@@ -9,6 +9,7 @@ pub mod diagnostics;
 pub mod error;
 pub mod materials;
 pub mod providers;
+pub mod runtime;
 pub mod secrets;
 pub mod services;
 pub mod sessions;
