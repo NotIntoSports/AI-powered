@@ -1,8 +1,13 @@
+use serde::Serialize;
+use ts_rs::TS;
+
 use crate::config::{PublicConfig, VoiceRouteConfig, VoiceRouteMode};
 
 use super::{active_role_profile, active_voice_route};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct PreflightIssue {
     pub code: &'static str,
     pub area: &'static str,

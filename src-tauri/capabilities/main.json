@@ -35,6 +35,14 @@
     "allow-material-list",
     "allow-material-import",
     "allow-material-search",
-    "allow-material-delete"
+    "allow-material-delete",
+    "allow-session-start",
+    "allow-session-stop",
+    "allow-session-set-mode",
+    "allow-session-export",
+    "allow-session-list",
+    "allow-session-get",
+    "allow-session-delete",
+    "allow-runtime-get-status"
   ]
 }

@@ -172,3 +172,50 @@ fn each_application_command_has_one_explicit_permission() {
         );
     }
 }
+
+#[test]
+fn cascade_session_commands_are_registered_and_permitted() {
+    let required = [
+        "session_start",
+        "session_stop",
+        "session_set_mode",
+        "session_export",
+        "session_list",
+        "session_get",
+        "session_delete",
+        "runtime_get_status",
+    ];
+    let lib = fs::read_to_string(manifest_dir().join("src/lib.rs")).unwrap();
+    let handler = lib
+        .split("tauri::generate_handler![")
+        .nth(1)
+        .and_then(|rest| rest.split(']').next())
+        .expect("generate_handler list");
+    let permissions =
+        fs::read_to_string(manifest_dir().join("permissions/application.toml")).unwrap();
+    let capability: Value = serde_json::from_str(
+        &fs::read_to_string(manifest_dir().join("capabilities/main.json")).unwrap(),
+    )
+    .unwrap();
+    let granted = capability["permissions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .collect::<Vec<_>>();
+    for command in required {
+        assert!(
+            handler.contains(&format!("commands::{command}")),
+            "generate_handler missing {command}"
+        );
+        assert!(
+            permissions.contains(&format!("commands.allow = [\"{command}\"]")),
+            "permission missing for {command}"
+        );
+        let identifier = format!("allow-{}", command.replace('_', "-"));
+        assert!(
+            granted.contains(&identifier.as_str()),
+            "capability missing {identifier}"
+        );
+    }
+}

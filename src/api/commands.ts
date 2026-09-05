@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
-import type { CommandResult, DiagnosticsExportResult, EmbeddingConfig, EmbeddingConfigSaveInput, EmbeddingTestResult, FoundationStatus, LiveKitConfig, LiveKitSettingsSaveInput, LiveKitTestResult, MaterialSearchHit, MaterialSummary, ModelDiscoveryResult, ProviderConfig, ProviderSaveInput, ProviderTestResult, PublicConfig, RoleProfileConfig, RoleProfileCopyInput, RoleProfileSaveInput, StartupState, VoiceRouteConfig, VoiceRouteSaveInput, VoiceRouteTestResult } from "../generated/bindings";
+import type { CommandResult, DiagnosticsExportResult, EmbeddingConfig, EmbeddingConfigSaveInput, EmbeddingTestResult, FoundationStatus, LiveKitConfig, LiveKitSettingsSaveInput, LiveKitTestResult, MaterialSearchHit, MaterialSummary, ModelDiscoveryResult, ProviderConfig, ProviderSaveInput, ProviderTestResult, PublicConfig, RoleProfileConfig, RoleProfileCopyInput, RoleProfileSaveInput, RuntimeStatus, SessionDetail, SessionExportResult, SessionStartResult, SessionSummary, StartupState, VoiceRouteConfig, VoiceRouteSaveInput, VoiceRouteTestResult } from "../generated/bindings";
 
 export function getFoundationStatus() {
   return invoke<CommandResult<FoundationStatus>>("foundation_get_status");
@@ -124,4 +124,36 @@ export function searchMaterials(query: string, topK?: number) {
 
 export function deleteMaterial(id: string) {
   return invoke<CommandResult<FoundationStatus>>("material_delete", { id });
+}
+
+export function startSession() {
+  return invoke<CommandResult<SessionStartResult>>("session_start");
+}
+
+export function stopSession() {
+  return invoke<CommandResult<SessionSummary>>("session_stop");
+}
+
+export function setSessionMode(mode: "ai_active" | "operator_speaking" | "paused" | "muted") {
+  return invoke<CommandResult<RuntimeStatus>>("session_set_mode", { mode });
+}
+
+export function exportSession(sessionId: string, format: "markdown" | "json" | "text") {
+  return invoke<CommandResult<SessionExportResult>>("session_export", { sessionId, format });
+}
+
+export function listSessions() {
+  return invoke<CommandResult<SessionSummary[]>>("session_list");
+}
+
+export function getSession(sessionId: string) {
+  return invoke<CommandResult<SessionDetail>>("session_get", { sessionId });
+}
+
+export function deleteSession(sessionId: string) {
+  return invoke<CommandResult<FoundationStatus>>("session_delete", { sessionId });
+}
+
+export function getRuntimeStatus() {
+  return invoke<CommandResult<RuntimeStatus>>("runtime_get_status");
 }

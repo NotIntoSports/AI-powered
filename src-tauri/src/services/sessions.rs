@@ -86,6 +86,8 @@ pub struct SessionService<S: PlaybackSink = NoopSink> {
     sink: S,
     cancel: AtomicBool,
     turn_index: i64,
+    unused_materials: bool,
+    last_error_code: Option<String>,
 }
 
 impl SessionService<NoopSink> {
@@ -109,6 +111,8 @@ impl<S: PlaybackSink> SessionService<S> {
             sink,
             cancel: AtomicBool::new(false),
             turn_index: 0,
+            unused_materials: false,
+            last_error_code: None,
         }
     }
 
@@ -134,6 +138,18 @@ impl<S: PlaybackSink> SessionService<S> {
 
     pub fn sink(&self) -> &S {
         &self.sink
+    }
+
+    pub fn unused_materials(&self) -> bool {
+        self.unused_materials
+    }
+
+    pub fn last_error_code(&self) -> Option<&str> {
+        self.last_error_code.as_deref()
+    }
+
+    pub fn reset(&mut self) {
+        self.reset_runtime();
     }
 
     #[cfg(test)]
@@ -163,6 +179,8 @@ impl<S: PlaybackSink> SessionService<S> {
         }
 
         self.reset_runtime();
+        self.unused_materials = false;
+        self.last_error_code = None;
         let session_id = uuid::Uuid::new_v4().to_string();
         let role_profile_id = active_role_profile(config)
             .map(|profile| profile.id.as_str())
@@ -326,6 +344,8 @@ impl<S: PlaybackSink> SessionService<S> {
             &serde_json::json!({ "text": truncate(&turn.assistant_text) }).to_string(),
         )?;
         self.turn_index += 1;
+        self.unused_materials = !turn.materials_used;
+        self.last_error_code = None;
 
         self.runtime.transition(SessionPhase::Speaking)?;
         persist_phase(&store, &session_id, SessionPhase::Speaking)?;
@@ -349,6 +369,7 @@ impl<S: PlaybackSink> SessionService<S> {
             SidecarPoll::Exited => match self.capture.restart_once() {
                 Ok(()) => Ok(SidecarPoll::Alive),
                 Err(error) => {
+                    self.last_error_code = Some(error.code().to_owned());
                     self.fail_session(database)?;
                     Err(error.into())
                 }
@@ -364,6 +385,8 @@ impl<S: PlaybackSink> SessionService<S> {
         self.runtime = SessionRuntime::new();
         self.session_id = None;
         self.turn_index = 0;
+        self.unused_materials = false;
+        self.last_error_code = None;
         self.cancel.store(false, Ordering::SeqCst);
         self.capture = AudioCapture::from_injected();
     }
@@ -411,37 +434,17 @@ fn persist_phase(
     session_id: &str,
     phase: SessionPhase,
 ) -> Result<(), SessionServiceError> {
-    store.set_status(session_id, phase_name(phase))?;
+    store.set_status(session_id, phase.as_str())?;
     store.append_event(session_id, "status", &status_payload(phase))?;
     Ok(())
 }
 
 fn status_payload(phase: SessionPhase) -> String {
-    serde_json::json!({ "status": phase_name(phase) }).to_string()
-}
-
-fn phase_name(phase: SessionPhase) -> &'static str {
-    match phase {
-        SessionPhase::Idle => "idle",
-        SessionPhase::Preparing => "preparing",
-        SessionPhase::Listening => "listening",
-        SessionPhase::Thinking => "thinking",
-        SessionPhase::Speaking => "speaking",
-        SessionPhase::Stopping => "stopping",
-        SessionPhase::Completed => "completed",
-        SessionPhase::Recovering => "recovering",
-        SessionPhase::Blocked => "blocked",
-        SessionPhase::Failed => "failed",
-    }
+    serde_json::json!({ "status": phase.as_str() }).to_string()
 }
 
 fn mode_name(mode: AgentMode) -> &'static str {
-    match mode {
-        AgentMode::AiActive => "ai_active",
-        AgentMode::OperatorSpeaking => "operator_speaking",
-        AgentMode::Paused => "paused",
-        AgentMode::Muted => "muted",
-    }
+    mode.as_str()
 }
 
 fn is_terminal_status(status: &str) -> bool {

@@ -152,3 +152,43 @@ commands.allow = ["material_search"]
 identifier = "allow-material-delete"
 description = "Allows deleting one local material and its indexed rows."
 commands.allow = ["material_delete"]
+
+[[permission]]
+identifier = "allow-session-start"
+description = "Allows starting a local cascade session after preflight."
+commands.allow = ["session_start"]
+
+[[permission]]
+identifier = "allow-session-stop"
+description = "Allows stopping the active cascade session."
+commands.allow = ["session_stop"]
+
+[[permission]]
+identifier = "allow-session-set-mode"
+description = "Allows changing cascade session takeover mode."
+commands.allow = ["session_set_mode"]
+
+[[permission]]
+identifier = "allow-session-export"
+description = "Allows exporting one cascade session to the local exports directory."
+commands.allow = ["session_export"]
+
+[[permission]]
+identifier = "allow-session-list"
+description = "Allows listing cascade session summaries without material text or PCM."
+commands.allow = ["session_list"]
+
+[[permission]]
+identifier = "allow-session-get"
+description = "Allows reading one cascade session and its turn snippets."
+commands.allow = ["session_get"]
+
+[[permission]]
+identifier = "allow-session-delete"
+description = "Allows deleting one cascade session and its persisted turns."
+commands.allow = ["session_delete"]
+
+[[permission]]
+identifier = "allow-runtime-get-status"
+description = "Allows reading the current cascade runtime phase and mode."
+commands.allow = ["runtime_get_status"]

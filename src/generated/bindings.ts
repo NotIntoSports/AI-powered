@@ -70,4 +70,26 @@ export type MaterialSummary = { id: string, fileName: string, contentSha256: str
 
 export type MaterialSearchHit = { materialId: string, chunkId: string, fileName: string, section: string, snippet: string, rank: number, };
 
+export type PreflightIssue = { code: string, area: string, action: string, };
+
+export type SessionSummary = { id: string, status: string, roleProfileId: string, voiceRouteId: string, transportMode: string, startedAt: string | null, finishedAt: string | null, updatedAt: string, };
+
+export type SessionStartResult = { "kind": "started", session: SessionSummary, } | { "kind": "blocked", issues: Array<PreflightIssue>, };
+
+export type RuntimeStatus = { phase: string, mode: string, seq: number, unusedMaterials: boolean, lastErrorCode: string | null, };
+
+export type SessionExportResult = { path: string, };
+
+export type SessionCitationView = { materialId: string, chunkId: string, snippet: string, };
+
+export type SessionTurnView = { id: string, turnIndex: number, userText: string, assistantText: string, materialsUsed: boolean, citations: Array<SessionCitationView>, };
+
+export type SessionDetail = { session: SessionSummary, turns: Array<SessionTurnView>, };
+
+export type SessionTranscriptEvent = { seq: number, text: string, };
+
+export type SessionReplyEvent = { seq: number, text: string, };
+
+export type AudioLevelEvent = { peak: number, seq: number, };
+
 export type CommandResult<T> = { ok: true; data: T } | { ok: false; error: PublicError };

@@ -1,6 +1,6 @@
 use std::{
     path::PathBuf,
-    sync::{Arc, Mutex, RwLock},
+    sync::{Arc, Mutex, RwLock, atomic::AtomicU64},
 };
 
 use crate::{
@@ -10,6 +10,7 @@ use crate::{
     diagnostics::{DiagnosticError, DiagnosticWriter},
     error::PublicError,
     secrets::{SecretService, SecretStore, WindowsSecretStore},
+    services::SessionService,
     sessions::SessionStore,
 };
 
@@ -26,6 +27,8 @@ pub struct AppState {
     pub diagnostics: DiagnosticWriter,
     pub config: ConfigStore,
     pub service_lock: Mutex<()>,
+    pub sessions: Mutex<SessionService>,
+    pub event_seq: AtomicU64,
     database_path: PathBuf,
     secret_backend_ready: bool,
     startup: RwLock<StartupState>,
@@ -91,6 +94,8 @@ impl AppState {
             diagnostics,
             config,
             service_lock: Mutex::new(()),
+            sessions: Mutex::new(SessionService::new()),
+            event_seq: AtomicU64::new(0),
             database_path,
             secret_backend_ready,
             startup: RwLock::new(startup),

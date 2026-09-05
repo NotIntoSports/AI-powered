@@ -14,12 +14,50 @@ pub enum SessionPhase {
     Failed,
 }
 
+impl SessionPhase {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Idle => "idle",
+            Self::Preparing => "preparing",
+            Self::Listening => "listening",
+            Self::Thinking => "thinking",
+            Self::Speaking => "speaking",
+            Self::Stopping => "stopping",
+            Self::Completed => "completed",
+            Self::Recovering => "recovering",
+            Self::Blocked => "blocked",
+            Self::Failed => "failed",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AgentMode {
     AiActive,
     OperatorSpeaking,
     Paused,
     Muted,
+}
+
+impl AgentMode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::AiActive => "ai_active",
+            Self::OperatorSpeaking => "operator_speaking",
+            Self::Paused => "paused",
+            Self::Muted => "muted",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "ai_active" => Some(Self::AiActive),
+            "operator_speaking" => Some(Self::OperatorSpeaking),
+            "paused" => Some(Self::Paused),
+            "muted" => Some(Self::Muted),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

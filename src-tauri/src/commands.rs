@@ -1,4 +1,6 @@
-use tauri::State;
+use std::sync::atomic::Ordering;
+
+use tauri::{AppHandle, Emitter, State};
 
 use crate::{
     app_state::AppState,
@@ -6,18 +8,24 @@ use crate::{
         EmbeddingConfig, LiveKitConfig, ProviderConfig, PublicConfig, RoleProfileConfig,
         VoiceRouteConfig, diagnostic_view, public_view,
     },
-    contracts::{CommandResult, DiagnosticsExportResult, FoundationStatus, StartupState},
+    contracts::{
+        AudioLevelEvent, CommandResult, DiagnosticsExportResult, FoundationStatus, RuntimeStatus,
+        SessionCitationView, SessionDetail, SessionExportResult, SessionReplyEvent,
+        SessionStartResult, SessionSummary, SessionTranscriptEvent, SessionTurnView, StartupState,
+    },
     error::PublicError,
     providers::{OfficialLiveKitProbe, OpenAiCompatibleEmbeddingProbe, OpenAiCompatibleProbe},
+    runtime::{AgentMode, preflight},
     services::{
         EmbeddingConfigSaveInput, EmbeddingService, EmbeddingServiceError, EmbeddingTestResult,
         LiveKitSettingsError, LiveKitSettingsSaveInput, LiveKitSettingsService, LiveKitTestResult,
         MaterialSearchHit, MaterialService, MaterialServiceError, MaterialSummary,
         ModelDiscoveryResult, ProviderSaveInput, ProviderService, ProviderServiceError,
         ProviderTestResult, RoleProfileCopyInput, RoleProfileSaveInput, RoleProfileService,
-        RoleProfileServiceError, VoiceRouteSaveInput, VoiceRouteService, VoiceRouteServiceError,
-        VoiceRouteTestResult,
+        RoleProfileServiceError, SessionServiceError, SessionStartOutcome, VoiceRouteSaveInput,
+        VoiceRouteService, VoiceRouteServiceError, VoiceRouteTestResult,
     },
+    sessions::{SessionExportError, SessionExportFormat, SessionStore, export_session},
 };
 
 #[tauri::command]
@@ -332,6 +340,484 @@ pub fn material_delete(state: State<'_, AppState>, id: String) -> CommandResult<
         Err(error) => return error,
     };
     material_delete_cmd(&state, id)
+}
+
+const EVENT_RUNTIME_STATUS: &str = "runtime.status.v1";
+const EVENT_AUDIO_LEVEL: &str = "audio.level.v1";
+const EVENT_SESSION_TRANSCRIPT: &str = "session.transcript.v1";
+const EVENT_SESSION_REPLY: &str = "session.reply.v1";
+
+fn session_service_error<T: ts_rs::TS>(error: SessionServiceError) -> CommandResult<T> {
+    let code = error.code();
+    let message = match code {
+        "SESSION_ALREADY_ACTIVE" => "A session is already active",
+        "SESSION_NOT_FOUND" => "Session not found",
+        "SESSION_STATE_INVALID" => "Session state is invalid",
+        _ => "Session operation failed",
+    };
+    let mut public = PublicError::new(code, message, false);
+    if matches!(code, "SESSION_NOT_FOUND") {
+        public = public.with_field("sessionId");
+    }
+    CommandResult::Err { error: public }
+}
+
+fn clip_snippet(text: &str) -> String {
+    text.chars().take(160).collect()
+}
+
+fn load_public_config(state: &AppState) -> Result<PublicConfig, PublicError> {
+    match state.config.load() {
+        Ok(config) => Ok(public_view(&config)),
+        Err(error) => Err(PublicError::new(
+            error.code(),
+            "Configuration is unavailable",
+            false,
+        )),
+    }
+}
+
+fn secrets_backend_ready(state: &AppState) -> bool {
+    state.secrets.status("system/startup-probe").is_ok()
+}
+
+fn runtime_status_from_state(state: &AppState) -> RuntimeStatus {
+    let seq = state.event_seq.load(Ordering::SeqCst);
+    match state.sessions.lock() {
+        Ok(sessions) => RuntimeStatus {
+            phase: sessions.phase().as_str().to_owned(),
+            mode: sessions.mode().as_str().to_owned(),
+            seq,
+            unused_materials: sessions.unused_materials(),
+            last_error_code: sessions.last_error_code().map(str::to_owned),
+        },
+        Err(_) => RuntimeStatus {
+            phase: "idle".into(),
+            mode: "ai_active".into(),
+            seq,
+            unused_materials: false,
+            last_error_code: Some("SERVICE_BUSY".into()),
+        },
+    }
+}
+
+fn bump_runtime_status(state: &AppState) -> RuntimeStatus {
+    state.event_seq.fetch_add(1, Ordering::SeqCst);
+    runtime_status_from_state(state)
+}
+
+fn emit_runtime(app: &AppHandle, state: &AppState) {
+    let status = bump_runtime_status(state);
+    let _ = app.emit(EVENT_RUNTIME_STATUS, &status);
+    if let Ok(sessions) = state.sessions.lock() {
+        let _ = app.emit(
+            EVENT_AUDIO_LEVEL,
+            AudioLevelEvent {
+                peak: sessions.capture().last_peak(),
+                seq: status.seq,
+            },
+        );
+    }
+}
+
+#[cfg(test)]
+fn runtime_status_event(
+    seq: u64,
+    phase: &str,
+    mode: &str,
+    unused_materials: bool,
+    last_error_code: Option<&str>,
+) -> serde_json::Value {
+    serde_json::to_value(RuntimeStatus {
+        phase: phase.to_owned(),
+        mode: mode.to_owned(),
+        seq,
+        unused_materials,
+        last_error_code: last_error_code.map(str::to_owned),
+    })
+    .expect("runtime status")
+}
+
+#[cfg(test)]
+fn transcript_event(seq: u64, text: &str) -> serde_json::Value {
+    serde_json::to_value(SessionTranscriptEvent {
+        seq,
+        text: clip_snippet(text),
+    })
+    .expect("transcript event")
+}
+
+#[cfg(test)]
+fn reply_event(seq: u64, text: &str) -> serde_json::Value {
+    serde_json::to_value(SessionReplyEvent {
+        seq,
+        text: clip_snippet(text),
+    })
+    .expect("reply event")
+}
+
+#[cfg(test)]
+fn audio_level_event(seq: u64, peak: f64) -> serde_json::Value {
+    serde_json::to_value(AudioLevelEvent { peak, seq }).expect("audio level")
+}
+
+#[allow(dead_code)]
+fn emit_transcript_and_reply(app: &AppHandle, seq: u64, user_text: &str, assistant_text: &str) {
+    let _ = app.emit(
+        EVENT_SESSION_TRANSCRIPT,
+        SessionTranscriptEvent {
+            seq,
+            text: clip_snippet(user_text),
+        },
+    );
+    let _ = app.emit(
+        EVENT_SESSION_REPLY,
+        SessionReplyEvent {
+            seq,
+            text: clip_snippet(assistant_text),
+        },
+    );
+}
+
+fn session_detail(
+    store: &SessionStore<'_>,
+    id: &str,
+) -> Result<SessionDetail, SessionServiceError> {
+    let session = store.get(id)?.ok_or(SessionServiceError::NotFound)?;
+    let mut turns = Vec::new();
+    for turn in store.list_turns(id)? {
+        let citations = store
+            .list_citations(&turn.id)?
+            .into_iter()
+            .map(|citation| SessionCitationView {
+                material_id: citation.material_id,
+                chunk_id: citation.chunk_id,
+                snippet: clip_snippet(&citation.snippet),
+            })
+            .collect();
+        turns.push(SessionTurnView {
+            id: turn.id,
+            turn_index: turn.turn_index,
+            user_text: turn.user_text,
+            assistant_text: turn.assistant_text,
+            materials_used: turn.materials_used,
+            citations,
+        });
+    }
+    Ok(SessionDetail {
+        session: session.into(),
+        turns,
+    })
+}
+
+fn session_start_cmd(state: &AppState) -> CommandResult<SessionStartResult> {
+    let config = match load_public_config(state) {
+        Ok(config) => config,
+        Err(error) => return CommandResult::Err { error },
+    };
+    let secrets_ready = secrets_backend_ready(state);
+    let database = match state.database.lock() {
+        Ok(guard) => guard,
+        Err(_) => {
+            return service_error("DATABASE_OPERATION_FAILED", "Database is unavailable");
+        }
+    };
+    let Some(database) = database.as_ref() else {
+        return CommandResult::Ok {
+            data: SessionStartResult::Blocked {
+                issues: preflight(&config, secrets_ready, false),
+            },
+        };
+    };
+    let mut sessions = match state.sessions.lock() {
+        Ok(guard) => guard,
+        Err(_) => {
+            return service_error(
+                "SERVICE_BUSY",
+                "Service configuration is temporarily unavailable",
+            );
+        }
+    };
+    match sessions.start(database, &config, secrets_ready) {
+        Ok(SessionStartOutcome::Started { session }) => CommandResult::Ok {
+            data: SessionStartResult::Started {
+                session: session.into(),
+            },
+        },
+        Ok(SessionStartOutcome::Blocked { issues }) => CommandResult::Ok {
+            data: SessionStartResult::Blocked { issues },
+        },
+        Err(error) => session_service_error(error),
+    }
+}
+
+fn session_stop_cmd(state: &AppState) -> CommandResult<SessionSummary> {
+    let database = match state.database.lock() {
+        Ok(guard) => guard,
+        Err(_) => {
+            return service_error("DATABASE_OPERATION_FAILED", "Database is unavailable");
+        }
+    };
+    let Some(database) = database.as_ref() else {
+        return service_error("DATABASE_OPERATION_FAILED", "Database is unavailable");
+    };
+    let mut sessions = match state.sessions.lock() {
+        Ok(guard) => guard,
+        Err(_) => {
+            return service_error(
+                "SERVICE_BUSY",
+                "Service configuration is temporarily unavailable",
+            );
+        }
+    };
+    match sessions.stop(database) {
+        Ok(session) => CommandResult::Ok {
+            data: session.into(),
+        },
+        Err(error) => session_service_error(error),
+    }
+}
+
+fn session_set_mode_cmd(state: &AppState, mode: String) -> CommandResult<RuntimeStatus> {
+    let Some(mode) = AgentMode::from_name(&mode) else {
+        return CommandResult::Err {
+            error: PublicError::new("SESSION_MODE_INVALID", "Unsupported session mode", false)
+                .with_field("mode"),
+        };
+    };
+    {
+        let database = match state.database.lock() {
+            Ok(guard) => guard,
+            Err(_) => {
+                return service_error("DATABASE_OPERATION_FAILED", "Database is unavailable");
+            }
+        };
+        let Some(database) = database.as_ref() else {
+            return service_error("DATABASE_OPERATION_FAILED", "Database is unavailable");
+        };
+        let mut sessions = match state.sessions.lock() {
+            Ok(guard) => guard,
+            Err(_) => {
+                return service_error(
+                    "SERVICE_BUSY",
+                    "Service configuration is temporarily unavailable",
+                );
+            }
+        };
+        if let Err(error) = sessions.set_mode(database, mode) {
+            return session_service_error(error);
+        }
+    }
+    CommandResult::Ok {
+        data: bump_runtime_status(state),
+    }
+}
+
+fn session_list_cmd(state: &AppState) -> CommandResult<Vec<SessionSummary>> {
+    let database = match state.database.lock() {
+        Ok(guard) => guard,
+        Err(_) => {
+            return service_error("DATABASE_OPERATION_FAILED", "Database is unavailable");
+        }
+    };
+    let Some(database) = database.as_ref() else {
+        return service_error("DATABASE_OPERATION_FAILED", "Database is unavailable");
+    };
+    match SessionStore::new(database).list() {
+        Ok(rows) => CommandResult::Ok {
+            data: rows.into_iter().map(SessionSummary::from).collect(),
+        },
+        Err(error) => service_error(error.code(), "Session list failed"),
+    }
+}
+
+fn session_get_cmd(state: &AppState, session_id: String) -> CommandResult<SessionDetail> {
+    let database = match state.database.lock() {
+        Ok(guard) => guard,
+        Err(_) => {
+            return service_error("DATABASE_OPERATION_FAILED", "Database is unavailable");
+        }
+    };
+    let Some(database) = database.as_ref() else {
+        return service_error("DATABASE_OPERATION_FAILED", "Database is unavailable");
+    };
+    match session_detail(&SessionStore::new(database), &session_id) {
+        Ok(detail) => CommandResult::Ok { data: detail },
+        Err(error) => session_service_error(error),
+    }
+}
+
+fn session_delete_cmd(state: &AppState, session_id: String) -> CommandResult<FoundationStatus> {
+    let database = match state.database.lock() {
+        Ok(guard) => guard,
+        Err(_) => {
+            return service_error("DATABASE_OPERATION_FAILED", "Database is unavailable");
+        }
+    };
+    let Some(database) = database.as_ref() else {
+        return service_error("DATABASE_OPERATION_FAILED", "Database is unavailable");
+    };
+    let mut sessions = match state.sessions.lock() {
+        Ok(guard) => guard,
+        Err(_) => {
+            return service_error(
+                "SERVICE_BUSY",
+                "Service configuration is temporarily unavailable",
+            );
+        }
+    };
+    if sessions.session_id() == Some(session_id.as_str()) {
+        sessions.reset();
+    }
+    match SessionStore::new(database).delete_session(&session_id) {
+        Ok(()) => CommandResult::Ok {
+            data: FoundationStatus { ready: true },
+        },
+        Err(error) => service_error(error.code(), "Session delete failed"),
+    }
+}
+
+fn session_export_cmd(
+    state: &AppState,
+    session_id: String,
+    format: String,
+) -> CommandResult<SessionExportResult> {
+    let Some(format) = SessionExportFormat::from_name(&format) else {
+        return CommandResult::Err {
+            error: PublicError::new(
+                SessionExportError::FormatInvalid.code(),
+                "Unsupported export format",
+                false,
+            )
+            .with_field("format"),
+        };
+    };
+    let database = match state.database.lock() {
+        Ok(guard) => guard,
+        Err(_) => {
+            return service_error("DATABASE_OPERATION_FAILED", "Database is unavailable");
+        }
+    };
+    let Some(database) = database.as_ref() else {
+        return service_error("DATABASE_OPERATION_FAILED", "Database is unavailable");
+    };
+    let export_root = state.paths.data_directory.join("exports");
+    match export_session(
+        &SessionStore::new(database),
+        &session_id,
+        format,
+        &export_root,
+    ) {
+        Ok(path) => CommandResult::Ok {
+            data: SessionExportResult {
+                path: path.to_string_lossy().into_owned(),
+            },
+        },
+        Err(error) => {
+            let mut public = PublicError::new(error.code(), "Session export failed", false);
+            if error == SessionExportError::NotFound {
+                public = public.with_field("sessionId");
+            }
+            CommandResult::Err { error: public }
+        }
+    }
+}
+
+fn runtime_get_status_cmd(state: &AppState) -> CommandResult<RuntimeStatus> {
+    CommandResult::Ok {
+        data: runtime_status_from_state(state),
+    }
+}
+
+#[tauri::command]
+pub fn session_start(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> CommandResult<SessionStartResult> {
+    let _guard = match service_guard(&state) {
+        Ok(guard) => guard,
+        Err(error) => return error,
+    };
+    let result = session_start_cmd(&state);
+    if matches!(
+        result,
+        CommandResult::Ok {
+            data: SessionStartResult::Started { .. }
+        }
+    ) {
+        emit_runtime(&app, &state);
+    }
+    result
+}
+
+#[tauri::command]
+pub fn session_stop(app: AppHandle, state: State<'_, AppState>) -> CommandResult<SessionSummary> {
+    let _guard = match service_guard(&state) {
+        Ok(guard) => guard,
+        Err(error) => return error,
+    };
+    let result = session_stop_cmd(&state);
+    if matches!(result, CommandResult::Ok { .. }) {
+        emit_runtime(&app, &state);
+    }
+    result
+}
+
+#[tauri::command]
+pub fn session_set_mode(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    mode: String,
+) -> CommandResult<RuntimeStatus> {
+    let result = session_set_mode_cmd(&state, mode);
+    if matches!(result, CommandResult::Ok { .. }) {
+        let status = match &result {
+            CommandResult::Ok { data } => data.clone(),
+            CommandResult::Err { .. } => runtime_status_from_state(&state),
+        };
+        let _ = app.emit(EVENT_RUNTIME_STATUS, &status);
+    }
+    result
+}
+
+#[tauri::command]
+pub fn session_export(
+    state: State<'_, AppState>,
+    session_id: String,
+    format: String,
+) -> CommandResult<SessionExportResult> {
+    let _guard = match service_guard(&state) {
+        Ok(guard) => guard,
+        Err(error) => return error,
+    };
+    session_export_cmd(&state, session_id, format)
+}
+
+#[tauri::command]
+pub fn session_list(state: State<'_, AppState>) -> CommandResult<Vec<SessionSummary>> {
+    session_list_cmd(&state)
+}
+
+#[tauri::command]
+pub fn session_get(state: State<'_, AppState>, session_id: String) -> CommandResult<SessionDetail> {
+    session_get_cmd(&state, session_id)
+}
+
+#[tauri::command]
+pub fn session_delete(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> CommandResult<FoundationStatus> {
+    let _guard = match service_guard(&state) {
+        Ok(guard) => guard,
+        Err(error) => return error,
+    };
+    session_delete_cmd(&state, session_id)
+}
+
+#[tauri::command]
+pub fn runtime_get_status(state: State<'_, AppState>) -> CommandResult<RuntimeStatus> {
+    runtime_get_status_cmd(&state)
 }
 
 fn service_guard<T: ts_rs::TS>(
@@ -1135,5 +1621,214 @@ mod tests {
         assert_eq!(deleted["data"]["ready"], true);
         let empty = serde_json::to_value(super::material_list_cmd(&state)).unwrap();
         assert_eq!(empty["data"].as_array().unwrap().len(), 0);
+    }
+
+    fn command_body<'a>(source: &'a str, name: &str) -> &'a str {
+        source
+            .split(&format!("pub fn {name}"))
+            .nth(1)
+            .unwrap_or_else(|| panic!("missing command {name}"))
+    }
+
+    #[test]
+    fn session_mutating_commands_take_the_service_guard() {
+        let source = include_str!("commands.rs");
+        for name in [
+            "session_start",
+            "session_stop",
+            "session_delete",
+            "session_export",
+        ] {
+            assert!(
+                command_body(source, name).contains("service_guard"),
+                "{name} must take service_guard"
+            );
+        }
+    }
+
+    #[test]
+    fn session_read_and_mode_commands_skip_the_service_guard() {
+        let source = include_str!("commands.rs");
+        for name in [
+            "session_list",
+            "session_get",
+            "session_set_mode",
+            "runtime_get_status",
+        ] {
+            let body = command_body(source, name);
+            let until_next = body
+                .split("\nfn ")
+                .next()
+                .and_then(|chunk| chunk.split("\npub fn ").next())
+                .unwrap_or(body);
+            assert!(
+                !until_next.contains("service_guard"),
+                "{name} must not take service_guard"
+            );
+        }
+    }
+
+    fn ready_session_config() -> String {
+        r#"{
+            "configVersion":1,
+            "models":{"providers":[
+                {"id":"asr-1","baseUrl":"https://asr.example.test/v1","credential":{"reference":"providers/asr-1/api-key","configured":true}},
+                {"id":"llm-1","baseUrl":"https://llm.example.test/v1","credential":{"reference":"providers/llm-1/api-key","configured":true}},
+                {"id":"tts-1","baseUrl":"https://tts.example.test/v1","credential":{"reference":"providers/tts-1/api-key","configured":true}}
+            ]},
+            "speech":{"voiceRoutes":[{
+                "id":"route-1","name":"Default","mode":"cascaded",
+                "asrProviderId":"asr-1","asrModelId":"whisper",
+                "llmProviderId":"llm-1","llmModelId":"gpt",
+                "ttsProviderId":"tts-1","ttsModelId":"tts-model",
+                "voiceId":"alloy","active":true,"ready":true,"status":"ready","configVersion":1
+            }],"activeVoiceRouteId":"route-1"},
+            "roleProfiles":[{
+                "id":"role-1","name":"Interviewer",
+                "systemPrompt":"PROMPT-BODY","openingMessage":"OPENING-BODY","styleInstructions":"STYLE-BODY",
+                "active":true,"configVersion":1
+            }],
+            "activeRoleProfileId":"role-1"
+        }"#
+        .into()
+    }
+
+    fn session_state(directory: &tempfile::TempDir, config: &str) -> AppState {
+        let paths = AppPaths {
+            data_directory: directory.path().join("data"),
+            logs_directory: directory.path().join("logs"),
+            config_path: directory.path().join("config.json"),
+        };
+        std::fs::write(&paths.config_path, config).unwrap();
+        AppState::initialize(paths, Arc::new(MemorySecretStore::default())).unwrap()
+    }
+
+    #[test]
+    fn session_start_returns_blocked_or_started_without_secret_or_pcm() {
+        let empty_dir = tempfile::tempdir().unwrap();
+        let empty = session_state(&empty_dir, r#"{"configVersion":1}"#);
+        let blocked = serde_json::to_value(super::session_start_cmd(&empty)).unwrap();
+        assert_eq!(blocked["ok"], true);
+        assert_eq!(blocked["data"]["kind"], "blocked");
+        assert!(blocked["data"]["issues"].as_array().unwrap().len() >= 2);
+        assert!(!serde_json::to_string(&blocked).unwrap().contains("pcm"));
+
+        let ready_dir = tempfile::tempdir().unwrap();
+        let ready = session_state(&ready_dir, &ready_session_config());
+        let started = serde_json::to_value(super::session_start_cmd(&ready)).unwrap();
+        assert_eq!(started["ok"], true, "{started}");
+        assert_eq!(started["data"]["kind"], "started");
+        assert_eq!(started["data"]["session"]["status"], "listening");
+        assert_eq!(started["data"]["session"]["transportMode"], "direct");
+        let json = serde_json::to_string(&started).unwrap();
+        assert!(!json.contains("PROMPT-BODY"));
+        assert!(!json.contains("pcm"));
+        assert!(!json.to_ascii_lowercase().contains("sk-"));
+    }
+
+    #[test]
+    fn session_commands_list_get_export_delete_and_status() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = session_state(&directory, &ready_session_config());
+        let started = serde_json::to_value(super::session_start_cmd(&state)).unwrap();
+        let id = started["data"]["session"]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+
+        let listed = serde_json::to_value(super::session_list_cmd(&state)).unwrap();
+        assert_eq!(listed["ok"], true);
+        assert_eq!(listed["data"][0]["id"], id);
+
+        let detail = serde_json::to_value(super::session_get_cmd(&state, id.clone())).unwrap();
+        assert_eq!(detail["ok"], true);
+        assert_eq!(detail["data"]["session"]["id"], id);
+        assert!(detail["data"]["turns"].as_array().unwrap().is_empty());
+        assert!(detail["data"].get("extractedText").is_none());
+
+        let exported = serde_json::to_value(super::session_export_cmd(
+            &state,
+            id.clone(),
+            "markdown".into(),
+        ))
+        .unwrap();
+        assert_eq!(exported["ok"], true);
+        let path = exported["data"]["path"].as_str().unwrap();
+        assert!(path.contains("exports"));
+        assert!(std::path::Path::new(path).is_file());
+        let export_text = std::fs::read_to_string(path).unwrap();
+        assert!(export_text.contains(&id));
+        assert!(!export_text.contains("PROMPT-BODY"));
+
+        let status = serde_json::to_value(super::runtime_get_status_cmd(&state)).unwrap();
+        assert_eq!(status["ok"], true);
+        assert_eq!(status["data"]["phase"], "listening");
+        assert_eq!(status["data"]["mode"], "ai_active");
+        assert!(status["data"]["seq"].as_u64().is_some());
+        assert_eq!(status["data"]["unusedMaterials"], false);
+        assert!(status["data"]["lastErrorCode"].is_null());
+
+        let mode = serde_json::to_value(super::session_set_mode_cmd(
+            &state,
+            "operator_speaking".into(),
+        ))
+        .unwrap();
+        assert_eq!(mode["ok"], true);
+        assert_eq!(mode["data"]["mode"], "operator_speaking");
+
+        let deleted = serde_json::to_value(super::session_delete_cmd(&state, id)).unwrap();
+        assert_eq!(deleted["ok"], true);
+        let empty = serde_json::to_value(super::session_list_cmd(&state)).unwrap();
+        assert_eq!(empty["data"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn session_stop_keeps_failed_status() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = session_state(&directory, &ready_session_config());
+        assert_eq!(
+            serde_json::to_value(super::session_start_cmd(&state)).unwrap()["ok"],
+            true
+        );
+        {
+            let db = state.database.lock().unwrap();
+            let mut sessions = state.sessions.lock().unwrap();
+            sessions.capture().mark_sidecar_exited();
+            sessions.poll_sidecar(db.as_ref().unwrap()).unwrap();
+            sessions.capture().mark_sidecar_exited();
+            let error = sessions
+                .poll_sidecar(db.as_ref().unwrap())
+                .expect_err("second crash");
+            assert_eq!(error.code(), "SESSION_SIDECAR_FAILED");
+        }
+        let stopped = serde_json::to_value(super::session_stop_cmd(&state)).unwrap();
+        assert_eq!(stopped["ok"], true);
+        assert_eq!(stopped["data"]["status"], "failed");
+    }
+
+    #[test]
+    fn session_event_payloads_carry_incrementing_seq_without_pcm() {
+        let first = super::runtime_status_event(1, "listening", "ai_active", false, None);
+        let second = super::transcript_event(2, "hello");
+        let third = super::reply_event(3, "world");
+        let level = super::audio_level_event(4, 0.42);
+        assert_eq!(first["seq"], 1);
+        assert_eq!(second["seq"], 2);
+        assert_eq!(third["seq"], 3);
+        assert_eq!(level["seq"], 4);
+        assert_eq!(level["peak"], 0.42);
+        for payload in [first, second, third, level] {
+            let json = payload.to_string();
+            assert!(!json.contains("pcm"));
+            assert!(!json.contains("extractedText"));
+        }
+        assert_eq!(
+            super::transcript_event(5, &"x".repeat(200))["text"]
+                .as_str()
+                .unwrap()
+                .chars()
+                .count(),
+            160
+        );
     }
 }
