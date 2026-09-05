@@ -32,6 +32,7 @@ pub enum RoleProfileServiceError {
     InvalidId,
     FieldsInvalid,
     CopyIdInUse,
+    ReviewRequired,
     NotFound,
     Config(ConfigError),
 }
@@ -42,6 +43,7 @@ impl RoleProfileServiceError {
             Self::InvalidId => "ROLE_PROFILE_ID_INVALID",
             Self::FieldsInvalid => "ROLE_PROFILE_FIELDS_INVALID",
             Self::CopyIdInUse => "ROLE_PROFILE_COPY_ID_IN_USE",
+            Self::ReviewRequired => "ROLE_PROFILE_REVIEW_REQUIRED",
             Self::NotFound => "ROLE_PROFILE_NOT_FOUND",
             Self::Config(error) => error.code(),
         }
@@ -123,6 +125,12 @@ impl<'a> RoleProfileService<'a> {
                     .ok_or_else(|| {
                         ConfigError::new("ROLE_PROFILE_NOT_FOUND", "Role profile not found")
                     })?;
+                if source.config_version == 0 {
+                    return Err(ConfigError::new(
+                        "ROLE_PROFILE_REVIEW_REQUIRED",
+                        "Legacy role profile must be saved before use",
+                    ));
+                }
                 let profile = RoleProfileConfig {
                     id: id.into(),
                     name: source.name.clone(),
@@ -145,10 +153,17 @@ impl<'a> RoleProfileService<'a> {
         let mut activated = None;
         self.config
             .update(|config| {
-                if !config.role_profiles.iter().any(|profile| profile.id == id) {
+                let target = config
+                    .role_profiles
+                    .iter()
+                    .find(|profile| profile.id == id)
+                    .ok_or_else(|| {
+                        ConfigError::new("ROLE_PROFILE_NOT_FOUND", "Role profile not found")
+                    })?;
+                if target.config_version == 0 {
                     return Err(ConfigError::new(
-                        "ROLE_PROFILE_NOT_FOUND",
-                        "Role profile not found",
+                        "ROLE_PROFILE_REVIEW_REQUIRED",
+                        "Legacy role profile must be saved before use",
                     ));
                 }
                 for profile in &mut config.role_profiles {
@@ -225,6 +240,7 @@ fn validate_id(id: &str) -> Result<(), RoleProfileServiceError> {
 fn map_config_error(error: ConfigError) -> RoleProfileServiceError {
     match error.code() {
         "ROLE_PROFILE_COPY_ID_IN_USE" => RoleProfileServiceError::CopyIdInUse,
+        "ROLE_PROFILE_REVIEW_REQUIRED" => RoleProfileServiceError::ReviewRequired,
         "ROLE_PROFILE_NOT_FOUND" => RoleProfileServiceError::NotFound,
         _ => RoleProfileServiceError::Config(error),
     }

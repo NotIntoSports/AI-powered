@@ -171,6 +171,75 @@ fn role_activation_is_singleton_and_delete_clears_active_id_and_reports_missing_
     );
 }
 
+#[test]
+fn role_legacy_profile_requires_review_before_activation_until_saved() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("config.json");
+    std::fs::write(
+        &path,
+        r#"{"configVersion":1,"roleProfiles":[{"id":"legacy","instructions":"Ask one question"}]}"#,
+    )
+    .unwrap();
+    let config = ConfigStore::new(path);
+    let service = RoleProfileService::new(&config);
+
+    let before = config.load().unwrap();
+    let legacy = &before.role_profiles[0];
+    assert_eq!(legacy.system_prompt, "Ask one question");
+    assert_eq!(legacy.config_version, 0);
+    assert!(!legacy.active);
+    assert_eq!(
+        service.activate("legacy").unwrap_err().code(),
+        "ROLE_PROFILE_REVIEW_REQUIRED"
+    );
+    assert_eq!(config.load().unwrap(), before);
+
+    let saved = service.save(role_input("legacy")).unwrap();
+    assert_eq!(saved.config_version, 1);
+    assert!(service.activate("legacy").unwrap().active);
+}
+
+#[test]
+fn role_oversized_legacy_profile_stays_quarantined_without_activation_or_copy() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("config.json");
+    let instructions = "legacy content ".repeat(3_000);
+    assert!(instructions.len() > 32 * 1024);
+    std::fs::write(
+        &path,
+        serde_json::json!({
+            "configVersion": 1,
+            "roleProfiles": [{
+                "id": "legacy-oversized",
+                "instructions": instructions,
+            }],
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let config = ConfigStore::new(path);
+    let service = RoleProfileService::new(&config);
+
+    let before = config.load().unwrap();
+    assert_eq!(before.role_profiles[0].config_version, 0);
+    assert!(before.role_profiles[0].system_prompt.len() > 32 * 1024);
+    assert_eq!(
+        service.activate("legacy-oversized").unwrap_err().code(),
+        "ROLE_PROFILE_REVIEW_REQUIRED"
+    );
+    assert_eq!(
+        service
+            .copy(RoleProfileCopyInput {
+                source_id: "legacy-oversized".into(),
+                id: "review-copy".into(),
+            })
+            .unwrap_err()
+            .code(),
+        "ROLE_PROFILE_REVIEW_REQUIRED"
+    );
+    assert_eq!(config.load().unwrap(), before);
+}
+
 struct FakeProbe;
 
 impl ProviderProbe for FakeProbe {
