@@ -24,10 +24,7 @@ pub fn preflight(config: &PublicConfig, secrets_ready: bool, db_ok: bool) -> Vec
 
     match route {
         None => issues.push(issue("SESSION_ROUTE_REQUIRED", "speech", "open_services")),
-        Some(route) if route.mode == VoiceRouteMode::E2e => {
-            issues.push(issue("SESSION_ROUTE_NOT_DIRECT", "speech", "open_services"))
-        }
-        Some(route) if cascade_incomplete(route) => {
+        Some(route) if e2e_incomplete(config, route) || cascade_incomplete(route) => {
             issues.push(issue("SESSION_STAGE_INCOMPLETE", "speech", "open_services"))
         }
         Some(_) => {}
@@ -64,6 +61,22 @@ fn cascade_incomplete(route: &VoiceRouteConfig) -> bool {
         ]
         .iter()
         .any(|value| value.is_none_or(|item| item.is_empty()))
+}
+
+fn e2e_incomplete(config: &PublicConfig, route: &VoiceRouteConfig) -> bool {
+    if route.mode != VoiceRouteMode::E2e {
+        return false;
+    }
+    let provider_id = route.e2e_provider_id.as_deref().filter(|id| !id.is_empty());
+    let model_id = route.e2e_model_id.as_deref().filter(|id| !id.is_empty());
+    match (provider_id, model_id) {
+        (Some(provider_id), Some(_)) => !config
+            .models
+            .providers
+            .iter()
+            .any(|provider| provider.id == provider_id),
+        _ => true,
+    }
 }
 
 fn credential_missing(
@@ -132,11 +145,29 @@ mod tests {
     }
 
     #[test]
-    fn preflight_flags_e2e_route_incomplete_stages_and_missing_secrets() {
+    fn preflight_accepts_e2e_when_provider_and_model_are_in_catalog() {
+        let issues = preflight(
+            &crate::runtime::test_support::ready_e2e_public_config(),
+            true,
+            true,
+        );
+        assert!(issues.is_empty(), "{issues:?}");
+        assert!(
+            issues
+                .iter()
+                .all(|issue| issue.code != "SESSION_ROUTE_NOT_DIRECT"),
+            "{issues:?}"
+        );
+    }
+
+    #[test]
+    fn preflight_flags_e2e_route_incomplete_ids_and_missing_role() {
         let mut config = ready_public_config();
         config.speech.voice_routes[0].mode = VoiceRouteMode::E2e;
         config.speech.voice_routes[0].asr_provider_id = None;
         config.speech.voice_routes[0].asr_model_id = None;
+        config.speech.voice_routes[0].e2e_provider_id = None;
+        config.speech.voice_routes[0].e2e_model_id = None;
         config.active_role_profile_id = None;
         config.role_profiles[0].active = false;
 
@@ -144,7 +175,28 @@ mod tests {
         assert!(issues.len() >= 2, "got {issues:?}");
         assert_codes(
             &issues,
-            &["SESSION_ROUTE_NOT_DIRECT", "SESSION_ROLE_REQUIRED"],
+            &["SESSION_STAGE_INCOMPLETE", "SESSION_ROLE_REQUIRED"],
+        );
+        assert!(
+            issues
+                .iter()
+                .all(|issue| issue.code != "SESSION_ROUTE_NOT_DIRECT"),
+            "{issues:?}"
+        );
+    }
+
+    #[test]
+    fn preflight_flags_e2e_provider_missing_from_catalog() {
+        let mut config = crate::runtime::test_support::ready_e2e_public_config();
+        config.speech.voice_routes[0].e2e_provider_id = Some("missing-e2e".into());
+
+        let issues = preflight(&config, true, true);
+        assert_codes(&issues, &["SESSION_STAGE_INCOMPLETE"]);
+        assert!(
+            issues
+                .iter()
+                .all(|issue| issue.code != "SESSION_ROUTE_NOT_DIRECT"),
+            "{issues:?}"
         );
     }
 

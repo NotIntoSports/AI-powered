@@ -47,6 +47,7 @@ pub struct CascadeCredentials<'a> {
     pub llm: Option<&'a str>,
     pub tts: Option<&'a str>,
     pub embed: Option<&'a str>,
+    pub e2e: Option<&'a str>,
 }
 
 pub struct CascadeTurnDeps<'a> {
@@ -249,7 +250,7 @@ fn resolve_user_text(
         .ok_or(CascadeError::ResponseInvalid(CascadeStage::Asr))
 }
 
-fn retrieve(
+pub(crate) fn retrieve(
     deps: &CascadeTurnDeps<'_>,
     request: &CascadeTurnRequest<'_>,
     user_text: &str,
@@ -634,6 +635,7 @@ mod tests {
                     llm: Some("llm-secret"),
                     tts: Some("tts-secret"),
                     embed: Some("embed-secret"),
+                    e2e: None,
                 },
                 pcm: None,
                 sample_rate: 16_000,

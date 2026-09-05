@@ -5,13 +5,17 @@ use std::sync::{
 
 use crate::{
     audio::{ASR_SAMPLE_RATE, AudioCapture, AudioError, NoopSink, PlaybackSink, SidecarPoll},
-    config::PublicConfig,
+    config::{PublicConfig, VoiceRouteMode},
     database::{Database, DatabaseError},
-    providers::{CascadeError, ChatModel, EmbeddingProbe, SpeechToText, TextToSpeech},
+    providers::{
+        CascadeError, ChatModel, EmbeddingProbe, ProviderEndpoint, RealtimeError, RealtimeModel,
+        SpeechToText, TextToSpeech,
+    },
     runtime::{
         AgentMode, CascadeCredentials, CascadeTurn, CascadeTurnDeps, CascadeTurnRequest,
         HistoryTurn, PreflightIssue, RuntimeError, SessionPhase, SessionRuntime,
-        active_role_profile, active_voice_route, build_snapshot, preflight, run_cascade_turn,
+        active_role_profile, active_voice_route, build_snapshot, cascade::retrieve, preflight,
+        run_cascade_turn,
     },
     sessions::{NewCitation, NewSession, NewSnapshot, NewTurn, SessionRecord, SessionStore},
 };
@@ -23,18 +27,20 @@ pub enum SessionServiceError {
     StateInvalid,
     SidecarFailed,
     Cascade(CascadeError),
+    Realtime(RealtimeError),
     Audio(AudioError),
     Database(DatabaseError),
 }
 
 impl SessionServiceError {
-    pub fn code(&self) -> &'static str {
+    pub fn code(&self) -> &str {
         match self {
             Self::AlreadyActive => "SESSION_ALREADY_ACTIVE",
             Self::NotFound => "SESSION_NOT_FOUND",
             Self::StateInvalid => "SESSION_STATE_INVALID",
             Self::SidecarFailed => "SESSION_SIDECAR_FAILED",
             Self::Cascade(error) => error.code(),
+            Self::Realtime(error) => error.code(),
             Self::Audio(error) => error.code(),
             Self::Database(error) => error.code(),
         }
@@ -44,6 +50,12 @@ impl SessionServiceError {
 impl From<CascadeError> for SessionServiceError {
     fn from(error: CascadeError) -> Self {
         Self::Cascade(error)
+    }
+}
+
+impl From<RealtimeError> for SessionServiceError {
+    fn from(error: RealtimeError) -> Self {
+        Self::Realtime(error)
     }
 }
 
@@ -80,6 +92,7 @@ pub struct SessionProbes<'a> {
     pub llm: &'a dyn ChatModel,
     pub tts: &'a dyn TextToSpeech,
     pub embed: &'a dyn EmbeddingProbe,
+    pub realtime: &'a dyn RealtimeModel,
 }
 
 /// Flags stop / takeover can set without waiting for `SessionService`.
@@ -369,33 +382,44 @@ impl<S: PlaybackSink> SessionService<S> {
             .collect::<Vec<_>>();
         let pcm = self.capture.pcm_for_asr();
         let user_text = text.map(str::trim).filter(|value| !value.is_empty());
-        let cascade = {
-            let deps = CascadeTurnDeps {
-                asr: probes.asr,
-                llm: probes.llm,
-                tts: probes.tts,
-                embed: probes.embed,
-                database,
-                runtime: &self.runtime,
-                sleep: &std::thread::sleep,
-            };
-            run_cascade_turn(
-                &deps,
-                CascadeTurnRequest {
-                    config: &config,
-                    credentials,
-                    pcm: user_text.is_none().then_some(pcm.as_slice()),
-                    sample_rate: ASR_SAMPLE_RATE,
-                    user_text,
-                    history: &history,
-                },
-                self.control.cancel_flag(),
-            )
+        let deps = CascadeTurnDeps {
+            asr: probes.asr,
+            llm: probes.llm,
+            tts: probes.tts,
+            embed: probes.embed,
+            database,
+            runtime: &self.runtime,
+            sleep: &std::thread::sleep,
         };
-        let turn = match cascade {
-            Ok(turn) => turn,
-            Err(error) => {
-                return self.recover_from_cascade_error(database, &session_id, error);
+        let request = CascadeTurnRequest {
+            config: &config,
+            credentials,
+            pcm: user_text.is_none().then_some(pcm.as_slice()),
+            sample_rate: ASR_SAMPLE_RATE,
+            user_text,
+            history: &history,
+        };
+        let e2e_route =
+            active_voice_route(&config).is_some_and(|route| route.mode == VoiceRouteMode::E2e);
+        let turn = if e2e_route {
+            match run_e2e_turn(
+                probes.realtime,
+                &deps,
+                &request,
+                &pcm,
+                self.control.cancel_flag(),
+            ) {
+                Ok(turn) => turn,
+                Err(error) => {
+                    return self.recover_from_realtime_error(database, &session_id, error);
+                }
+            }
+        } else {
+            match run_cascade_turn(&deps, request, self.control.cancel_flag()) {
+                Ok(turn) => turn,
+                Err(error) => {
+                    return self.recover_from_cascade_error(database, &session_id, error);
+                }
             }
         };
 
@@ -501,6 +525,28 @@ impl<S: PlaybackSink> SessionService<S> {
             return Err(error.into());
         }
         if is_fatal_cascade(&error) {
+            self.fail_session(database)?;
+            return Err(error.into());
+        }
+        self.return_to_listening(database, session_id)?;
+        Err(error.into())
+    }
+
+    fn recover_from_realtime_error(
+        &mut self,
+        database: &Database,
+        session_id: &str,
+        error: RealtimeError,
+    ) -> Result<Option<CascadeTurn>, SessionServiceError> {
+        self.last_error_code = Some(error.code().to_owned());
+        if self.control.take_stop_tts() {
+            self.sink.cancel();
+        }
+        if self.control.stop_requested() {
+            self.finish_stop(database)?;
+            return Err(error.into());
+        }
+        if is_fatal_realtime(&error) {
             self.fail_session(database)?;
             return Err(error.into());
         }
@@ -630,6 +676,71 @@ fn is_fatal_cascade(error: &CascadeError) -> bool {
     )
 }
 
+fn is_fatal_realtime(error: &RealtimeError) -> bool {
+    matches!(
+        error,
+        RealtimeError::Unauthorized | RealtimeError::UrlInvalid
+    )
+}
+
+fn run_e2e_turn(
+    realtime: &dyn RealtimeModel,
+    deps: &CascadeTurnDeps<'_>,
+    request: &CascadeTurnRequest<'_>,
+    pcm: &[u8],
+    cancel: &AtomicBool,
+) -> Result<CascadeTurn, RealtimeError> {
+    if cancel.load(Ordering::SeqCst) {
+        return Err(RealtimeError::Cancelled);
+    }
+    let route = active_voice_route(request.config).ok_or(RealtimeError::UrlInvalid)?;
+    let provider_id = route
+        .e2e_provider_id
+        .as_deref()
+        .filter(|id| !id.is_empty())
+        .ok_or(RealtimeError::UrlInvalid)?;
+    let model_id = route
+        .e2e_model_id
+        .as_deref()
+        .filter(|id| !id.is_empty())
+        .ok_or(RealtimeError::UrlInvalid)?;
+    let endpoint = request
+        .config
+        .models
+        .providers
+        .iter()
+        .find(|provider| provider.id == provider_id)
+        .map(|provider| ProviderEndpoint {
+            provider_id: provider.id.clone(),
+            base_url: provider.base_url.clone(),
+        })
+        .filter(|endpoint| !endpoint.base_url.is_empty())
+        .ok_or(RealtimeError::UrlInvalid)?;
+    let turn = realtime.transcribe_turn(
+        &endpoint,
+        request.credentials.e2e,
+        model_id,
+        pcm,
+        request.sample_rate,
+        cancel,
+    )?;
+    if cancel.load(Ordering::SeqCst) {
+        return Err(RealtimeError::Cancelled);
+    }
+    let citations = retrieve(deps, request, &turn.user_text);
+    if cancel.load(Ordering::SeqCst) {
+        return Err(RealtimeError::Cancelled);
+    }
+    Ok(CascadeTurn {
+        user_text: turn.user_text,
+        assistant_text: turn.assistant_text,
+        tts_pcm: turn.tts_pcm,
+        materials_used: !citations.is_empty(),
+        citations,
+        error_code: None,
+    })
+}
+
 fn is_terminal_status(status: &str) -> bool {
     matches!(status, "completed" | "failed" | "interrupted")
 }
@@ -667,15 +778,18 @@ mod tests {
         database::Database,
         providers::{
             CascadeError, ChatMessage, ChatModel, EmbeddingError, EmbeddingProbe, ProviderEndpoint,
-            SpeechToText, TextToSpeech,
+            RealtimeError, RealtimeModel, RealtimeTurn, SpeechToText, TextToSpeech,
         },
-        runtime::{AgentMode, CascadeCredentials, SessionPhase, test_support::ready_public_config},
+        runtime::{
+            AgentMode, CascadeCredentials, SessionPhase,
+            test_support::{ready_e2e_public_config, ready_public_config},
+        },
         secrets::MemorySecretStore,
         sessions::{NewSession, SessionStore},
     };
     use std::sync::{
         Arc, Mutex,
-        atomic::{AtomicU32, Ordering},
+        atomic::{AtomicBool, AtomicU32, Ordering},
     };
 
     struct ScriptedAsr {
@@ -818,6 +932,97 @@ mod tests {
         }
     }
 
+    struct UnusedRealtime;
+
+    impl RealtimeModel for UnusedRealtime {
+        fn transcribe_turn(
+            &self,
+            _: &ProviderEndpoint,
+            _: Option<&str>,
+            _: &str,
+            _: &[u8],
+            _: u32,
+            _: &AtomicBool,
+        ) -> Result<RealtimeTurn, RealtimeError> {
+            panic!("cascaded turn must not call Realtime")
+        }
+    }
+
+    struct FakeRealtime {
+        user_text: String,
+        assistant_text: String,
+        tts_pcm: Vec<u8>,
+        error: Mutex<Option<RealtimeError>>,
+        cancel_after: bool,
+        calls: AtomicU32,
+        pcm: Mutex<Vec<u8>>,
+        model_id: Mutex<Option<String>>,
+    }
+
+    impl FakeRealtime {
+        fn ok(user_text: &str, assistant_text: &str, pcm: &[u8]) -> Self {
+            Self {
+                user_text: user_text.into(),
+                assistant_text: assistant_text.into(),
+                tts_pcm: pcm.to_vec(),
+                error: Mutex::new(None),
+                cancel_after: false,
+                calls: AtomicU32::new(0),
+                pcm: Mutex::new(Vec::new()),
+                model_id: Mutex::new(None),
+            }
+        }
+
+        fn fail(error: RealtimeError) -> Self {
+            Self {
+                user_text: String::new(),
+                assistant_text: String::new(),
+                tts_pcm: Vec::new(),
+                error: Mutex::new(Some(error)),
+                cancel_after: false,
+                calls: AtomicU32::new(0),
+                pcm: Mutex::new(Vec::new()),
+                model_id: Mutex::new(None),
+            }
+        }
+
+        fn cancel_after_turn(user_text: &str, assistant_text: &str) -> Self {
+            let mut fake = Self::ok(user_text, assistant_text, &[0x09]);
+            fake.cancel_after = true;
+            fake
+        }
+    }
+
+    impl RealtimeModel for FakeRealtime {
+        fn transcribe_turn(
+            &self,
+            _: &ProviderEndpoint,
+            _: Option<&str>,
+            model_id: &str,
+            pcm16le: &[u8],
+            _: u32,
+            cancel: &AtomicBool,
+        ) -> Result<RealtimeTurn, RealtimeError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            *self.pcm.lock().expect("pcm") = pcm16le.to_vec();
+            *self.model_id.lock().expect("model") = Some(model_id.to_owned());
+            if cancel.load(Ordering::SeqCst) {
+                return Err(RealtimeError::Cancelled);
+            }
+            if let Some(error) = self.error.lock().expect("error").take() {
+                return Err(error);
+            }
+            if self.cancel_after {
+                cancel.store(true, Ordering::SeqCst);
+            }
+            Ok(RealtimeTurn {
+                user_text: self.user_text.clone(),
+                assistant_text: self.assistant_text.clone(),
+                tts_pcm: self.tts_pcm.clone(),
+            })
+        }
+    }
+
     struct UnusedEmbed;
 
     impl EmbeddingProbe for UnusedEmbed {
@@ -846,6 +1051,7 @@ mod tests {
             llm: Some("llm"),
             tts: Some("tts"),
             embed: Some("emb"),
+            e2e: Some("e2e"),
         }
     }
 
@@ -950,6 +1156,7 @@ mod tests {
             llm: &llm,
             tts: &tts,
             embed: &embed,
+            realtime: &UnusedRealtime,
         };
 
         let turn = service
@@ -991,6 +1198,7 @@ mod tests {
             llm: &llm,
             tts: &tts,
             embed: &embed,
+            realtime: &UnusedRealtime,
         };
 
         let turn = service
@@ -1032,6 +1240,7 @@ mod tests {
             llm: &llm,
             tts: &tts,
             embed: &embed,
+            realtime: &UnusedRealtime,
         };
         let turn = service
             .finalize_utterance(
@@ -1101,6 +1310,7 @@ mod tests {
             llm: &llm,
             tts: &tts,
             embed: &embed,
+            realtime: &UnusedRealtime,
         };
 
         service
@@ -1129,6 +1339,7 @@ mod tests {
             llm: &fail_llm,
             tts: &tts,
             embed: &embed,
+            realtime: &UnusedRealtime,
         };
 
         let error = service
@@ -1158,6 +1369,7 @@ mod tests {
             llm: &ok_llm,
             tts: &tts,
             embed: &embed,
+            realtime: &UnusedRealtime,
         };
         let turn = service
             .finalize_utterance(
@@ -1191,6 +1403,7 @@ mod tests {
             llm: &llm,
             tts: &tts,
             embed: &embed,
+            realtime: &UnusedRealtime,
         };
 
         let error = service
@@ -1231,6 +1444,7 @@ mod tests {
             llm: &llm,
             tts: &tts,
             embed: &embed,
+            realtime: &UnusedRealtime,
         };
         let control = service.control();
         let waiter = std::thread::spawn(move || {
@@ -1341,5 +1555,205 @@ mod tests {
         );
         assert_eq!(service.capture().snapshot_48k().len(), 0);
         assert!(service.session_id().is_none());
+    }
+
+    fn start_e2e(service: &mut SessionService, database: &Database) -> String {
+        match service
+            .start(database, &ready_e2e_public_config(), true)
+            .unwrap()
+        {
+            SessionStartOutcome::Started { session } => session.id,
+            SessionStartOutcome::Blocked { issues } => {
+                panic!("expected e2e start, blocked {issues:?}")
+            }
+        }
+    }
+
+    fn e2e_probes<'a>(
+        asr: &'a ScriptedAsr,
+        llm: &'a ScriptedLlm,
+        tts: &'a ScriptedTts,
+        embed: &'a UnusedEmbed,
+        realtime: &'a FakeRealtime,
+    ) -> SessionProbes<'a> {
+        SessionProbes {
+            asr,
+            llm,
+            tts,
+            embed,
+            realtime,
+        }
+    }
+
+    #[test]
+    fn e2e_start_keeps_direct_transport_and_preflight_passes() {
+        let (_directory, database) = opened();
+        let mut service = SessionService::new();
+        let id = start_e2e(&mut service, &database);
+        assert_eq!(service.phase(), SessionPhase::Listening);
+        let row = SessionStore::new(&database).get(&id).unwrap().unwrap();
+        assert_eq!(row.transport_mode, "direct");
+        assert_eq!(row.status, "listening");
+        let snapshots = SessionStore::new(&database).list_snapshots(&id).unwrap();
+        assert_eq!(snapshots[0].transport_mode, "direct");
+        assert!(snapshots[0].provider_ids.contains("e2e-1"));
+        assert!(snapshots[0].model_ids.contains("gpt-realtime"));
+    }
+
+    #[test]
+    fn e2e_fake_realtime_turn_persists_and_sets_unused_materials() {
+        let (_directory, database) = opened();
+        let mut service = SessionService::new();
+        let id = start_e2e(&mut service, &database);
+        service.push_pcm(&[0x10, 0x00, 0x20, 0x00]);
+        let asr = ScriptedAsr::ok("should-not-run");
+        let llm = ScriptedLlm::ok("should-not-run");
+        let tts = ScriptedTts::ok(&[0x99]);
+        let embed = UnusedEmbed;
+        let realtime = FakeRealtime::ok("你好", "实时回复", &[0x01, 0x02]);
+        let probes = e2e_probes(&asr, &llm, &tts, &embed, &realtime);
+
+        let turn = service
+            .finalize_utterance(
+                &database,
+                &ready_e2e_public_config(),
+                &probes,
+                credentials(),
+                None,
+            )
+            .unwrap()
+            .expect("turn");
+
+        assert_eq!(turn.user_text, "你好");
+        assert_eq!(turn.assistant_text, "实时回复");
+        assert_eq!(turn.tts_pcm, [0x01, 0x02]);
+        assert!(!turn.materials_used);
+        assert_eq!(realtime.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            realtime.model_id.lock().expect("model").as_deref(),
+            Some("gpt-realtime")
+        );
+        assert_eq!(
+            realtime.pcm.lock().expect("pcm").as_slice(),
+            service.capture().pcm_for_asr().as_slice()
+        );
+        assert_eq!(asr.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(llm.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(tts.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(service.phase(), SessionPhase::Listening);
+        assert!(service.unused_materials());
+
+        let stored = SessionStore::new(&database).list_turns(&id).unwrap();
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].user_text, "你好");
+        assert_eq!(stored[0].assistant_text, "实时回复");
+        assert!(!stored[0].materials_used);
+    }
+
+    #[test]
+    fn e2e_cancel_between_realtime_and_persist_returns_to_listening() {
+        let (_directory, database) = opened();
+        let mut service = SessionService::new();
+        let id = start_e2e(&mut service, &database);
+        let asr = ScriptedAsr::ok("ignored");
+        let llm = ScriptedLlm::ok("ignored");
+        let tts = ScriptedTts::ok(&[0x01]);
+        let embed = UnusedEmbed;
+        let realtime = FakeRealtime::cancel_after_turn("取消前", "不应落库");
+        let probes = e2e_probes(&asr, &llm, &tts, &embed, &realtime);
+
+        let error = service
+            .finalize_utterance(
+                &database,
+                &ready_e2e_public_config(),
+                &probes,
+                credentials(),
+                None,
+            )
+            .expect_err("cancelled");
+        assert_eq!(error.code(), "SESSION_CANCELLED");
+        assert_eq!(service.last_error_code(), Some("SESSION_CANCELLED"));
+        assert_eq!(service.phase(), SessionPhase::Listening);
+        assert!(
+            SessionStore::new(&database)
+                .list_turns(&id)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(realtime.calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn e2e_unauthorized_fails_session() {
+        let (_directory, database) = opened();
+        let mut service = SessionService::new();
+        let id = start_e2e(&mut service, &database);
+        let asr = ScriptedAsr::ok("ignored");
+        let llm = ScriptedLlm::ok("ignored");
+        let tts = ScriptedTts::ok(&[0x01]);
+        let embed = UnusedEmbed;
+        let realtime = FakeRealtime::fail(RealtimeError::Unauthorized);
+        let probes = e2e_probes(&asr, &llm, &tts, &embed, &realtime);
+
+        let error = service
+            .finalize_utterance(
+                &database,
+                &ready_e2e_public_config(),
+                &probes,
+                credentials(),
+                None,
+            )
+            .expect_err("unauthorized");
+        assert_eq!(error.code(), "REALTIME_UNAUTHORIZED");
+        assert_eq!(service.last_error_code(), Some("REALTIME_UNAUTHORIZED"));
+        assert_eq!(service.phase(), SessionPhase::Failed);
+        let row = SessionStore::new(&database).get(&id).unwrap().unwrap();
+        assert_eq!(row.status, "failed");
+        assert!(row.finished_at.is_some());
+    }
+
+    #[test]
+    fn e2e_retrieves_materials_after_final_user_text() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = Database::open(directory.path().join("app.sqlite3")).unwrap();
+        database.migrate().unwrap();
+        let path = directory.path().join("note.txt");
+        std::fs::write(&path, "负责订单服务与 Kafka 链路，完整句子用于检索。").unwrap();
+        crate::services::MaterialService::new(&database, directory.path())
+            .import_file(&path)
+            .unwrap();
+
+        let mut service = SessionService::new();
+        match service
+            .start(&database, &ready_e2e_public_config(), true)
+            .unwrap()
+        {
+            SessionStartOutcome::Started { .. } => {}
+            SessionStartOutcome::Blocked { issues } => panic!("blocked {issues:?}"),
+        }
+        let asr = ScriptedAsr::ok("ignored");
+        let llm = ScriptedLlm::ok("ignored");
+        let tts = ScriptedTts::ok(&[0x01]);
+        let embed = UnusedEmbed;
+        let realtime = FakeRealtime::ok("订单服务", "资料回答", &[0x02]);
+        let probes = e2e_probes(&asr, &llm, &tts, &embed, &realtime);
+
+        let turn = service
+            .finalize_utterance(
+                &database,
+                &ready_e2e_public_config(),
+                &probes,
+                credentials(),
+                None,
+            )
+            .unwrap()
+            .expect("turn");
+        assert!(turn.materials_used);
+        assert!(!service.unused_materials());
+        assert!(
+            turn.citations
+                .iter()
+                .any(|citation| citation.snippet.contains("订单服务"))
+        );
     }
 }

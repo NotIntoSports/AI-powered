@@ -55,6 +55,8 @@ fn collect_ids(
         push_unique(&mut model_ids, route.llm_model_id.as_deref());
         push_unique(&mut provider_ids, route.tts_provider_id.as_deref());
         push_unique(&mut model_ids, route.tts_model_id.as_deref());
+        push_unique(&mut provider_ids, route.e2e_provider_id.as_deref());
+        push_unique(&mut model_ids, route.e2e_model_id.as_deref());
     }
     if let Some((provider_id, model_id)) = embedding {
         push_unique(&mut provider_ids, Some(provider_id));
@@ -112,6 +114,17 @@ mod tests {
             )
         );
 
+        assert_no_secrets_or_prompts(&snapshot);
+    }
+
+    #[test]
+    fn snapshot_includes_e2e_ids_and_keeps_direct_transport() {
+        let config = crate::runtime::test_support::ready_e2e_public_config();
+        let snapshot = build_snapshot(&config);
+        assert_eq!(snapshot.transport_mode, "direct");
+        assert_eq!(snapshot.voice_route_id, "route-1");
+        assert_eq!(snapshot.provider_ids, vec!["e2e-1", "emb-1"]);
+        assert_eq!(snapshot.model_ids, vec!["gpt-realtime", "bge"]);
         assert_no_secrets_or_prompts(&snapshot);
     }
 

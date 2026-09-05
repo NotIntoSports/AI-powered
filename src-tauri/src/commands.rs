@@ -16,7 +16,7 @@ use crate::{
     error::PublicError,
     providers::{
         OfficialLiveKitProbe, OpenAiCompatibleCascade, OpenAiCompatibleEmbeddingProbe,
-        OpenAiCompatibleProbe,
+        OpenAiCompatibleProbe, OpenAiCompatibleRealtime,
     },
     runtime::{AgentMode, CascadeCredentials, active_embedding, active_voice_route, preflight},
     services::{
@@ -996,17 +996,28 @@ pub fn session_finalize_utterance(
         Ok(secret) => secret,
         Err(error) => return CommandResult::Err { error },
     };
+    let e2e_secret = match read_provider_secret(
+        &state,
+        &config,
+        route.and_then(|item| item.e2e_provider_id.as_deref()),
+    ) {
+        Ok(secret) => secret,
+        Err(error) => return CommandResult::Err { error },
+    };
+    let realtime = OpenAiCompatibleRealtime::new();
     let probes = SessionProbes {
         asr: &cascade,
         llm: &cascade,
         tts: &cascade,
         embed: &embed,
+        realtime: &realtime,
     };
     let credentials = CascadeCredentials {
         asr: asr_secret.as_deref().map(String::as_str),
         llm: llm_secret.as_deref().map(String::as_str),
         tts: tts_secret.as_deref().map(String::as_str),
         embed: embed_secret.as_deref().map(String::as_str),
+        e2e: e2e_secret.as_deref().map(String::as_str),
     };
     let trimmed = text.trim();
     let result = session_finalize_utterance_cmd(
@@ -2159,6 +2170,22 @@ mod tests {
         }
     }
 
+    struct UnusedRealtime;
+
+    impl crate::providers::RealtimeModel for UnusedRealtime {
+        fn transcribe_turn(
+            &self,
+            _: &crate::providers::ProviderEndpoint,
+            _: Option<&str>,
+            _: &str,
+            _: &[u8],
+            _: u32,
+            _: &std::sync::atomic::AtomicBool,
+        ) -> Result<crate::providers::RealtimeTurn, crate::providers::RealtimeError> {
+            panic!("cascaded command test must not call Realtime")
+        }
+    }
+
     impl crate::providers::EmbeddingProbe for UnusedEmbed {
         fn embed(
             &self,
@@ -2189,6 +2216,7 @@ mod tests {
             llm: &llm,
             tts: &tts,
             embed: &embed,
+            realtime: &UnusedRealtime,
         };
         let finalized = serde_json::to_value(super::session_finalize_utterance_cmd(
             &state,
@@ -2248,6 +2276,7 @@ mod tests {
                 llm: &fail,
                 tts: &tts,
                 embed: &embed,
+                realtime: &UnusedRealtime,
             },
             crate::runtime::CascadeCredentials::default(),
             Some("第一轮"),
@@ -2265,6 +2294,7 @@ mod tests {
                 llm: &ok_llm,
                 tts: &tts,
                 embed: &embed,
+                realtime: &UnusedRealtime,
             },
             crate::runtime::CascadeCredentials::default(),
             Some("第二轮"),
@@ -2303,6 +2333,7 @@ mod tests {
                         llm: &llm,
                         tts: &tts,
                         embed: &embed,
+                        realtime: &UnusedRealtime,
                     },
                     crate::runtime::CascadeCredentials::default(),
                     Some("慢轮"),

@@ -118,6 +118,65 @@ pub(crate) mod test_support {
         })
     }
 
+    pub fn ready_e2e_public_config() -> PublicConfig {
+        public_view(&AppConfigV1 {
+            models: ModelConfig {
+                providers: vec![
+                    provider("e2e-1", "https://e2e.example.test/v1"),
+                    provider("emb-1", "https://emb.example.test/v1"),
+                ],
+                active_provider_id: None,
+            },
+            speech: SpeechConfig {
+                voice_routes: vec![VoiceRouteConfig {
+                    id: "route-1".into(),
+                    name: "Realtime".into(),
+                    mode: VoiceRouteMode::E2e,
+                    asr_provider_id: None,
+                    asr_model_id: None,
+                    llm_provider_id: None,
+                    llm_model_id: None,
+                    tts_provider_id: None,
+                    tts_model_id: None,
+                    voice_id: Some("alloy".into()),
+                    e2e_provider_id: Some("e2e-1".into()),
+                    e2e_model_id: Some("gpt-realtime".into()),
+                    active: true,
+                    ready: true,
+                    status: Some("ready".into()),
+                    config_version: 1,
+                }],
+                active_voice_route_id: Some("route-1".into()),
+            },
+            knowledge: KnowledgeConfig {
+                embedding_configs: vec![EmbeddingConfig {
+                    id: "emb-space".into(),
+                    provider_id: "emb-1".into(),
+                    model_id: "bge".into(),
+                    dimensions: 1024,
+                    distance: EmbeddingDistance::Cosine,
+                    normalized: true,
+                    active: true,
+                    ready: true,
+                    status: Some("ready".into()),
+                    config_version: 1,
+                }],
+                active_embedding_config_id: Some("emb-space".into()),
+            },
+            role_profiles: vec![RoleProfileConfig {
+                id: "role-1".into(),
+                name: "Interviewer".into(),
+                system_prompt: PROMPT_MARKERS[0].into(),
+                opening_message: PROMPT_MARKERS[1].into(),
+                style_instructions: PROMPT_MARKERS[2].into(),
+                active: true,
+                config_version: 1,
+            }],
+            active_role_profile_id: Some("role-1".into()),
+            ..AppConfigV1::default()
+        })
+    }
+
     fn provider(id: &str, base_url: &str) -> ProviderConfig {
         ProviderConfig {
             id: id.into(),
