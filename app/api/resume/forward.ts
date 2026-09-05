@@ -1,10 +1,10 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
-const TOKEN_COOKIE = "control_api_token";
+const TOKEN_COOKIE = "desktop_session";
 
-function controlApiOrigin() {
-  return (process.env.CONTROL_API_ORIGIN || "http://175.27.132.61").replace(/\/$/, "");
+function backendOrigin() {
+  return (process.env.BACKEND_ORIGIN || "").replace(/\/$/, "");
 }
 
 export async function forwardControlResume(path: string, init: RequestInit = {}) {
@@ -15,9 +15,16 @@ export async function forwardControlResume(path: string, init: RequestInit = {})
       { status: 401, headers: { "Cache-Control": "no-store" } }
     );
   }
+  const origin = backendOrigin();
+  if (!origin) {
+    return NextResponse.json(
+      { code: "BACKEND_UNCONFIGURED", message: "未配置本机后端地址" },
+      { status: 503, headers: { "Cache-Control": "no-store" } }
+    );
+  }
   const headers = new Headers(init.headers);
   headers.set("Authorization", `Bearer ${token}`);
-  const response = await fetch(`${controlApiOrigin()}${path}`, {
+  const response = await fetch(`${origin}${path}`, {
     ...init,
     headers,
     cache: "no-store"

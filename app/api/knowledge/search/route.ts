@@ -3,10 +3,10 @@ import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
-const TOKEN_COOKIE = "control_api_token";
+const TOKEN_COOKIE = "desktop_session";
 
-function controlApiOrigin() {
-  return (process.env.CONTROL_API_ORIGIN || "http://175.27.132.61").replace(/\/$/, "");
+function backendOrigin() {
+  return (process.env.BACKEND_ORIGIN || "").replace(/\/$/, "");
 }
 
 export async function POST(request: Request) {
@@ -17,8 +17,15 @@ export async function POST(request: Request) {
       { status: 401, headers: { "Cache-Control": "no-store" } }
     );
   }
+  const origin = backendOrigin();
+  if (!origin) {
+    return NextResponse.json(
+      { code: "BACKEND_UNCONFIGURED", message: "未配置本机后端地址" },
+      { status: 503, headers: { "Cache-Control": "no-store" } }
+    );
+  }
   const payload = await request.json().catch(() => null);
-  const response = await fetch(`${controlApiOrigin()}/api/v1/client/knowledge/search`, {
+  const response = await fetch(`${origin}/api/v1/client/knowledge/search`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,

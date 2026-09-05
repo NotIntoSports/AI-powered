@@ -3,16 +3,17 @@ import { fileURLToPath } from "node:url";
 import type { NextConfig } from "next";
 
 const appDirectory = path.dirname(fileURLToPath(import.meta.url));
-const controlApiOrigin = process.env.CONTROL_API_ORIGIN || "http://127.0.0.1:8080";
+const backendOrigin = (process.env.BACKEND_ORIGIN || "").replace(/\/$/, "");
 
 const nextConfig: NextConfig = {
   output: "standalone",
   outputFileTracingRoot: appDirectory,
   async rewrites() {
+    if (!backendOrigin) return [];
     return [
       {
         source: "/api/v1/:path*",
-        destination: `${controlApiOrigin}/api/v1/:path*`
+        destination: `${backendOrigin}/api/v1/:path*`
       }
     ];
   }

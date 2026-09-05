@@ -9,7 +9,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const token = (await cookies()).get("control_api_token")?.value;
+  const token = (await cookies()).get("desktop_session")?.value;
   if (!token) {
     return NextResponse.json(
       { code: "UNAUTHENTICATED", message: "请先在客户端登录后再管理资料" },

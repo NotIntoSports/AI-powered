@@ -36,8 +36,8 @@ Required environment:
 - `LIVEKIT_URL`
 - `LIVEKIT_API_KEY`
 - `LIVEKIT_API_SECRET`
-- `CONTROL_API_ORIGIN` and `AGENT_INTERNAL_TOKEN` (loads
-  `GET /api/v1/agent/settings/voice-route`)
+- `BACKEND_ORIGIN` and `AGENT_INTERNAL_TOKEN` (loads
+  `GET /api/v1/agent/settings/voice-route`; no default host)
 
 A missing or unverified active route fails the room with `VOICE_ROUTE_NOT_READY`;
 the worker does not fall back to another route. Logs record route ID, model IDs,

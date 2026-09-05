@@ -37,9 +37,9 @@ npm install
 npm run dev
 ```
 
-Open `http://127.0.0.1:3001`. The Next.js server proxies `/api/v1` to
-`CONTROL_API_ORIGIN` (default `http://127.0.0.1:8080`) so the browser stays
-same-origin for the `control_session` cookie.
+Open `http://127.0.0.1:3001`. The Next.js server proxies `/api/v1` only when
+`BACKEND_ORIGIN` is set (no default host) so the browser stays same-origin
+for the session cookie.
 
 Production requires TLS and `COOKIE_SECURE=true` on the API. Do not publish this
 console beyond a trusted network without TLS. Deploy compose lives in

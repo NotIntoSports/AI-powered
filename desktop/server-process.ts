@@ -79,8 +79,7 @@ export function buildServerEnvironment(
     ELECTRON_RUN_AS_NODE: "1",
     HOSTNAME: "127.0.0.1",
     PORT: String(port),
-    AI_INTERVIEW_BASE_URL: `http://127.0.0.1:${port}`,
-    CONTROL_API_ORIGIN: inherited.CONTROL_API_ORIGIN || "http://175.27.132.61"
+    AI_INTERVIEW_BASE_URL: `http://127.0.0.1:${port}`
   };
 }
 

@@ -28,7 +28,7 @@ RESPONSE_TOPIC = "agent.response.v1"
 logger = logging.getLogger("livekit-agent")
 
 def _agent_origin() -> str:
-    return os.environ.get("CONTROL_API_ORIGIN", "").strip().rstrip("/")
+    return os.environ.get("BACKEND_ORIGIN", "").strip().rstrip("/")
 
 
 def _agent_token() -> str:

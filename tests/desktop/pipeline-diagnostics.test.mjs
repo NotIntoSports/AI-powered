@@ -40,9 +40,9 @@ test("pipeline diagnostics keep livekitUrl for connection correlation", () => {
   const normalized = normalizePipelineEvent({
     event: "bridge.token-received",
     traceId: "meet_123",
-    fields: { httpStatus: 200, provider: "livekit", status: "ok", livekitUrl: "ws://175.27.132.61:7880" }
+    fields: { httpStatus: 200, provider: "livekit", status: "ok", livekitUrl: "ws://127.0.0.1:7880" }
   });
-  assert.equal(normalized?.fields.livekitUrl, "ws://175.27.132.61:7880");
+  assert.equal(normalized?.fields.livekitUrl, "ws://127.0.0.1:7880");
 });
 
 test("pipeline diagnostics reject malformed events and unbounded metadata", () => {

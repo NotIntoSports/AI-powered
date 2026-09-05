@@ -2,7 +2,6 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 const LOCAL_ENV_PREFIXES = [
-  "CONTROL_API_",
   "SPEECH_",
   "ALIYUN_",
   "VOLCENGINE_"

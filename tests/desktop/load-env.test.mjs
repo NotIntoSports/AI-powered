@@ -14,7 +14,7 @@ test("imports speech and control keys from dotenv without overwriting", async ()
     [
       "# comment",
       "ALIYUN_NLS_APPKEY=app-from-file",
-      "CONTROL_API_ORIGIN=http://example.test",
+      "VOLCENGINE_SPEECH_APP_ID=app-from-file",
       "UNRELATED=skip-me",
       "SPEECH_PROVIDER=aliyun",
       ""
@@ -24,7 +24,7 @@ test("imports speech and control keys from dotenv without overwriting", async ()
   const applied = applyLocalEnvFile(envPath, env);
   assert.equal(applied, 2);
   assert.equal(env.ALIYUN_NLS_APPKEY, "keep-existing");
-  assert.equal(env.CONTROL_API_ORIGIN, "http://example.test");
+  assert.equal(env.VOLCENGINE_SPEECH_APP_ID, "app-from-file");
   assert.equal(env.SPEECH_PROVIDER, "aliyun");
   assert.equal(env.UNRELATED, undefined);
 });

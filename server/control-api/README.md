@@ -70,7 +70,7 @@ npm run test:livekit-load
 ```
 
 `livekit-agent` loads the active voice-route snapshot from this API when
-`CONTROL_API_ORIGIN` + `AGENT_INTERNAL_TOKEN` are set. Cascaded mode uses
+`BACKEND_ORIGIN` + `AGENT_INTERNAL_TOKEN` are set. Cascaded mode uses
 the route's ASR/LLM/TTS endpoints (NLS credentials ride along when the
 provider is `speech:aliyun`). Do not run local Whisper/FunASR on the 4C8G host.
 

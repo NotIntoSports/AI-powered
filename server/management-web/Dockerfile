@@ -7,13 +7,11 @@ FROM node:22-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-ENV CONTROL_API_ORIGIN=http://control-api:8080
 RUN npm run build
 
 FROM node:22-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
-ENV CONTROL_API_ORIGIN=http://control-api:8080
 ENV HOSTNAME=0.0.0.0
 ENV PORT=3001
 RUN addgroup -S nextjs && adduser -S nextjs -G nextjs

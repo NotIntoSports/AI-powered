@@ -4,14 +4,14 @@ import { z } from "zod";
 
 export const runtime = "nodejs";
 
-const TOKEN_COOKIE = "control_api_token";
+const TOKEN_COOKIE = "desktop_session";
 const requestSchema = z.object({
   roomId: z.string().trim().regex(/^[A-Za-z0-9_-]{1,128}$/),
   userId: z.string().trim().regex(/^[A-Za-z0-9_-]{1,128}$/)
 });
 
-function controlApiOrigin() {
-  return (process.env.CONTROL_API_ORIGIN || "http://175.27.132.61").replace(/\/$/, "");
+function backendOrigin() {
+  return (process.env.BACKEND_ORIGIN || "").replace(/\/$/, "");
 }
 
 export async function POST(request: Request) {
@@ -24,7 +24,14 @@ export async function POST(request: Request) {
       { status: 401, headers: { "Cache-Control": "no-store" } }
     );
   }
-  const response = await fetch(`${controlApiOrigin()}/api/v1/client/rtc/token`, {
+  const origin = backendOrigin();
+  if (!origin) {
+    return NextResponse.json(
+      { code: "BACKEND_UNCONFIGURED", message: "未配置本机后端地址" },
+      { status: 503, headers: { "Cache-Control": "no-store" } }
+    );
+  }
+  const response = await fetch(`${origin}/api/v1/client/rtc/token`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
     body: JSON.stringify(parsed.data),

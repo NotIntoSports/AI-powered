@@ -6,7 +6,7 @@ const dataDirectory = process.env.INTERVIEW_DATA_DIR
   ? path.resolve(process.env.INTERVIEW_DATA_DIR)
   : path.join(process.cwd(), "data", "settings");
 const dpapiScript = path.join(process.cwd(), "scripts", "dpapi-secret.ps1");
-const TOKEN_COOKIE = "control_api_token";
+const TOKEN_COOKIE = "desktop_session";
 
 function runDpapi(mode: "Protect" | "Unprotect", value: string) {
   if (process.platform !== "win32") throw new Error("DPAPI_UNAVAILABLE");
@@ -25,7 +25,7 @@ function runDpapi(mode: "Protect" | "Unprotect", value: string) {
 }
 
 export function controlApiOrigin() {
-  return (process.env.CONTROL_API_ORIGIN || "http://175.27.132.61").replace(/\/$/, "");
+  return (process.env.BACKEND_ORIGIN || "").replace(/\/$/, "");
 }
 
 async function readDesktopToken() {
@@ -45,10 +45,12 @@ export async function fetchDesktopControlJson<T>(path: string, init?: RequestIni
 export async function fetchDesktopControlResult<T>(path: string, init?: RequestInit): Promise<ControlApiResult<T>> {
   const token = await readDesktopToken();
   if (!token) return { ok: false, failure: { status: 401, code: "AUTH_REQUIRED", message: "" } };
+  const origin = controlApiOrigin();
+  if (!origin) return { ok: false, failure: { status: 0, code: "BACKEND_UNCONFIGURED", message: "" } };
   try {
     const headers = new Headers(init?.headers);
     headers.set("Authorization", `Bearer ${token}`);
-    const response = await fetch(`${controlApiOrigin()}${path}`, {
+    const response = await fetch(`${origin}${path}`, {
       ...init,
       headers,
       cache: "no-store",
@@ -62,8 +64,10 @@ export async function fetchDesktopControlResult<T>(path: string, init?: RequestI
 
 export async function pingControlApi() {
   const started = Date.now();
+  const origin = controlApiOrigin();
+  if (!origin) return { reachable: false, rttMs: 0 };
   try {
-    const response = await fetch(`${controlApiOrigin()}/healthz`, {
+    const response = await fetch(`${origin}/healthz`, {
       cache: "no-store",
       signal: AbortSignal.timeout(1_500)
     });

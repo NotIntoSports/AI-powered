@@ -3,10 +3,10 @@ import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
-const TOKEN_COOKIE = "control_api_token";
+const TOKEN_COOKIE = "desktop_session";
 
-function controlApiOrigin() {
-  return (process.env.CONTROL_API_ORIGIN || "http://175.27.132.61").replace(/\/$/, "");
+function backendOrigin() {
+  return (process.env.BACKEND_ORIGIN || "").replace(/\/$/, "");
 }
 
 export async function GET() {
@@ -14,7 +14,11 @@ export async function GET() {
   if (!token) {
     return NextResponse.json({ connected: false }, { headers: { "Cache-Control": "no-store" } });
   }
-  const response = await fetch(`${controlApiOrigin()}/api/v1/auth/me`, {
+  const origin = backendOrigin();
+  if (!origin) {
+    return NextResponse.json({ connected: false }, { headers: { "Cache-Control": "no-store" } });
+  }
+  const response = await fetch(`${origin}/api/v1/auth/me`, {
     headers: { Authorization: `Bearer ${token}` },
     cache: "no-store"
   });
@@ -32,7 +36,14 @@ export async function POST(request: Request) {
   if (!username || !password) {
     return NextResponse.json({ code: "INVALID_INPUT", message: "请填写客户端账号和密码" }, { status: 422 });
   }
-  const response = await fetch(`${controlApiOrigin()}/api/v1/auth/login`, {
+  const origin = backendOrigin();
+  if (!origin) {
+    return NextResponse.json(
+      { code: "BACKEND_UNCONFIGURED", message: "未配置本机后端地址" },
+      { status: 503, headers: { "Cache-Control": "no-store" } }
+    );
+  }
+  const response = await fetch(`${origin}/api/v1/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username, password, purpose: "desktop" }),
