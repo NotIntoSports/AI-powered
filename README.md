@@ -64,17 +64,9 @@ Python LiveKit Agent、Go Control API、管理员控制台和 nginx 部署树已
 ## 运行
 
 ```powershell
-Copy-Item .env.example .env.local
-# 日常产品走 npm run tauri:dev（Direct Runtime）。以下 Electron / Next 为遗留启动路径
 npm install
-npm run dev
+npm run tauri:dev
 ```
-
-打开：
-
-- 工作台：`http://localhost:3000`
-- 助手舞台：`http://localhost:3000/stage`
-- 健康检查：`http://localhost:3000/api/health`
 
 在设置页的助手形象中上传图片或待机视频。文件保存在本机
 `data/avatar`，OBS 舞台会自动切换，无需重启；也可以点击“恢复默认头像”清除素材。
@@ -127,31 +119,24 @@ OBS 自动配置会将舞台源设为“仅监听”；使用 OBS 监听时同�
 首次安装：
 
 ```powershell
-npm run setup:windows
-npm run check:environment
+npm install
 ```
 
-`setup:windows` 会安装 npm 依赖、通过 winget 安装 OBS。若已经自行安装 OBS，可运行
-`scripts/setup-windows.ps1 -SkipObs`。
+若尚未安装 OBS，可运行 `scripts/setup-windows.ps1`；已自行安装时可加 `-SkipObs`。
 
 日常使用：
 
 ```powershell
-npm run start:windows
+npm run tauri:dev
 ```
 
-该命令会启动系统 OBS、Next.js，并打开工作台。这是源码脚本流程；
-打包后的 Windows 客户端使用内置的专用 OBS，密码由 Electron `safeStorage` 以当前用户 DPAPI
+Electron / Next.js 启动路径已移除。打包用 `npm run tauri:build`。
+打包后的 Windows 客户端使用内置的专用 OBS，密码由当前用户 DPAPI
 保护主副本，并同步到专用 OBS 配置。密码不会进入 OBS 命令行、渲染页面、IPC 或日志。
 OBS 上游必须读取明文配置，因此专用运行目录的 `obs-websocket\config.json` 中仍有明文密码；
 该目录仅归当前 Windows 用户所有。更多 OBS / 虚拟声卡接线见下方「OBS 设置」章节。
 若源码流程中的系统 OBS 已提前启动，启动器会提示确认正常重启；取消或正常关闭失败时不会强制结束 OBS。日志保存在
 `.tools/logs`。虚拟音频驱动涉及系统设备和重启，仍需按控制台指引由用户或 IT 明确安装。
-启动器会等待 `/api/health` 返回本项目的固定服务标识后才打开浏览器；端口上的其他 HTTP
-服务即使返回 200 也不会被误当成本项目。
-
-日常启动使用生产模式，助手舞台不会出现 Next.js 开发工具图标。修改代码后先运行
-`npm run build`；开发调试才使用 `npm run dev`。
 
 控制台和舞台默认只监听 `127.0.0.1`，不会自动向局域网开放。开始互动前必须确认
 已向对方说明 AI 协助、记录保存和人工复核；开场白也会再次说明。历史记录支持
@@ -184,15 +169,6 @@ ToDesk 等远控软件的音频端点会显示提示，但不会被误认为通�
 检测到信号才通过，因此 OBS 监听设备或“仅监听”设置错误时不会误显示为就绪。
 Windows SAPI 合成默认最多等待 30 秒、声音枚举最多 10 秒，超时会清理子进程；
 可用 `SAPI_SYNTHESIS_TIMEOUT_MS` 和 `SAPI_VOICE_LIST_TIMEOUT_MS` 调整。
-
-使用结束后可停止本项目：
-
-```powershell
-npm run stop:windows
-```
-
-默认不会关闭用户可能正在使用的 OBS；如需一并关闭，运行
-`scripts/stop-windows.ps1 -IncludeObs`。
 
 ## 当前限制
 

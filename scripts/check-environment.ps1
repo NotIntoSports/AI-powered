@@ -75,7 +75,7 @@ $result = [ordered]@{
     workspace = $workspace
     node = [ordered]@{ ready = $nodeReady; version = $nodeVersion; path = $nodePath }
     npm = [ordered]@{ ready = [bool]$npmPath; path = $npmPath }
-    dependencies = [ordered]@{ ready = Test-Path -LiteralPath (Join-Path $workspace 'node_modules\next\package.json') }
+    dependencies = [ordered]@{ ready = Test-Path -LiteralPath (Join-Path $workspace 'node_modules\@tauri-apps\cli\package.json') }
     winget = [ordered]@{ ready = [bool]$wingetPath; path = $wingetPath }
     obs = [ordered]@{ ready = [bool]$obsPath; path = $obsPath; websocketPortOpen = Test-Port 4455 }
     virtualAudio = [ordered]@{ ready = $virtualAudioReady; devices = @($virtualAudioDevices) }

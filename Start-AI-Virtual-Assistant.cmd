@@ -2,10 +2,10 @@
 setlocal
 cd /d "%~dp0"
 echo Starting AI Virtual Assistant...
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "scripts\start-windows.ps1"
+call npm run tauri:dev
 if errorlevel 1 (
   echo.
-  echo Startup failed. Review the message above and .tools\logs\next.err.log.
+  echo Startup failed. Review the message above.
   pause
   exit /b 1
 )

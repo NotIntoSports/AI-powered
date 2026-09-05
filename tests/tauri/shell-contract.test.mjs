@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-test("parallel Tauri shell preserves legacy entry points", async () => {
+test("root scripts are Tauri-only", async () => {
   const pkg = JSON.parse(await readFile("package.json", "utf8"));
   const vite = await readFile("vite.config.ts", "utf8");
   const tauri = JSON.parse(await readFile("src-tauri/tauri.conf.json", "utf8"));
@@ -51,11 +51,23 @@ test("parallel Tauri shell preserves legacy entry points", async () => {
     "capability.permissions must not contain duplicates",
   );
   assert.doesNotMatch(JSON.stringify(capability), /shell:allow-(?:execute|spawn)|fs:|https?:\/\/|"\*"/i);
-  assert.equal(pkg.scripts.dev, "next dev -H 127.0.0.1");
-  assert.equal(pkg.scripts.build, "next build");
-  assert.equal(pkg.scripts["build:desktop"], "tsc -p tsconfig.desktop.json");
-  assert.equal(
-    pkg.scripts["make:windows"],
-    "npm run build && npm run build:standalone && npm run build:desktop && npm run build:audio-bridge && npm run prepare:prerequisites && electron-builder --win nsis --x64 && npm run test:packaged-runtime",
-  );
+  assert.equal(pkg.main, undefined);
+  assert.equal(pkg.scripts["dev:tauri-ui"], "vite --config vite.config.ts");
+  assert.equal(pkg.scripts["build:tauri-ui"], "tsc -p tsconfig.tauri.json && vite build --config vite.config.ts");
+  assert.equal(pkg.scripts["test:tauri-ui"], "vitest run --config vite.config.ts");
+  assert.equal(pkg.scripts["tauri:dev"], "tauri dev");
+  assert.equal(pkg.scripts["tauri:build"], "tauri build");
+  assert.equal(pkg.scripts.dev, undefined);
+  assert.equal(pkg.scripts.build, undefined);
+  assert.equal(pkg.scripts.start, undefined);
+  assert.equal(pkg.scripts["build:desktop"], undefined);
+  assert.equal(pkg.scripts["make:windows"], undefined);
+  assert.equal(pkg.scripts["start:windows"], undefined);
+  assert.equal(pkg.scripts["test:desktop-shell"], undefined);
+  assert.equal(pkg.scripts["test:obs"], undefined);
+  assert.equal(pkg.dependencies?.next, undefined);
+  assert.equal(pkg.dependencies?.["obs-websocket-js"], undefined);
+  assert.equal(pkg.dependencies?.["@ricky0123/vad-web"], undefined);
+  assert.equal(pkg.devDependencies?.electron, undefined);
+  assert.equal(pkg.devDependencies?.["electron-builder"], undefined);
 });

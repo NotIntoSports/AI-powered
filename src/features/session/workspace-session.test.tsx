@@ -421,7 +421,7 @@ describe("WorkspaceSession", () => {
       ok: true,
       data: status({ phase: "listening", seq: 2, revision: 3 }),
     });
-    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("cmd-1");
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("00000000-0000-0000-0000-000000000001");
 
     render(<WorkspaceSession />);
     await screen.findByText(/listening/);
@@ -429,7 +429,7 @@ describe("WorkspaceSession", () => {
     fireEvent.click(screen.getByRole("button", { name: "朗读" }));
     await waitFor(() =>
       expect(commands.sessionAgentCommand).toHaveBeenCalledWith({
-        id: "cmd-1",
+        id: "00000000-0000-0000-0000-000000000001",
         action: "say",
         text: "请开始自我介绍",
         answer: null,
@@ -461,14 +461,17 @@ describe("WorkspaceSession", () => {
         }),
       });
     const uuid = vi.spyOn(globalThis.crypto, "randomUUID");
-    uuid.mockReturnValueOnce("cmd-1").mockReturnValueOnce("cmd-2").mockReturnValueOnce("cmd-3");
+    uuid
+      .mockReturnValueOnce("00000000-0000-0000-0000-000000000001")
+      .mockReturnValueOnce("00000000-0000-0000-0000-000000000002")
+      .mockReturnValueOnce("00000000-0000-0000-0000-000000000003");
 
     render(<WorkspaceSession />);
     await screen.findByText(/listening/);
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
     await waitFor(() =>
       expect(commands.sessionAgentCommand).toHaveBeenCalledWith({
-        id: "cmd-1",
+        id: "00000000-0000-0000-0000-000000000001",
         action: "retry",
         text: null,
         answer: null,
@@ -481,7 +484,7 @@ describe("WorkspaceSession", () => {
     fireEvent.click(screen.getByRole("button", { name: "纠正" }));
     await waitFor(() =>
       expect(commands.sessionAgentCommand).toHaveBeenCalledWith({
-        id: "cmd-2",
+        id: "00000000-0000-0000-0000-000000000002",
         action: "correct",
         text: null,
         answer: "改成这句",
@@ -493,7 +496,7 @@ describe("WorkspaceSession", () => {
     fireEvent.click(screen.getByRole("button", { name: "报告" }));
     await waitFor(() =>
       expect(commands.sessionAgentCommand).toHaveBeenCalledWith({
-        id: "cmd-3",
+        id: "00000000-0000-0000-0000-000000000003",
         action: "report",
         text: null,
         answer: null,
