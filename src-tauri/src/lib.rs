@@ -11,6 +11,7 @@ pub mod materials;
 pub mod providers;
 pub mod secrets;
 pub mod services;
+pub mod sessions;
 
 fn navigation_is_allowed(url: &tauri::Url) -> bool {
     if url.scheme() == "tauri" {
