@@ -197,8 +197,11 @@ impl<S: PlaybackSink> SessionService<S> {
         self.cancel.store(true, Ordering::SeqCst);
         self.sink.cancel();
         let store = SessionStore::new(database);
-        if self.runtime.phase() == SessionPhase::Completed {
-            return store.get(&session_id)?.ok_or(SessionServiceError::NotFound);
+        let row = store
+            .get(&session_id)?
+            .ok_or(SessionServiceError::NotFound)?;
+        if is_terminal_phase(self.runtime.phase()) || is_terminal_status(&row.status) {
+            return Ok(row);
         }
         self.runtime.transition(SessionPhase::Stopping)?;
         persist_phase(&store, &session_id, SessionPhase::Stopping)?;
@@ -888,6 +891,29 @@ mod tests {
         let row = SessionStore::new(&database).get(&id).unwrap().unwrap();
         assert_eq!(row.status, "failed");
         assert!(row.finished_at.is_some());
+    }
+
+    #[test]
+    fn stop_after_sidecar_crash_keeps_failed_status() {
+        let (_directory, database) = opened();
+        let mut service = SessionService::new();
+        let id = start_ready(&mut service, &database);
+
+        service.capture().mark_sidecar_exited();
+        assert_eq!(service.poll_sidecar(&database).unwrap(), SidecarPoll::Alive);
+        service.capture().mark_sidecar_exited();
+        let error = service.poll_sidecar(&database).expect_err("second crash");
+        assert_eq!(error.code(), "SESSION_SIDECAR_FAILED");
+        assert_eq!(service.phase(), SessionPhase::Failed);
+
+        let row = service.stop(&database).unwrap();
+        assert_eq!(row.status, "failed");
+        assert!(row.finished_at.is_some());
+        assert_eq!(service.phase(), SessionPhase::Failed);
+
+        let stored = SessionStore::new(&database).get(&id).unwrap().unwrap();
+        assert_eq!(stored.status, "failed");
+        assert!(stored.finished_at.is_some());
     }
 
     #[test]
