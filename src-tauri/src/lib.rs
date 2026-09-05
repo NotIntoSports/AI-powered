@@ -7,6 +7,7 @@ pub mod contracts;
 pub mod database;
 pub mod diagnostics;
 pub mod error;
+pub mod providers;
 pub mod secrets;
 
 fn navigation_is_allowed(url: &tauri::Url) -> bool {
