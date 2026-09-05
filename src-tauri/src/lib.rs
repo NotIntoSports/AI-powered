@@ -1,6 +1,7 @@
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
 mod app_state;
+pub mod audio;
 mod commands;
 pub mod config;
 pub mod contracts;
