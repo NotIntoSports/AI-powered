@@ -16,7 +16,7 @@ fn empty_database_migrates_once_and_passes_integrity_check() {
     database.migrate().unwrap();
     database.migrate().unwrap();
 
-    assert_eq!(database.schema_version().unwrap(), 2);
+    assert_eq!(database.schema_version().unwrap(), 3);
     assert_eq!(database.integrity_check().unwrap(), "ok");
     assert_eq!(
         database.application_table_names().unwrap(),
@@ -29,7 +29,12 @@ fn empty_database_migrates_once_and_passes_integrity_check() {
             "material_documents",
             "material_file_cleanup",
             "materials",
+            "runtime_snapshots",
             "schema_migrations",
+            "session_citations",
+            "session_events",
+            "session_turns",
+            "sessions",
         ]
     );
 }
@@ -106,12 +111,85 @@ fn foundation_database_migrates_to_materials_schema() {
     let database = Database::open(path).unwrap();
     database.migrate().unwrap();
 
-    assert_eq!(database.schema_version().unwrap(), 2);
+    assert_eq!(database.schema_version().unwrap(), 3);
     assert!(
         database
             .application_table_names()
             .unwrap()
             .contains(&"materials".to_owned())
+    );
+}
+
+#[test]
+fn materials_schema_migrates_to_cascade_session_schema() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("v2.sqlite3");
+    let connection = Connection::open(&path).unwrap();
+    connection
+        .execute_batch(include_str!("../../migrations/0001_foundation.sql"))
+        .unwrap();
+    connection
+        .execute_batch(include_str!("../../migrations/0002_materials.sql"))
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO schema_migrations(version, applied_at) VALUES (1, '2026-09-04T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO schema_migrations(version, applied_at) VALUES (2, '2026-09-04T12:00:00Z')",
+            [],
+        )
+        .unwrap();
+    drop(connection);
+
+    let database = Database::open(path).unwrap();
+    database.migrate().unwrap();
+
+    assert_eq!(database.schema_version().unwrap(), 3);
+    let tables = database.application_table_names().unwrap();
+    for name in [
+        "sessions",
+        "session_turns",
+        "session_citations",
+        "session_events",
+        "runtime_snapshots",
+    ] {
+        assert!(tables.contains(&name.to_owned()), "missing table {name}");
+    }
+}
+
+#[test]
+fn session_check_rejects_unknown_status_and_transport() {
+    let (_directory, database) = database();
+    database.migrate().unwrap();
+    database
+        .execute_batch(
+            "INSERT INTO sessions(
+                id, status, role_profile_id, voice_route_id, transport_mode, updated_at
+             ) VALUES ('session-ok', 'idle', '', '', 'direct', '2026-09-05T00:00:00Z');",
+        )
+        .unwrap();
+
+    assert!(
+        database
+            .execute_batch(
+                "INSERT INTO sessions(
+                    id, status, role_profile_id, voice_route_id, transport_mode, updated_at
+                 ) VALUES ('session-bad-status', 'unknown', '', '', 'direct', '2026-09-05T00:00:00Z');"
+            )
+            .is_err()
+    );
+    assert!(
+        database
+            .execute_batch(
+                "INSERT INTO sessions(
+                    id, status, role_profile_id, voice_route_id, transport_mode, updated_at
+                 ) VALUES ('session-bad-transport', 'idle', '', '', 'livekit', '2026-09-05T00:00:00Z');"
+            )
+            .is_err()
     );
 }
 

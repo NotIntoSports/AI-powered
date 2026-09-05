@@ -10,6 +10,7 @@ use thiserror::Error;
 const MIGRATIONS: &[(i64, &str)] = &[
     (1, include_str!("../../migrations/0001_foundation.sql")),
     (2, include_str!("../../migrations/0002_materials.sql")),
+    (3, include_str!("../../migrations/0003_sessions.sql")),
 ];
 const LATEST_SCHEMA_VERSION: i64 = MIGRATIONS[MIGRATIONS.len() - 1].0;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
