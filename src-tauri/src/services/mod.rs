@@ -3,6 +3,7 @@ mod livekit;
 mod materials;
 mod providers;
 mod roles;
+mod sessions;
 mod voice_routes;
 
 pub use embeddings::{
@@ -21,6 +22,7 @@ pub use providers::{
 pub use roles::{
     RoleProfileCopyInput, RoleProfileSaveInput, RoleProfileService, RoleProfileServiceError,
 };
+pub use sessions::{SessionProbes, SessionService, SessionServiceError, SessionStartOutcome};
 pub use voice_routes::{
     VoiceRouteSaveInput, VoiceRouteService, VoiceRouteServiceError, VoiceRouteTestResult,
 };

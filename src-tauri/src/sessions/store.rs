@@ -165,6 +165,17 @@ impl<'a> SessionStore<'a> {
         })
     }
 
+    pub fn finish(&self, id: &str, status: &str) -> Result<(), DatabaseError> {
+        let now = chrono::Utc::now().to_rfc3339();
+        self.database.with_connection(|connection| {
+            connection.execute(
+                "UPDATE sessions SET status = ?2, finished_at = ?3, updated_at = ?3 WHERE id = ?1",
+                params![id, status, now],
+            )?;
+            Ok(())
+        })
+    }
+
     pub fn mark_interrupted_open(&self) -> Result<usize, DatabaseError> {
         let now = chrono::Utc::now().to_rfc3339();
         self.database.with_connection(|connection| {

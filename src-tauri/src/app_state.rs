@@ -6,10 +6,11 @@ use std::{
 use crate::{
     config::{ConfigLoadOutcome, ConfigStore},
     contracts::StartupState,
-    database::Database,
+    database::{Database, DatabaseError},
     diagnostics::{DiagnosticError, DiagnosticWriter},
     error::PublicError,
     secrets::{SecretService, SecretStore, WindowsSecretStore},
+    sessions::SessionStore,
 };
 
 #[derive(Debug, Clone)]
@@ -72,10 +73,7 @@ impl AppState {
         let database = if secret_backend_ready
             && matches!(startup, StartupState::Ready | StartupState::Migrated)
         {
-            match Database::open(&database_path).and_then(|database| {
-                database.migrate()?;
-                Ok(database)
-            }) {
+            match open_and_recover(&database_path) {
                 Ok(database) => Some(database),
                 Err(error) => {
                     startup = StartupState::Invalid {
@@ -130,10 +128,7 @@ impl AppState {
                 error: public_startup_error(error.code()),
             }
         } else {
-            match Database::open(&self.database_path).and_then(|database| {
-                database.migrate()?;
-                Ok(database)
-            }) {
+            match open_and_recover(&self.database_path) {
                 Ok(database) => {
                     if let Ok(mut slot) = self.database.lock() {
                         *slot = Some(database);
@@ -150,6 +145,13 @@ impl AppState {
         }
         next
     }
+}
+
+fn open_and_recover(path: &std::path::Path) -> Result<Database, DatabaseError> {
+    let database = Database::open(path)?;
+    database.migrate()?;
+    SessionStore::new(&database).mark_interrupted_open()?;
+    Ok(database)
 }
 
 fn public_startup_error(code: &str) -> PublicError {

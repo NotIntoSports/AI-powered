@@ -259,7 +259,7 @@ impl AudioCapture {
     }
 
     #[cfg(test)]
-    fn mark_sidecar_exited(&self) {
+    pub(crate) fn mark_sidecar_exited(&self) {
         self.sidecar_dead.store(true, Ordering::SeqCst);
     }
 }
