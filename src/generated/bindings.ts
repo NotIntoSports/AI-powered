@@ -76,7 +76,7 @@ export type PreflightIssue = { code: string, area: string, action: string, };
 
 export type SessionSummary = { id: string, status: string, roleProfileId: string, voiceRouteId: string, transportMode: string, startedAt: string | null, finishedAt: string | null, updatedAt: string, };
 
-export type SessionStartResult = { "kind": "started", session: SessionSummary, } | { "kind": "blocked", issues: Array<PreflightIssue>, };
+export type SessionStartResult = { "kind": "started", session: SessionSummary, livekit: LiveKitJoinToken | null, } | { "kind": "blocked", issues: Array<PreflightIssue>, };
 
 export type RuntimeStatus = { phase: string, mode: string, seq: number, unusedMaterials: boolean, lastErrorCode: string | null, };
 

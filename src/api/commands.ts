@@ -130,8 +130,8 @@ export function deleteMaterial(id: string) {
   return invoke<CommandResult<FoundationStatus>>("material_delete", { id });
 }
 
-export function startSession() {
-  return invoke<CommandResult<SessionStartResult>>("session_start");
+export function startSession(transportMode?: "direct" | "livekit") {
+  return invoke<CommandResult<SessionStartResult>>("session_start", { transportMode });
 }
 
 export function stopSession() {

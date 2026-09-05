@@ -16,7 +16,7 @@ fn empty_database_migrates_once_and_passes_integrity_check() {
     database.migrate().unwrap();
     database.migrate().unwrap();
 
-    assert_eq!(database.schema_version().unwrap(), 3);
+    assert_eq!(database.schema_version().unwrap(), 4);
     assert_eq!(database.integrity_check().unwrap(), "ok");
     assert_eq!(
         database.application_table_names().unwrap(),
@@ -111,7 +111,7 @@ fn foundation_database_migrates_to_materials_schema() {
     let database = Database::open(path).unwrap();
     database.migrate().unwrap();
 
-    assert_eq!(database.schema_version().unwrap(), 3);
+    assert_eq!(database.schema_version().unwrap(), 4);
     assert!(
         database
             .application_table_names()
@@ -148,7 +148,7 @@ fn materials_schema_migrates_to_cascade_session_schema() {
     let database = Database::open(path).unwrap();
     database.migrate().unwrap();
 
-    assert_eq!(database.schema_version().unwrap(), 3);
+    assert_eq!(database.schema_version().unwrap(), 4);
     let tables = database.application_table_names().unwrap();
     for name in [
         "sessions",
@@ -187,8 +187,145 @@ fn session_check_rejects_unknown_status_and_transport() {
             .execute_batch(
                 "INSERT INTO sessions(
                     id, status, role_profile_id, voice_route_id, transport_mode, updated_at
-                 ) VALUES ('session-bad-transport', 'idle', '', '', 'livekit', '2026-09-05T00:00:00Z');"
+                 ) VALUES ('session-bad-transport', 'idle', '', '', 'webrtc', '2026-09-05T00:00:00Z');"
             )
+            .is_err()
+    );
+}
+
+#[test]
+fn session_check_allows_livekit_transport() {
+    let (_directory, database) = database();
+    database.migrate().unwrap();
+    database
+        .execute_batch(
+            "INSERT INTO sessions(
+                id, status, role_profile_id, voice_route_id, transport_mode, updated_at
+             ) VALUES ('session-livekit', 'idle', '', '', 'livekit', '2026-09-05T00:00:00Z');
+             INSERT INTO runtime_snapshots(
+                id, session_id, app_version, config_revision, provider_ids, model_ids,
+                voice_route_id, transport_mode, role_hash, knowledge_fingerprint, created_at
+             ) VALUES (
+                'snap-livekit', 'session-livekit', '0.1.0', '1', '[]', '[]',
+                '', 'livekit', '', '', '2026-09-05T00:00:00Z'
+             );",
+        )
+        .unwrap();
+    assert_eq!(
+        database
+            .query_string("SELECT transport_mode FROM sessions WHERE id='session-livekit'")
+            .unwrap(),
+        "livekit"
+    );
+    assert_eq!(
+        database
+            .query_string("SELECT transport_mode FROM runtime_snapshots WHERE id='snap-livekit'")
+            .unwrap(),
+        "livekit"
+    );
+}
+
+#[test]
+fn cascade_session_schema_migrates_to_livekit_transport() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("v3.sqlite3");
+    let connection = Connection::open(&path).unwrap();
+    connection
+        .execute_batch(include_str!("../../migrations/0001_foundation.sql"))
+        .unwrap();
+    connection
+        .execute_batch(include_str!("../../migrations/0002_materials.sql"))
+        .unwrap();
+    connection
+        .execute_batch(include_str!("../../migrations/0003_sessions.sql"))
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO schema_migrations(version, applied_at) VALUES (1, '2026-09-04T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO schema_migrations(version, applied_at) VALUES (2, '2026-09-04T12:00:00Z')",
+            [],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO schema_migrations(version, applied_at) VALUES (3, '2026-09-05T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+    connection
+        .execute_batch(
+            "INSERT INTO sessions(
+                id, status, role_profile_id, voice_route_id, transport_mode, updated_at
+             ) VALUES ('session-direct', 'listening', 'role-1', 'route-1', 'direct', '2026-09-05T00:00:00Z');
+             INSERT INTO session_turns(
+                id, session_id, turn_index, user_text, assistant_text, materials_used, created_at
+             ) VALUES ('turn-1', 'session-direct', 0, '问', '答', 0, '2026-09-05T00:00:00Z');
+             INSERT INTO runtime_snapshots(
+                id, session_id, app_version, config_revision, provider_ids, model_ids,
+                voice_route_id, transport_mode, role_hash, knowledge_fingerprint, created_at
+             ) VALUES (
+                'snap-direct', 'session-direct', '0.1.0', '1', '[]', '[]',
+                'route-1', 'direct', 'hash', '', '2026-09-05T00:00:00Z'
+             );",
+        )
+        .unwrap();
+    drop(connection);
+
+    let database = Database::open(path).unwrap();
+    database.migrate().unwrap();
+
+    assert_eq!(database.schema_version().unwrap(), 4);
+    assert_eq!(database.integrity_check().unwrap(), "ok");
+    assert_eq!(
+        database
+            .query_string("SELECT transport_mode FROM sessions WHERE id='session-direct'")
+            .unwrap(),
+        "direct"
+    );
+    assert_eq!(
+        database
+            .query_string("SELECT id FROM session_turns WHERE session_id='session-direct'")
+            .unwrap(),
+        "turn-1"
+    );
+    assert_eq!(
+        database
+            .query_string("SELECT transport_mode FROM runtime_snapshots WHERE id='snap-direct'")
+            .unwrap(),
+        "direct"
+    );
+    database
+        .execute_batch(
+            "INSERT INTO sessions(
+                id, status, role_profile_id, voice_route_id, transport_mode, updated_at
+             ) VALUES ('session-livekit', 'idle', '', '', 'livekit', '2026-09-06T00:00:00Z');",
+        )
+        .unwrap();
+    assert!(
+        database
+            .execute_batch(
+                "INSERT INTO sessions(
+                    id, status, role_profile_id, voice_route_id, transport_mode, updated_at
+                 ) VALUES ('session-bad-transport', 'idle', '', '', 'webrtc', '2026-09-06T00:00:00Z');"
+            )
+            .is_err()
+    );
+    database
+        .execute_batch("DELETE FROM sessions WHERE id='session-direct';")
+        .unwrap();
+    assert!(
+        database
+            .query_string("SELECT id FROM session_turns WHERE session_id='session-direct'")
+            .is_err()
+    );
+    assert!(
+        database
+            .query_string("SELECT id FROM runtime_snapshots WHERE session_id='session-direct'")
             .is_err()
     );
 }

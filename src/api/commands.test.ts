@@ -17,6 +17,7 @@ import {
   enableLiveKitSettings,
   finalizeSessionUtterance,
   issueLiveKitJoinToken,
+  startSession,
   getConfigPublic,
   importMaterial,
   listMaterials,
@@ -140,6 +141,16 @@ describe("session adapters", () => {
     invokeMock.mockResolvedValue({ ok: true, data: {} });
     await finalizeSessionUtterance("请介绍岗位");
     expect(invokeMock).toHaveBeenCalledWith("session_finalize_utterance", { text: "请介绍岗位" });
+  });
+
+  it("starts a session with optional transportMode and defaults to direct", async () => {
+    invokeMock.mockResolvedValue({ ok: true, data: {} });
+    await startSession();
+    await startSession("direct");
+    await startSession("livekit");
+    expect(invokeMock).toHaveBeenNthCalledWith(1, "session_start", { transportMode: undefined });
+    expect(invokeMock).toHaveBeenNthCalledWith(2, "session_start", { transportMode: "direct" });
+    expect(invokeMock).toHaveBeenNthCalledWith(3, "session_start", { transportMode: "livekit" });
   });
 });
 

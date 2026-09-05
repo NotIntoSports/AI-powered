@@ -8,12 +8,13 @@ use crate::config::{
     LiveKitConfig, ModelConfig, ProviderConfig, PublicConfig, RoleProfileConfig, SecretSlot,
     SpeechConfig, StorageConfig, TransportConfig, VoiceRouteConfig, VoiceRouteMode,
 };
+use crate::services::LiveKitJoinToken;
 #[cfg(test)]
 use crate::services::{
-    DiscoveredModelDto, EmbeddingConfigSaveInput, EmbeddingTestResult, LiveKitJoinToken,
-    LiveKitSettingsSaveInput, LiveKitTestResult, MaterialSearchHit, MaterialSummary,
-    ModelDiscoveryResult, ProviderSaveInput, ProviderTestResult, RoleProfileCopyInput,
-    RoleProfileSaveInput, VoiceRouteSaveInput, VoiceRouteTestResult,
+    DiscoveredModelDto, EmbeddingConfigSaveInput, EmbeddingTestResult, LiveKitSettingsSaveInput,
+    LiveKitTestResult, MaterialSearchHit, MaterialSummary, ModelDiscoveryResult, ProviderSaveInput,
+    ProviderTestResult, RoleProfileCopyInput, RoleProfileSaveInput, VoiceRouteSaveInput,
+    VoiceRouteTestResult,
 };
 
 use serde::{Serialize, Serializer, ser::SerializeMap};
@@ -114,9 +115,15 @@ impl From<crate::sessions::SessionRecord> for SessionSummary {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 #[ts(tag = "kind", rename_all = "camelCase")]
+#[allow(clippy::large_enum_variant)]
 pub enum SessionStartResult {
-    Started { session: SessionSummary },
-    Blocked { issues: Vec<PreflightIssue> },
+    Started {
+        session: SessionSummary,
+        livekit: Option<LiveKitJoinToken>,
+    },
+    Blocked {
+        issues: Vec<PreflightIssue>,
+    },
 }
 
 /// Live runtime snapshot. Frontend must drop events or snapshots whose `seq`

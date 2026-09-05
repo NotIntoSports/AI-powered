@@ -71,7 +71,7 @@ describe("WorkspaceSession", () => {
     vi.mocked(commands.getRuntimeStatus).mockResolvedValue({ ok: true, data: status() });
     vi.mocked(commands.startSession).mockResolvedValue({
       ok: true,
-      data: { kind: "started", session: summary() },
+      data: { kind: "started", session: summary(), livekit: null },
     });
     vi.mocked(commands.stopSession).mockResolvedValue({
       ok: true,
@@ -293,7 +293,7 @@ describe("WorkspaceSession", () => {
     });
     vi.mocked(commands.startSession).mockResolvedValue({
       ok: true,
-      data: { kind: "started", session: summary({ id: "sess-2" }) },
+      data: { kind: "started", session: summary({ id: "sess-2" }), livekit: null },
     });
     fireEvent.click(screen.getByRole("button", { name: "开始" }));
     await waitFor(() => {

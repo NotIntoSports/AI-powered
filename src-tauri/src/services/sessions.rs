@@ -21,16 +21,20 @@ use crate::{
     sessions::{NewCitation, NewSession, NewSnapshot, NewTurn, SessionRecord, SessionStore},
 };
 
+use super::livekit::{LiveKitJoinToken, LiveKitSettingsError, LiveKitSettingsService};
+
 #[derive(Debug)]
 pub enum SessionServiceError {
     AlreadyActive,
     NotFound,
     StateInvalid,
+    TransportInvalid,
     SidecarFailed,
     Cascade(CascadeError),
     Realtime(RealtimeError),
     Audio(AudioError),
     Database(DatabaseError),
+    LiveKit(LiveKitSettingsError),
 }
 
 impl SessionServiceError {
@@ -39,7 +43,9 @@ impl SessionServiceError {
             Self::AlreadyActive => "SESSION_ALREADY_ACTIVE",
             Self::NotFound => "SESSION_NOT_FOUND",
             Self::StateInvalid => "SESSION_STATE_INVALID",
+            Self::TransportInvalid => "SESSION_TRANSPORT_INVALID",
             Self::SidecarFailed => "SESSION_SIDECAR_FAILED",
+            Self::LiveKit(error) => error.code(),
             Self::Cascade(error) => error.code(),
             Self::Realtime(error) => error.code(),
             Self::Audio(error) => error.code(),
@@ -83,9 +89,15 @@ impl From<RuntimeError> for SessionServiceError {
 }
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum SessionStartOutcome {
-    Started { session: SessionRecord },
-    Blocked { issues: Vec<PreflightIssue> },
+    Started {
+        session: SessionRecord,
+        livekit: Option<LiveKitJoinToken>,
+    },
+    Blocked {
+        issues: Vec<PreflightIssue>,
+    },
 }
 
 pub struct SessionProbes<'a> {
@@ -273,12 +285,15 @@ impl<S: PlaybackSink> SessionService<S> {
         database: &Database,
         config: &PublicConfig,
         secrets_ready: bool,
+        transport_mode: Option<&str>,
+        livekit: Option<&LiveKitSettingsService<'_>>,
     ) -> Result<SessionStartOutcome, SessionServiceError> {
         let issues = preflight(config, secrets_ready, true);
         if !issues.is_empty() {
             return Ok(SessionStartOutcome::Blocked { issues });
         }
 
+        let transport_mode = resolve_transport_mode(transport_mode, config)?;
         let store = SessionStore::new(database);
         if self.has_active_session()
             || store
@@ -293,6 +308,20 @@ impl<S: PlaybackSink> SessionService<S> {
         self.unused_materials = false;
         self.last_error_code = None;
         let session_id = uuid::Uuid::new_v4().to_string();
+        let join_token = if transport_mode == "livekit" {
+            let issuer =
+                livekit.ok_or(SessionServiceError::LiveKit(LiveKitSettingsError::NotReady))?;
+            Some(
+                issuer
+                    .issue_join_token(
+                        &format!("session-{session_id}"),
+                        &format!("tauri-{session_id}"),
+                    )
+                    .map_err(SessionServiceError::LiveKit)?,
+            )
+        } else {
+            None
+        };
         self.control.set_session_id(Some(session_id.clone()));
         let role_profile_id = active_role_profile(config)
             .map(|profile| profile.id.as_str())
@@ -305,9 +334,9 @@ impl<S: PlaybackSink> SessionService<S> {
             status: "preparing",
             role_profile_id,
             voice_route_id,
-            transport_mode: "direct",
+            transport_mode,
         })?;
-        persist_snapshot(&store, &session_id, config)?;
+        persist_snapshot(&store, &session_id, config, transport_mode)?;
         self.session_id = Some(session_id.clone());
         self.runtime.transition(SessionPhase::Preparing)?;
         persist_phase(&store, &session_id, SessionPhase::Preparing)?;
@@ -316,7 +345,10 @@ impl<S: PlaybackSink> SessionService<S> {
         let session = store
             .get(&session_id)?
             .ok_or(SessionServiceError::NotFound)?;
-        Ok(SessionStartOutcome::Started { session })
+        Ok(SessionStartOutcome::Started {
+            session,
+            livekit: join_token,
+        })
     }
 
     pub fn stop(&mut self, database: &Database) -> Result<SessionRecord, SessionServiceError> {
@@ -994,12 +1026,37 @@ fn command_prompt(history: &[HistoryTurn], prompt: &str) -> String {
     format!("会话上下文：{context}\n任务：{prompt}")
 }
 
+fn resolve_transport_mode(
+    transport_mode: Option<&str>,
+    config: &PublicConfig,
+) -> Result<&'static str, SessionServiceError> {
+    match transport_mode
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        None | Some("direct") => Ok("direct"),
+        Some("livekit") => {
+            let livekit = &config.transport.livekit;
+            if !livekit.ready || livekit.status.as_deref() != Some("ready") {
+                return Err(SessionServiceError::LiveKit(LiveKitSettingsError::NotReady));
+            }
+            if !livekit.enabled {
+                return Err(SessionServiceError::LiveKit(LiveKitSettingsError::Disabled));
+            }
+            Ok("livekit")
+        }
+        Some(_) => Err(SessionServiceError::TransportInvalid),
+    }
+}
+
 fn persist_snapshot(
     store: &SessionStore<'_>,
     session_id: &str,
     config: &PublicConfig,
+    transport_mode: &str,
 ) -> Result<(), SessionServiceError> {
-    let snapshot = build_snapshot(config);
+    let mut snapshot = build_snapshot(config);
+    snapshot.transport_mode = transport_mode.to_owned();
     let provider_ids =
         serde_json::to_string(&snapshot.provider_ids).unwrap_or_else(|_| "[]".into());
     let model_ids = serde_json::to_string(&snapshot.model_ids).unwrap_or_else(|_| "[]".into());
@@ -1466,10 +1523,13 @@ mod tests {
 
     fn start_ready(service: &mut SessionService, database: &Database) -> String {
         match service
-            .start(database, &ready_public_config(), true)
+            .start(database, &ready_public_config(), true, None, None)
             .unwrap()
         {
-            SessionStartOutcome::Started { session } => session.id,
+            SessionStartOutcome::Started { session, livekit } => {
+                assert!(livekit.is_none());
+                session.id
+            }
             SessionStartOutcome::Blocked { issues } => {
                 panic!("expected start, blocked {issues:?}")
             }
@@ -1481,8 +1541,11 @@ mod tests {
         database: &Database,
         config: &PublicConfig,
     ) -> String {
-        match service.start(database, config, true).unwrap() {
-            SessionStartOutcome::Started { session } => session.id,
+        match service.start(database, config, true, None, None).unwrap() {
+            SessionStartOutcome::Started { session, livekit } => {
+                assert!(livekit.is_none());
+                session.id
+            }
             SessionStartOutcome::Blocked { issues } => {
                 panic!("expected start, blocked {issues:?}")
             }
@@ -1495,7 +1558,7 @@ mod tests {
         let mut service = SessionService::new();
         let empty = crate::runtime::test_support::empty_public_config();
 
-        let outcome = service.start(&database, &empty, false).unwrap();
+        let outcome = service.start(&database, &empty, false, None, None).unwrap();
         match outcome {
             SessionStartOutcome::Blocked { issues } => {
                 assert!(issues.len() >= 2, "{issues:?}");
@@ -1505,7 +1568,7 @@ mod tests {
                         .any(|issue| issue.code == "SESSION_ROUTE_REQUIRED")
                 );
             }
-            SessionStartOutcome::Started { session } => {
+            SessionStartOutcome::Started { session, .. } => {
                 panic!("started despite preflight {}", session.id)
             }
         }
@@ -1543,7 +1606,7 @@ mod tests {
         start_ready(&mut service, &database);
 
         let error = service
-            .start(&database, &ready_public_config(), true)
+            .start(&database, &ready_public_config(), true, None, None)
             .expect_err("second start");
         assert_eq!(error.code(), "SESSION_ALREADY_ACTIVE");
         assert!(matches!(error, SessionServiceError::AlreadyActive));
@@ -1706,7 +1769,7 @@ mod tests {
         let mut config = ready_public_config();
         config.speech.voice_routes[0].voice_id = Some(String::new());
         let mut service = SessionService::new();
-        match service.start(&database, &config, true).unwrap() {
+        match service.start(&database, &config, true, None, None).unwrap() {
             SessionStartOutcome::Started { .. } => {}
             SessionStartOutcome::Blocked { issues } => panic!("blocked {issues:?}"),
         }
@@ -1968,10 +2031,13 @@ mod tests {
 
     fn start_e2e(service: &mut SessionService, database: &Database) -> String {
         match service
-            .start(database, &ready_e2e_public_config(), true)
+            .start(database, &ready_e2e_public_config(), true, None, None)
             .unwrap()
         {
-            SessionStartOutcome::Started { session } => session.id,
+            SessionStartOutcome::Started { session, livekit } => {
+                assert!(livekit.is_none());
+                session.id
+            }
             SessionStartOutcome::Blocked { issues } => {
                 panic!("expected e2e start, blocked {issues:?}")
             }
@@ -2134,7 +2200,7 @@ mod tests {
 
         let mut service = SessionService::new();
         match service
-            .start(&database, &ready_e2e_public_config(), true)
+            .start(&database, &ready_e2e_public_config(), true, None, None)
             .unwrap()
         {
             SessionStartOutcome::Started { .. } => {}
@@ -2399,5 +2465,199 @@ mod tests {
         assert_eq!(llm.calls.load(Ordering::SeqCst), 0);
         assert_eq!(tts.calls.load(Ordering::SeqCst), 0);
         assert_eq!(service.sink().recorded(), [0x55, 0x66]);
+    }
+
+    fn ready_livekit_public_config() -> PublicConfig {
+        use crate::config::SecretSlot;
+        let mut config = ready_public_config();
+        config.transport.livekit.enabled = true;
+        config.transport.livekit.ready = true;
+        config.transport.livekit.status = Some("ready".into());
+        config.transport.livekit.url = Some("wss://livekit.example.test".into());
+        config.transport.livekit.api_key = Some(SecretSlot {
+            reference: "transport/livekit/api-key".into(),
+            configured: true,
+        });
+        config.transport.livekit.api_secret = Some(SecretSlot {
+            reference: "transport/livekit/api-secret".into(),
+            configured: true,
+        });
+        config.transport.livekit.config_version = 1;
+        config
+    }
+
+    struct ReadyLiveKitProbe;
+
+    impl crate::providers::LiveKitProbe for ReadyLiveKitProbe {
+        fn test(
+            &self,
+            url: &str,
+            api_key: &str,
+            api_secret: &str,
+        ) -> Result<(), crate::providers::LiveKitError> {
+            assert!(url.starts_with("ws"));
+            assert_eq!(api_key, "livekit-key");
+            assert_eq!(api_secret, "livekit-secret");
+            Ok(())
+        }
+    }
+
+    fn any_sqlite_text_contains(database: &Database, needle: &str) -> bool {
+        database
+            .with_connection(|connection| {
+                let mut names = connection.prepare(
+                    "SELECT name FROM sqlite_schema
+                     WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+                )?;
+                let tables = names
+                    .query_map([], |row| row.get::<_, String>(0))?
+                    .collect::<Result<Vec<_>, _>>()?;
+                for table in tables {
+                    let mut statement = connection.prepare(&format!("SELECT * FROM {table}"))?;
+                    let mut rows = statement.query([])?;
+                    while let Some(row) = rows.next()? {
+                        for index in 0..row.as_ref().column_count() {
+                            if let Ok(value) = row.get_ref(index)
+                                && let Ok(text) = value.as_str()
+                                && text.contains(needle)
+                            {
+                                return Ok(true);
+                            }
+                        }
+                    }
+                }
+                Ok(false)
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn start_defaults_to_direct_even_when_livekit_is_enabled() {
+        let (_directory, database) = opened();
+        let mut service = SessionService::new();
+        match service
+            .start(&database, &ready_livekit_public_config(), true, None, None)
+            .unwrap()
+        {
+            SessionStartOutcome::Started { session, livekit } => {
+                assert_eq!(session.transport_mode, "direct");
+                assert!(livekit.is_none());
+            }
+            SessionStartOutcome::Blocked { issues } => panic!("blocked {issues:?}"),
+        }
+        let snapshots = SessionStore::new(&database).list().unwrap();
+        assert_eq!(snapshots[0].transport_mode, "direct");
+    }
+
+    #[test]
+    fn start_livekit_fails_closed_when_disabled_or_not_ready() {
+        let (_directory, database) = opened();
+        let mut service = SessionService::new();
+        assert_eq!(
+            service
+                .start(
+                    &database,
+                    &ready_public_config(),
+                    true,
+                    Some("livekit"),
+                    None,
+                )
+                .unwrap_err()
+                .code(),
+            "LIVEKIT_NOT_READY"
+        );
+
+        let mut ready_disabled = ready_public_config();
+        ready_disabled.transport.livekit.ready = true;
+        ready_disabled.transport.livekit.status = Some("ready".into());
+        ready_disabled.transport.livekit.url = Some("wss://livekit.example.test".into());
+        assert_eq!(
+            service
+                .start(&database, &ready_disabled, true, Some("livekit"), None,)
+                .unwrap_err()
+                .code(),
+            "LIVEKIT_DISABLED"
+        );
+        assert!(SessionStore::new(&database).list().unwrap().is_empty());
+    }
+
+    #[test]
+    fn start_rejects_unknown_transport_mode() {
+        let (_directory, database) = opened();
+        let mut service = SessionService::new();
+        assert_eq!(
+            service
+                .start(
+                    &database,
+                    &ready_livekit_public_config(),
+                    true,
+                    Some("webrtc"),
+                    None,
+                )
+                .unwrap_err()
+                .code(),
+            "SESSION_TRANSPORT_INVALID"
+        );
+        assert!(SessionStore::new(&database).list().unwrap().is_empty());
+    }
+
+    #[test]
+    fn start_livekit_when_ready_persists_mode_and_returns_short_join_token() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = Database::open(directory.path().join("app.sqlite3")).unwrap();
+        database.migrate().unwrap();
+        let config_store = crate::config::ConfigStore::new(directory.path().join("config.json"));
+        config_store.restore_defaults().unwrap();
+        let secrets =
+            crate::secrets::SecretService::new("test", Arc::new(MemorySecretStore::default()))
+                .unwrap();
+        let livekit =
+            super::LiveKitSettingsService::new(&config_store, &secrets, &ReadyLiveKitProbe);
+        livekit
+            .save(super::super::LiveKitSettingsSaveInput {
+                url: Some("wss://livekit.example.test".into()),
+                api_key: Some("livekit-key".into()),
+                api_secret: Some("livekit-secret".into()),
+            })
+            .unwrap();
+        livekit.test().unwrap();
+        livekit.set_enabled(true).unwrap();
+
+        let mut service = SessionService::new();
+        let outcome = service
+            .start(
+                &database,
+                &ready_livekit_public_config(),
+                true,
+                Some(" livekit "),
+                Some(&livekit),
+            )
+            .unwrap();
+        let SessionStartOutcome::Started {
+            session,
+            livekit: token,
+        } = outcome
+        else {
+            panic!("expected started");
+        };
+        assert_eq!(session.transport_mode, "livekit");
+        let token = token.expect("join token");
+        assert_eq!(token.url, "wss://livekit.example.test");
+        assert_eq!(token.room, format!("session-{}", session.id));
+        assert_eq!(token.identity, format!("tauri-{}", session.id));
+        assert!(token.expires_in_sec <= 60);
+        assert!(!token.token.is_empty());
+        assert!(!token.token.contains("livekit-secret"));
+
+        let stored = SessionStore::new(&database)
+            .get(&session.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.transport_mode, "livekit");
+        let snapshots = SessionStore::new(&database)
+            .list_snapshots(&session.id)
+            .unwrap();
+        assert_eq!(snapshots[0].transport_mode, "livekit");
+        assert!(!any_sqlite_text_contains(&database, &token.token));
     }
 }

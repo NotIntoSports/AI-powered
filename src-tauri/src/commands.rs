@@ -363,11 +363,15 @@ fn session_service_error<T: ts_rs::TS>(error: SessionServiceError) -> CommandRes
         "SESSION_ALREADY_ACTIVE" => "A session is already active",
         "SESSION_NOT_FOUND" => "Session not found",
         "SESSION_STATE_INVALID" => "Session state is invalid",
+        "SESSION_TRANSPORT_INVALID" => "Unsupported session transport",
         _ => "Session operation failed",
     };
     let mut public = PublicError::new(code, message, false);
     if matches!(code, "SESSION_NOT_FOUND") {
         public = public.with_field("sessionId");
+    }
+    if matches!(code, "SESSION_TRANSPORT_INVALID") {
+        public = public.with_field("transportMode");
     }
     CommandResult::Err { error: public }
 }
@@ -564,7 +568,10 @@ fn session_detail(
     })
 }
 
-fn session_start_cmd(state: &AppState) -> CommandResult<SessionStartResult> {
+fn session_start_cmd(
+    state: &AppState,
+    transport_mode: Option<&str>,
+) -> CommandResult<SessionStartResult> {
     let config = match load_public_config(state) {
         Ok(config) => config,
         Err(error) => return CommandResult::Err { error },
@@ -592,15 +599,34 @@ fn session_start_cmd(state: &AppState) -> CommandResult<SessionStartResult> {
             );
         }
     };
-    match sessions.start(database, &config, secrets_ready) {
-        Ok(SessionStartOutcome::Started { session }) => CommandResult::Ok {
+    let probe = if matches!(transport_mode.map(str::trim), Some("livekit")) {
+        Some(match livekit_probe() {
+            Ok(probe) => probe,
+            Err(error) => return error,
+        })
+    } else {
+        None
+    };
+    let livekit = probe
+        .as_ref()
+        .map(|probe| LiveKitSettingsService::new(&state.config, &state.secrets, probe));
+    match sessions.start(
+        database,
+        &config,
+        secrets_ready,
+        transport_mode,
+        livekit.as_ref(),
+    ) {
+        Ok(SessionStartOutcome::Started { session, livekit }) => CommandResult::Ok {
             data: SessionStartResult::Started {
                 session: session.into(),
+                livekit,
             },
         },
         Ok(SessionStartOutcome::Blocked { issues }) => CommandResult::Ok {
             data: SessionStartResult::Blocked { issues },
         },
+        Err(SessionServiceError::LiveKit(error)) => livekit_service_error(error),
         Err(error) => session_service_error(error),
     }
 }
@@ -922,12 +948,13 @@ fn runtime_get_status_cmd(state: &AppState) -> CommandResult<RuntimeStatus> {
 pub fn session_start(
     app: AppHandle,
     state: State<'_, AppState>,
+    transport_mode: Option<String>,
 ) -> CommandResult<SessionStartResult> {
     let _guard = match service_guard(&state) {
         Ok(guard) => guard,
         Err(error) => return error,
     };
-    let result = session_start_cmd(&state);
+    let result = session_start_cmd(&state, transport_mode.as_deref());
     if matches!(
         result,
         CommandResult::Ok {
@@ -1705,6 +1732,7 @@ mod tests {
             EmbeddingServiceError, LiveKitSettingsError, ProviderServiceError,
             RoleProfileServiceError, VoiceRouteServiceError,
         },
+        sessions::SessionStore,
     };
 
     #[test]
@@ -2161,7 +2189,7 @@ mod tests {
     fn session_start_returns_blocked_or_started_without_secret_or_pcm() {
         let empty_dir = tempfile::tempdir().unwrap();
         let empty = session_state(&empty_dir, r#"{"configVersion":1}"#);
-        let blocked = serde_json::to_value(super::session_start_cmd(&empty)).unwrap();
+        let blocked = serde_json::to_value(super::session_start_cmd(&empty, None)).unwrap();
         assert_eq!(blocked["ok"], true);
         assert_eq!(blocked["data"]["kind"], "blocked");
         assert!(blocked["data"]["issues"].as_array().unwrap().len() >= 2);
@@ -2169,22 +2197,102 @@ mod tests {
 
         let ready_dir = tempfile::tempdir().unwrap();
         let ready = session_state(&ready_dir, &ready_session_config());
-        let started = serde_json::to_value(super::session_start_cmd(&ready)).unwrap();
+        let started = serde_json::to_value(super::session_start_cmd(&ready, None)).unwrap();
         assert_eq!(started["ok"], true, "{started}");
         assert_eq!(started["data"]["kind"], "started");
         assert_eq!(started["data"]["session"]["status"], "listening");
         assert_eq!(started["data"]["session"]["transportMode"], "direct");
+        assert_eq!(started["data"]["livekit"], serde_json::Value::Null);
         let json = serde_json::to_string(&started).unwrap();
         assert!(!json.contains("PROMPT-BODY"));
         assert!(!json.contains("pcm"));
         assert!(!json.to_ascii_lowercase().contains("sk-"));
     }
 
+    fn ready_livekit_session_config() -> String {
+        let mut config: serde_json::Value = serde_json::from_str(&ready_session_config()).unwrap();
+        config["transport"] = serde_json::json!({
+            "livekit": {
+                "enabled": true,
+                "url": "wss://livekit.example.test",
+                "apiKey": {"reference": "transport/livekit/api-key", "configured": true},
+                "apiSecret": {"reference": "transport/livekit/api-secret", "configured": true},
+                "ready": true,
+                "status": "ready",
+                "configVersion": 1
+            }
+        });
+        config.to_string()
+    }
+
+    #[test]
+    fn session_start_livekit_returns_join_token_and_does_not_persist_jwt() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = session_state(&directory, &ready_livekit_session_config());
+        state
+            .secrets
+            .set("transport/livekit/api-key", "livekit-key")
+            .unwrap();
+        state
+            .secrets
+            .set("transport/livekit/api-secret", "livekit-secret")
+            .unwrap();
+
+        let started =
+            serde_json::to_value(super::session_start_cmd(&state, Some("livekit"))).unwrap();
+        assert_eq!(started["ok"], true, "{started}");
+        assert_eq!(started["data"]["kind"], "started");
+        assert_eq!(started["data"]["session"]["transportMode"], "livekit");
+        assert_eq!(
+            started["data"]["livekit"]["url"],
+            "wss://livekit.example.test"
+        );
+        assert_eq!(started["data"]["livekit"]["expiresInSec"], 60);
+        let token = started["data"]["livekit"]["token"].as_str().unwrap();
+        assert!(!token.is_empty());
+        let id = started["data"]["session"]["id"].as_str().unwrap();
+        assert_eq!(started["data"]["livekit"]["room"], format!("session-{id}"));
+        assert_eq!(
+            started["data"]["livekit"]["identity"],
+            format!("tauri-{id}")
+        );
+
+        let database = state.database.lock().unwrap();
+        let database = database.as_ref().unwrap();
+        let stored = SessionStore::new(database).get(id).unwrap().unwrap();
+        assert_eq!(stored.transport_mode, "livekit");
+        let snapshots = SessionStore::new(database).list_snapshots(id).unwrap();
+        assert_eq!(snapshots[0].transport_mode, "livekit");
+        let dump = format!("{stored:?} {:?}", snapshots);
+        assert!(!dump.contains(token));
+    }
+
+    #[test]
+    fn session_start_livekit_fails_closed_when_not_ready() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = session_state(&directory, &ready_session_config());
+        let result =
+            serde_json::to_value(super::session_start_cmd(&state, Some("livekit"))).unwrap();
+        assert_eq!(result["ok"], false);
+        assert_eq!(result["error"]["code"], "LIVEKIT_NOT_READY");
+    }
+
+    #[test]
+    fn session_start_rejects_unknown_transport_mode() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = session_state(&directory, &ready_session_config());
+        let result =
+            serde_json::to_value(super::session_start_cmd(&state, Some("webrtc"))).unwrap();
+        assert_eq!(result["ok"], false);
+        assert_eq!(result["error"]["code"], "SESSION_TRANSPORT_INVALID");
+        assert_eq!(result["error"]["field"], "transportMode");
+    }
+
     #[test]
     fn session_commands_list_get_export_delete_and_status() {
         let directory = tempfile::tempdir().unwrap();
         let state = session_state(&directory, &ready_session_config());
-        let started = serde_json::to_value(super::session_start_cmd(&state)).unwrap();
+        let started = serde_json::to_value(super::session_start_cmd(&state, None)).unwrap();
         let id = started["data"]["session"]["id"]
             .as_str()
             .unwrap()
@@ -2241,7 +2349,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let state = session_state(&directory, &ready_session_config());
         assert_eq!(
-            serde_json::to_value(super::session_start_cmd(&state)).unwrap()["ok"],
+            serde_json::to_value(super::session_start_cmd(&state, None)).unwrap()["ok"],
             true
         );
         {
@@ -2426,7 +2534,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let state = session_state(&directory, &ready_session_config());
         assert_eq!(
-            serde_json::to_value(super::session_start_cmd(&state)).unwrap()["ok"],
+            serde_json::to_value(super::session_start_cmd(&state, None)).unwrap()["ok"],
             true
         );
         let asr = ScriptedAsr;
@@ -2482,7 +2590,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let state = session_state(&directory, &ready_session_config());
         assert_eq!(
-            serde_json::to_value(super::session_start_cmd(&state)).unwrap()["ok"],
+            serde_json::to_value(super::session_start_cmd(&state, None)).unwrap()["ok"],
             true
         );
         let asr = ScriptedAsr;
@@ -2531,7 +2639,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let state = session_state(&directory, &ready_session_config());
         assert_eq!(
-            serde_json::to_value(super::session_start_cmd(&state)).unwrap()["ok"],
+            serde_json::to_value(super::session_start_cmd(&state, None)).unwrap()["ok"],
             true
         );
         let entered = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -2591,7 +2699,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let state = session_state(&directory, &ready_session_config());
         assert_eq!(
-            serde_json::to_value(super::session_start_cmd(&state)).unwrap()["ok"],
+            serde_json::to_value(super::session_start_cmd(&state, None)).unwrap()["ok"],
             true
         );
         let asr = ScriptedAsr;

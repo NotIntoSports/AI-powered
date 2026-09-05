@@ -31,7 +31,7 @@ pub struct LiveKitTestResult {
     pub ready: bool,
 }
 
-#[derive(Clone, Serialize, TS)]
+#[derive(Clone, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]
 pub struct LiveKitJoinToken {

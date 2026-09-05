@@ -11,6 +11,10 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (1, include_str!("../../migrations/0001_foundation.sql")),
     (2, include_str!("../../migrations/0002_materials.sql")),
     (3, include_str!("../../migrations/0003_sessions.sql")),
+    (
+        4,
+        include_str!("../../migrations/0004_transport_livekit.sql"),
+    ),
 ];
 const LATEST_SCHEMA_VERSION: i64 = MIGRATIONS[MIGRATIONS.len() - 1].0;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -88,19 +92,29 @@ impl Database {
             if version <= current {
                 continue;
             }
-            let transaction = connection
-                .transaction()
+            // SQLite ignores PRAGMA foreign_keys inside a transaction, so rebuild
+            // migrations must turn FKs off before BEGIN and back on after COMMIT.
+            connection
+                .pragma_update(None, "foreign_keys", false)
                 .map_err(|_| DatabaseError::Operation)?;
-            transaction
-                .execute_batch(sql)
-                .map_err(|_| DatabaseError::Operation)?;
-            transaction
-                .execute(
-                    "INSERT INTO schema_migrations(version, applied_at) VALUES (?1, ?2)",
-                    params![version, chrono::Utc::now().to_rfc3339()],
-                )
-                .map_err(|_| DatabaseError::Operation)?;
-            transaction.commit().map_err(|_| DatabaseError::Operation)?;
+            let apply = (|| {
+                let transaction = connection
+                    .transaction()
+                    .map_err(|_| DatabaseError::Operation)?;
+                transaction
+                    .execute_batch(sql)
+                    .map_err(|_| DatabaseError::Operation)?;
+                transaction
+                    .execute(
+                        "INSERT INTO schema_migrations(version, applied_at) VALUES (?1, ?2)",
+                        params![version, chrono::Utc::now().to_rfc3339()],
+                    )
+                    .map_err(|_| DatabaseError::Operation)?;
+                transaction.commit().map_err(|_| DatabaseError::Operation)
+            })();
+            let restore = connection.pragma_update(None, "foreign_keys", true);
+            apply?;
+            restore.map_err(|_| DatabaseError::Operation)?;
         }
         Ok(())
     }
