@@ -11,7 +11,7 @@ pub use embeddings::{
 pub use livekit::{
     LiveKitSettingsError, LiveKitSettingsSaveInput, LiveKitSettingsService, LiveKitTestResult,
 };
-pub use materials::{MaterialService, MaterialServiceError, MaterialSummary};
+pub use materials::{MaterialSearchHit, MaterialService, MaterialServiceError, MaterialSummary};
 pub use providers::{
     DiscoveredModelDto, ModelDiscoveryResult, ProviderSaveInput, ProviderService,
     ProviderServiceError, ProviderTestResult,

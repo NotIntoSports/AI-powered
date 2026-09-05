@@ -2,6 +2,20 @@ use rusqlite::{OptionalExtension, params};
 
 use crate::database::{Database, DatabaseError};
 
+const DEFAULT_TOP_K: u32 = 20;
+const MAX_TOP_K: u32 = 20;
+const SNIPPET_CHARS: usize = 160;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MaterialSearchHit {
+    pub material_id: String,
+    pub chunk_id: String,
+    pub file_name: String,
+    pub section: String,
+    pub snippet: String,
+    pub rank: f64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MaterialRecord {
     pub id: String,
@@ -168,17 +182,73 @@ impl<'a> MaterialStore<'a> {
     }
 
     pub fn searchable_chunk_count(&self, query: &str) -> Result<i64, DatabaseError> {
+        let query = query.trim();
+        if query.is_empty() {
+            return Ok(0);
+        }
+        Ok(self.search_text(query, DEFAULT_TOP_K)?.len() as i64)
+    }
+
+    pub fn search_text(
+        &self,
+        query: &str,
+        top_k: u32,
+    ) -> Result<Vec<MaterialSearchHit>, DatabaseError> {
+        let query = query.trim();
+        if query.is_empty() {
+            return Ok(Vec::new());
+        }
+        let top_k = top_k.clamp(1, MAX_TOP_K);
+        if query.chars().count() >= 3 {
+            self.search_match(query, top_k)
+        } else {
+            self.search_like(query, top_k)
+        }
+    }
+
+    fn search_match(
+        &self,
+        query: &str,
+        top_k: u32,
+    ) -> Result<Vec<MaterialSearchHit>, DatabaseError> {
         self.database.with_connection(|connection| {
-            connection.query_row(
-                "SELECT COUNT(*)
+            let mut statement = connection.prepare(
+                "SELECT materials.id, fts.chunk_id, materials.file_name,
+                        material_chunks.section, material_chunks.content,
+                        bm25(material_chunks_fts)
                  FROM material_chunks_fts AS fts
                  JOIN materials ON materials.id = fts.material_id
+                 JOIN material_chunks ON material_chunks.id = fts.chunk_id
                  WHERE material_chunks_fts MATCH ?1
                    AND materials.retrieval_blocked = 0
-                   AND materials.status IN ('text_ready', 'vector_ready')",
-                params![query],
-                |row| row.get(0),
-            )
+                   AND materials.status IN ('text_ready', 'vector_ready')
+                 ORDER BY bm25(material_chunks_fts) ASC
+                 LIMIT ?2",
+            )?;
+            let rows = statement.query_map(params![query, top_k], map_search_hit)?;
+            rows.collect::<Result<Vec<_>, _>>()
+        })
+    }
+
+    fn search_like(
+        &self,
+        query: &str,
+        top_k: u32,
+    ) -> Result<Vec<MaterialSearchHit>, DatabaseError> {
+        let pattern = format!("%{}%", escape_like(query));
+        self.database.with_connection(|connection| {
+            let mut statement = connection.prepare(
+                "SELECT materials.id, material_chunks.id, materials.file_name,
+                        material_chunks.section, material_chunks.content, 0.0
+                 FROM material_chunks
+                 JOIN materials ON materials.id = material_chunks.material_id
+                 WHERE material_chunks.content LIKE ?1 ESCAPE '\\'
+                   AND materials.retrieval_blocked = 0
+                   AND materials.status IN ('text_ready', 'vector_ready')
+                 LIMIT ?2",
+            )?;
+            let rows = statement.query_map(params![pattern, top_k], map_search_hit)?;
+            rows.collect::<Result<Vec<_>, _>>()
         })
     }
 
@@ -212,6 +282,33 @@ impl<'a> MaterialStore<'a> {
                 .optional()
         })
     }
+}
+
+fn map_search_hit(row: &rusqlite::Row<'_>) -> rusqlite::Result<MaterialSearchHit> {
+    let content: String = row.get(4)?;
+    Ok(MaterialSearchHit {
+        material_id: row.get(0)?,
+        chunk_id: row.get(1)?,
+        file_name: row.get(2)?,
+        section: row.get(3)?,
+        snippet: snippet(&content),
+        rank: row.get(5)?,
+    })
+}
+
+fn snippet(content: &str) -> String {
+    content.chars().take(SNIPPET_CHARS).collect()
+}
+
+fn escape_like(query: &str) -> String {
+    let mut escaped = String::new();
+    for ch in query.chars() {
+        if matches!(ch, '%' | '_' | '\\') {
+            escaped.push('\\');
+        }
+        escaped.push(ch);
+    }
+    escaped
 }
 
 pub fn sha256_hex(bytes: &[u8]) -> String {
