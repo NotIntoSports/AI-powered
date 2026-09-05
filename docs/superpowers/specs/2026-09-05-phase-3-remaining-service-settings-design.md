@@ -4,11 +4,11 @@
 
 **状态：** 已确认，等待实施计划
 
-**范围：** 助手角色、可选 LiveKit、Embedding 与可选对象存储配置
+**范围：** 助手角色、可选 LiveKit 与 Embedding 配置
 
 ## 1. 目标
 
-补齐 Phase 3 尚未迁入 Tauri 桌面端的配置能力，使角色、Embedding、可选 LiveKit 和可选对象存储都由本地客户端管理，不依赖登录、管理网页、Go Control API、PostgreSQL、Nginx 或项目作者服务器。
+补齐 Phase 3 尚未迁入 Tauri 桌面端的配置能力，使角色、Embedding 和可选 LiveKit 都由本地客户端管理，不依赖登录、管理网页、Go Control API、PostgreSQL、Nginx 或项目作者服务器。
 
 本批次只建立经过测试、可供后续知识库和 Runtime 消费的配置与窄接口。资料导入、向量生成、会话运行、媒体传输和远程文件上传分别由后续阶段实现。
 
@@ -16,7 +16,7 @@
 
 - 单机、单用户、不登录。
 - 默认使用本地配置文件、本地 SQLite 和本地文件目录。
-- LiveKit 与对象存储默认关闭，由用户主动配置并启用。
+- LiveKit 默认关闭，由用户主动配置并启用。
 - C# AudioBridge 继续作为受控 sidecar，不在本批改写为 Rust。
 - 不修改任何服务器配置，也不提供远程管理协议。
 - 不自动切换供应商、模型、传输方式或收费服务。
@@ -94,29 +94,11 @@ Embedding 继续复用 OpenAI-compatible 供应商与 Credential Manager 密钥�
 - 后续 Runtime 在本地使用 Key/Secret 签发短期访问 Token；Token 不持久化。
 - 禁用 LiveKit 时默认 Direct 模式不读取 LiveKit 凭据。
 
-## 6. 可选对象存储配置
+## 6. 对象存储延期决定
 
-### 6.1 支持范围
+S3-compatible 对象存储不在本批实现，也不加入运行配置和 UI。当前产品以本地 `data/materials`、`app.sqlite` 和本地备份为完整默认方案，不配置云存储也不会缺少核心能力。
 
-本批定义一个协议化 `ObjectStorageProbe`，首个实现采用 S3-compatible API。具体 SDK 或签名库必须在实施前按开源优先规则评估许可证、维护、Windows 兼容性、依赖体积、安全和接入成本。
-
-`ObjectStorageConfig` 包含：
-
-- `enabled`，默认 `false`；
-- `provider`，本阶段仅 `s3-compatible`；
-- `endpoint`，只允许安全的 HTTP(S) URL 且禁止 userinfo、query、fragment；
-- `region`、`bucket`、可选 `prefix`；
-- `accessKeyId` 与 `secretAccessKey` 的 Credential Manager 引用；
-- `ready`、`status`、`configVersion`。
-
-规范密钥引用为 `storage/object/access-key-id` 与 `storage/object/secret-access-key`。
-
-### 6.2 行为
-
-- 默认资料仍保存在本机，配置对象存储不会自动上传现有或新增资料。
-- 启用前必须通过只读或无残留测试；不得把用户资料作为测试对象。
-- 若服务无法执行纯只读验证，可使用随机测试对象并确保删除；删除失败必须返回明确的 cleanup error。
-- 本批只保存配置、测试连接和展示数据去向，不实现同步、迁移、远程删除或备份上传。
+配置模型只通过独立的 `StorageConfig` 分区保留未来演进边界，不预先加入 endpoint、bucket 或密钥字段。将来有明确的云备份或跨设备迁移需求时，再单独设计 S3-compatible 适配器、数据同步语义、冲突处理和远程删除策略。
 
 ## 7. Rust 边界
 
@@ -125,8 +107,7 @@ Embedding 继续复用 OpenAI-compatible 供应商与 Credential Manager 密钥�
 - `RoleProfileService`：角色 CRUD、复制、激活和版本；
 - `EmbeddingService`：保存、探测、维度校验和激活；
 - `LiveKitSettingsService`：双密钥事务、测试和启用；
-- `ObjectStorageSettingsService`：双密钥事务、测试和启用；
-- `EmbeddingProbe`、`LiveKitProbe`、`ObjectStorageProbe`：协议窄接口，生产适配器与测试 fake 分离。
+- `EmbeddingProbe`、`LiveKitProbe`：协议窄接口，生产适配器与测试 fake 分离。
 
 所有 Phase 3 配置写入与 Credential Manager 变更共用应用级服务锁。多密钥保存必须保存旧值并在配置提交失败时逐项回滚；回滚或清理失败使用稳定错误码暴露，不包含原始第三方响应。
 
@@ -135,10 +116,10 @@ Tauri commands 只做 DTO 转换和错误映射。React 只调用 `src/api/comma
 ## 8. UI 设计
 
 - “设置”页管理角色，提供角色列表、编辑器、复制、删除和默认状态。
-- “服务”页增加 Embedding、LiveKit 和对象存储三个区域。
+- “服务”页增加 Embedding 和 LiveKit 两个区域。
 - 密钥字段使用 password input、`autocomplete=new-password`，提交后在 `finally` 清空。
 - 页面只显示“已安全保存/未配置”，永不回显密钥。
-- 每个可选外部服务明确显示默认关闭状态和数据去向。
+- LiveKit 明确显示默认关闭状态和媒体数据去向；Embedding 明确显示切片和查询会发送给所选供应商。
 - 测试按钮展示有界状态；只有 `ready=true` 才能启用。
 - 字段错误显示到对应区域，网络超时和临时连接失败标记为可重试。
 - 不引入新的 UI 依赖。
@@ -158,9 +139,6 @@ embedding_config_activate
 livekit_settings_save
 livekit_settings_test
 livekit_settings_enable
-object_storage_settings_save
-object_storage_settings_test
-object_storage_settings_enable
 ```
 
 每个命令拥有单独 Tauri permission。不得恢复通用 secret set/delete/status，也不得新增任意 HTTP、shell、进程或文件系统权限。
@@ -172,7 +150,7 @@ Rust DTO 通过 ts-rs 生成 TypeScript；输入 DTO 可以包含一次性密钥
 - ID、URL、模型、维度、bucket 等输入错误返回稳定 code 和 `field`。
 - DNS、timeout、connection reset 标记 `retryable=true`；认证、配置与配额错误不自动重试。
 - 第三方响应正文、header、签名串、完整 URL、角色话术和密钥不得进入公开错误。
-- Provider、LiveKit、Embedding 和对象存储探测器设置显式 timeout、响应上限和禁止重定向策略。
+- Provider、LiveKit 和 Embedding 探测器设置显式 timeout、响应上限和禁止重定向策略。
 - 配置、last-good、诊断导出和测试 fixture 必须通过密钥标记扫描。
 
 ## 11. 开源依赖决策闸门
@@ -181,7 +159,6 @@ Rust DTO 通过 ts-rs 生成 TypeScript；输入 DTO 可以包含一次性密钥
 
 - 优先复用现有 reqwest 与协议能力；
 - LiveKit 优先评估官方 Rust crates 或仅做 HTTP/WebSocket 有界探测；
-- S3-compatible 优先评估 AWS 官方 Rust SDK 与成熟轻量 SigV4 库；
 - 检查稳定版本、许可证、最近发布与 issue、MSRV、Windows x64、安装增量、CPU/内存、网络数据去向、密钥处理和维护成本；
 - 若成熟依赖明显过重，本批允许只实现窄协议探测器，但必须记录不采用现有方案的原因；
 - 不复制大段第三方源码。
@@ -190,7 +167,7 @@ Rust DTO 通过 ts-rs 生成 TypeScript；输入 DTO 可以包含一次性密钥
 
 - 领域单元测试覆盖全部 CRUD、引用、激活、版本、测试状态和配置回滚。
 - fake secret store 覆盖双密钥部分失败、回滚失败和可重试清理。
-- fake probe 覆盖成功、认证、timeout、维度错误、响应过大和无残留测试。
+- fake probe 覆盖成功、认证、timeout、维度错误和响应过大。
 - 配置测试覆盖默认值、旧配置兼容、活动状态不变量和 URL 安全。
 - IPC/权限/生成类型测试覆盖每个新增命令，并确保输出无密钥。
 - React 测试覆盖编辑、空密钥保留、提交清空、测试后启用、错误和数据去向提示。
