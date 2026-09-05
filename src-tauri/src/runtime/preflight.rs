@@ -152,10 +152,9 @@ mod tests {
             .providers
             .iter_mut()
             .find(|provider| provider.id == "asr-1")
+            && let Some(slot) = &mut provider.credential
         {
-            if let Some(slot) = &mut provider.credential {
-                slot.configured = false;
-            }
+            slot.configured = false;
         }
 
         let issues = preflight(&config, false, true);

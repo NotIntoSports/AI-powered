@@ -33,6 +33,14 @@ pub enum CascadeError {
     ResponseInvalid(CascadeStage),
     ResponseEmpty(CascadeStage),
     PcmInvalid,
+    RateLimited {
+        stage: CascadeStage,
+        retry_after_secs: Option<u64>,
+    },
+    ServerError(CascadeStage),
+    ConnectionReset(CascadeStage),
+    Cancelled,
+    AnswerBlocked,
 }
 
 impl CascadeError {
@@ -61,6 +69,26 @@ impl CascadeError {
             Self::ResponseEmpty(CascadeStage::Llm) => "LLM_RESPONSE_EMPTY",
             Self::ResponseEmpty(CascadeStage::Tts) => "TTS_PCM_INVALID",
             Self::PcmInvalid => "TTS_PCM_INVALID",
+            Self::RateLimited {
+                stage: CascadeStage::Asr,
+                ..
+            } => "ASR_RATE_LIMITED",
+            Self::RateLimited {
+                stage: CascadeStage::Llm,
+                ..
+            } => "LLM_RATE_LIMITED",
+            Self::RateLimited {
+                stage: CascadeStage::Tts,
+                ..
+            } => "TTS_RATE_LIMITED",
+            Self::ServerError(CascadeStage::Asr) => "ASR_SERVER_ERROR",
+            Self::ServerError(CascadeStage::Llm) => "LLM_SERVER_ERROR",
+            Self::ServerError(CascadeStage::Tts) => "TTS_SERVER_ERROR",
+            Self::ConnectionReset(CascadeStage::Asr) => "ASR_CONNECTION_RESET",
+            Self::ConnectionReset(CascadeStage::Llm) => "LLM_CONNECTION_RESET",
+            Self::ConnectionReset(CascadeStage::Tts) => "TTS_CONNECTION_RESET",
+            Self::Cancelled => "SESSION_CANCELLED",
+            Self::AnswerBlocked => "SESSION_ANSWER_BLOCKED",
         }
     }
 }

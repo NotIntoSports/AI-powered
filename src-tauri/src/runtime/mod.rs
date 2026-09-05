@@ -1,7 +1,12 @@
+pub mod cascade;
 pub mod preflight;
 pub mod snapshot;
 pub mod state;
 
+pub use cascade::{
+    CascadeCredentials, CascadeTurn, CascadeTurnDeps, CascadeTurnRequest, HistoryTurn,
+    TurnCitation, run_cascade_turn,
+};
 pub use preflight::{PreflightIssue, preflight};
 pub use snapshot::{SessionRuntimeSnapshot, build_snapshot};
 pub use state::{AgentMode, RuntimeError, RuntimeEvent, SessionPhase, SessionRuntime};

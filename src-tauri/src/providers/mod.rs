@@ -6,7 +6,8 @@ mod openai_compatible;
 use std::fmt;
 
 pub use cascade::{
-    CascadeError, ChatMessage, ChatModel, OpenAiCompatibleCascade, SpeechToText, TextToSpeech,
+    CascadeError, CascadeStage, ChatMessage, ChatModel, OpenAiCompatibleCascade, SpeechToText,
+    TextToSpeech,
 };
 #[cfg(test)]
 pub(crate) use cascade::{
