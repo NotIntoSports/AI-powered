@@ -6,26 +6,79 @@ fn manifest_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
+/// Explicit allow-list shape for a capability permission entry:
+/// `^(core:default|allow-[a-z0-9-]+)$`. Implemented without a regex dependency.
+fn matches_permission_shape(permission: &str) -> bool {
+    if permission == "core:default" {
+        return true;
+    }
+    match permission.strip_prefix("allow-") {
+        Some(rest) => {
+            !rest.is_empty()
+                && rest
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        }
+        None => false,
+    }
+}
+
 #[test]
 fn capability_is_explicit_and_has_no_generic_process_or_filesystem_access() {
     let text = fs::read_to_string(manifest_dir().join("capabilities/main.json")).unwrap();
     let capability: Value = serde_json::from_str(&text).unwrap();
+    // (5) window scope pinned to exactly ["main"].
     assert_eq!(capability["windows"], serde_json::json!(["main"]));
-    assert_eq!(
-        capability["permissions"],
-        serde_json::json!([
-            "core:default",
-            "allow-foundation-get-status",
-            "allow-secret-set",
-            "allow-secret-delete",
-            "allow-secret-status",
-            "allow-diagnostics-export",
-            "allow-config-get-startup-state",
-            "allow-config-restore-last-good",
-            "allow-config-restore-defaults",
-            "allow-open-app-directory"
-        ])
+
+    let permissions = capability["permissions"]
+        .as_array()
+        .expect("capability.permissions must be an array");
+    let granted: Vec<&str> = permissions
+        .iter()
+        .map(|value| value.as_str().expect("permission must be a string"))
+        .collect();
+
+    // Phase 0-1 accepted baseline. Phase 3+ may ADD command permissions but must
+    // never lose these, so assert containment (superset) rather than equality.
+    let baseline = [
+        "core:default",
+        "allow-foundation-get-status",
+        "allow-secret-set",
+        "allow-secret-delete",
+        "allow-secret-status",
+        "allow-diagnostics-export",
+        "allow-config-get-startup-state",
+        "allow-config-restore-last-good",
+        "allow-config-restore-defaults",
+        "allow-open-app-directory",
+    ];
+    // (1) always includes core:default.
+    assert!(
+        granted.contains(&"core:default"),
+        "capability must include core:default"
     );
+    // (3) superset of the Phase 0-1 baseline.
+    for required in baseline {
+        assert!(
+            granted.contains(&required),
+            "capability must retain baseline permission: {required}"
+        );
+    }
+    // (2) every entry matches the explicit allow-list shape.
+    for permission in &granted {
+        assert!(
+            matches_permission_shape(permission),
+            "unexpected capability permission shape: {permission}"
+        );
+    }
+    // (4) no duplicate grants.
+    let unique: std::collections::HashSet<&str> = granted.iter().copied().collect();
+    assert_eq!(
+        unique.len(),
+        granted.len(),
+        "capability.permissions must not contain duplicates"
+    );
+
     let lower = text.to_ascii_lowercase();
     for forbidden in [
         "shell:allow-execute",

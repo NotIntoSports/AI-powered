@@ -15,8 +15,13 @@ test("parallel Tauri shell preserves legacy entry points", async () => {
   assert.equal(tauri.build.devUrl, "http://127.0.0.1:1420");
   assert.equal(tauri.identifier, "com.aivirtualassistant.desktop");
   const capability = JSON.parse(await readFile("src-tauri/capabilities/main.json", "utf8"));
+  // (5) window scope pinned to exactly ["main"].
   assert.deepEqual(capability.windows, ["main"]);
-  assert.deepEqual(capability.permissions, [
+  const permissions = capability.permissions;
+  assert.ok(Array.isArray(permissions), "capability.permissions must be an array");
+  // Phase 0-1 accepted baseline. Phase 3+ may ADD command permissions but must
+  // never lose these, so we assert a superset (containment) rather than equality.
+  const baselinePermissions = [
     "core:default",
     "allow-foundation-get-status",
     "allow-secret-set",
@@ -27,7 +32,27 @@ test("parallel Tauri shell preserves legacy entry points", async () => {
     "allow-config-restore-last-good",
     "allow-config-restore-defaults",
     "allow-open-app-directory",
-  ]);
+  ];
+  // (1) always includes core:default.
+  assert.ok(permissions.includes("core:default"), "capability must include core:default");
+  // (3) superset of the Phase 0-1 baseline.
+  for (const required of baselinePermissions) {
+    assert.ok(
+      permissions.includes(required),
+      `capability must retain baseline permission: ${required}`,
+    );
+  }
+  // (2) every entry matches the explicit allow-list shape.
+  const shape = /^(core:default|allow-[a-z0-9-]+)$/;
+  for (const permission of permissions) {
+    assert.match(permission, shape, `unexpected capability permission shape: ${permission}`);
+  }
+  // (4) no duplicate grants.
+  assert.equal(
+    new Set(permissions).size,
+    permissions.length,
+    "capability.permissions must not contain duplicates",
+  );
   assert.doesNotMatch(JSON.stringify(capability), /shell:allow-(?:execute|spawn)|fs:|https?:\/\/|"\*"/i);
   assert.equal(pkg.scripts.dev, "next dev -H 127.0.0.1");
   assert.equal(pkg.scripts.build, "next build");

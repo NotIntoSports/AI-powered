@@ -14,6 +14,14 @@ fn navigation_is_allowed(url: &tauri::Url) -> bool {
         return true;
     }
 
+    // Tauri v2 serves the packaged Windows app from http://tauri.localhost
+    // (WebView2). Allow exactly that origin — http scheme, exact host, no port —
+    // so a release build does not white-screen. This is fail-closed: a lookalike
+    // host such as tauri.localhost.evil.com, any port, or https is rejected below.
+    if url.scheme() == "http" && url.host_str() == Some("tauri.localhost") && url.port().is_none() {
+        return true;
+    }
+
     cfg!(debug_assertions)
         && url.scheme() == "http"
         && url.host_str() == Some("127.0.0.1")
@@ -97,6 +105,29 @@ mod tests {
         ));
         assert!(navigation_is_allowed(
             &"http://127.0.0.1:1420/".parse().unwrap()
+        ));
+    }
+
+    #[test]
+    fn allows_packaged_windows_origin() {
+        assert!(navigation_is_allowed(
+            &"http://tauri.localhost/index.html".parse().unwrap()
+        ));
+    }
+
+    #[test]
+    fn blocks_remote_spoof() {
+        assert!(!navigation_is_allowed(
+            &"http://tauri.localhost.evil.com/index.html"
+                .parse()
+                .unwrap()
+        ));
+    }
+
+    #[test]
+    fn blocks_https_remote() {
+        assert!(!navigation_is_allowed(
+            &"https://evil.com/".parse().unwrap()
         ));
     }
 }
