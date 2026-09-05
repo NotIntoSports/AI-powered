@@ -5,7 +5,42 @@ use serde::Deserialize;
 
 use super::{DiscoveredModel, ProviderEndpoint, ProviderError, ProviderProbe};
 
-const MAX_RESPONSE_BYTES: u64 = 1024 * 1024;
+pub(crate) const MAX_RESPONSE_BYTES: u64 = 1024 * 1024;
+
+pub(crate) fn build_bounded_client() -> Result<Client, reqwest::Error> {
+    Client::builder()
+        .timeout(Duration::from_secs(10))
+        .connect_timeout(Duration::from_secs(5))
+        .redirect(Policy::none())
+        .no_proxy()
+        .tls_backend_rustls()
+        .build()
+}
+
+pub(crate) enum BoundedBodyError {
+    TooLarge,
+    Failed,
+}
+
+pub(crate) fn read_bounded_body(
+    response: reqwest::blocking::Response,
+) -> Result<Vec<u8>, BoundedBodyError> {
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_RESPONSE_BYTES)
+    {
+        return Err(BoundedBodyError::TooLarge);
+    }
+    let mut bytes = Vec::new();
+    response
+        .take(MAX_RESPONSE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| BoundedBodyError::Failed)?;
+    if bytes.len() as u64 > MAX_RESPONSE_BYTES {
+        return Err(BoundedBodyError::TooLarge);
+    }
+    Ok(bytes)
+}
 
 pub struct OpenAiCompatibleProbe {
     client: Client,
@@ -13,14 +48,7 @@ pub struct OpenAiCompatibleProbe {
 
 impl OpenAiCompatibleProbe {
     pub fn new() -> Result<Self, ProviderError> {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(10))
-            .connect_timeout(Duration::from_secs(5))
-            .redirect(Policy::none())
-            .no_proxy()
-            .tls_backend_rustls()
-            .build()
-            .map_err(|_| ProviderError::ClientUnavailable)?;
+        let client = build_bounded_client().map_err(|_| ProviderError::ClientUnavailable)?;
         Ok(Self { client })
     }
 }
@@ -51,20 +79,10 @@ impl ProviderProbe for OpenAiCompatibleProbe {
         if !response.status().is_success() {
             return Err(ProviderError::RequestFailed);
         }
-        if response
-            .content_length()
-            .is_some_and(|length| length > MAX_RESPONSE_BYTES)
-        {
-            return Err(ProviderError::ResponseTooLarge);
-        }
-        let mut bytes = Vec::new();
-        response
-            .take(MAX_RESPONSE_BYTES + 1)
-            .read_to_end(&mut bytes)
-            .map_err(|_| ProviderError::RequestFailed)?;
-        if bytes.len() as u64 > MAX_RESPONSE_BYTES {
-            return Err(ProviderError::ResponseTooLarge);
-        }
+        let bytes = read_bounded_body(response).map_err(|error| match error {
+            BoundedBodyError::TooLarge => ProviderError::ResponseTooLarge,
+            BoundedBodyError::Failed => ProviderError::RequestFailed,
+        })?;
         parse_model_catalog(&bytes)
     }
 }

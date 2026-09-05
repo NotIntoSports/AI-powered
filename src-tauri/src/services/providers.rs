@@ -140,6 +140,18 @@ impl<'a> ProviderService<'a> {
                     }
                 }
             }
+            for embedding in &mut config.knowledge.embedding_configs {
+                if embedding.provider_id == provider.id {
+                    embedding.ready = false;
+                    embedding.active = false;
+                    embedding.status = Some("configuration_changed".into());
+                    embedding.config_version = embedding.config_version.saturating_add(1);
+                    if config.knowledge.active_embedding_config_id.as_deref() == Some(&embedding.id)
+                    {
+                        config.knowledge.active_embedding_config_id = None;
+                    }
+                }
+            }
             Ok(())
         });
         match result {

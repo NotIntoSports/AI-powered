@@ -1,7 +1,11 @@
+mod embeddings;
 mod providers;
 mod roles;
 mod voice_routes;
 
+pub use embeddings::{
+    EmbeddingConfigSaveInput, EmbeddingService, EmbeddingServiceError, EmbeddingTestResult,
+};
 pub use providers::{
     DiscoveredModelDto, ModelDiscoveryResult, ProviderSaveInput, ProviderService,
     ProviderServiceError, ProviderTestResult,

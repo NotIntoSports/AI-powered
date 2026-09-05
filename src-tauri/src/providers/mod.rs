@@ -1,7 +1,9 @@
+mod embedding;
 mod openai_compatible;
 
 use std::fmt;
 
+pub use embedding::{EmbeddingError, EmbeddingProbe, OpenAiCompatibleEmbeddingProbe};
 pub use openai_compatible::OpenAiCompatibleProbe;
 #[cfg(test)]
 pub(crate) use openai_compatible::{normalize_models_url, parse_model_catalog};

@@ -1,14 +1,18 @@
 use std::sync::Arc;
 
 use crate::{
-    config::ConfigStore,
-    providers::{DiscoveredModel, ProviderEndpoint, ProviderError, ProviderProbe},
+    config::{ConfigStore, EmbeddingDistance},
+    providers::{
+        DiscoveredModel, EmbeddingError, EmbeddingProbe, ProviderEndpoint, ProviderError,
+        ProviderProbe,
+    },
     secrets::{MemorySecretStore, SecretService},
 };
 
-use super::{ProviderSaveInput, ProviderService};
-
-use super::{RoleProfileCopyInput, RoleProfileSaveInput, RoleProfileService};
+use super::{
+    EmbeddingConfigSaveInput, EmbeddingService, ProviderSaveInput, ProviderService,
+    RoleProfileCopyInput, RoleProfileSaveInput, RoleProfileService,
+};
 
 fn role_input(id: &str) -> RoleProfileSaveInput {
     RoleProfileSaveInput {
@@ -528,4 +532,275 @@ fn incomplete_legacy_route_cannot_be_tested_or_activated() {
         service.activate("legacy").unwrap_err().code(),
         "VOICE_ROUTE_NOT_READY"
     );
+}
+
+struct ReadyEmbeddingProbe;
+
+impl EmbeddingProbe for ReadyEmbeddingProbe {
+    fn embed(
+        &self,
+        _: &ProviderEndpoint,
+        credential: Option<&str>,
+        model_id: &str,
+        dimensions: u32,
+        input: &str,
+    ) -> Result<Vec<f32>, EmbeddingError> {
+        assert_eq!(credential, Some("credential-value"));
+        assert_eq!(model_id, "embed-3");
+        assert_eq!(input, "AI Virtual Assistant embedding connectivity test");
+        Ok(vec![0.25; dimensions as usize])
+    }
+}
+
+struct FailEmbeddingProbe;
+
+impl EmbeddingProbe for FailEmbeddingProbe {
+    fn embed(
+        &self,
+        _: &ProviderEndpoint,
+        _: Option<&str>,
+        _: &str,
+        _: u32,
+        _: &str,
+    ) -> Result<Vec<f32>, EmbeddingError> {
+        Err(EmbeddingError::Timeout)
+    }
+}
+
+struct WrongDimensionProbe;
+
+impl EmbeddingProbe for WrongDimensionProbe {
+    fn embed(
+        &self,
+        _: &ProviderEndpoint,
+        _: Option<&str>,
+        _: &str,
+        _: u32,
+        _: &str,
+    ) -> Result<Vec<f32>, EmbeddingError> {
+        Ok(vec![1.0, 2.0])
+    }
+}
+
+fn embedding_input(id: &str) -> EmbeddingConfigSaveInput {
+    EmbeddingConfigSaveInput {
+        id: id.into(),
+        provider_id: "openai".into(),
+        model_id: "embed-3".into(),
+        dimensions: 3,
+        normalized: true,
+    }
+}
+
+fn seeded_embedding_store() -> (tempfile::TempDir, ConfigStore, SecretService) {
+    let directory = tempfile::tempdir().unwrap();
+    let config = ConfigStore::new(directory.path().join("config.json"));
+    config.restore_defaults().unwrap();
+    let secrets = SecretService::new("test", Arc::new(MemorySecretStore::default())).unwrap();
+    let providers = ProviderService::new(&config, &secrets, &FakeProbe);
+    providers
+        .save(ProviderSaveInput {
+            id: "openai".into(),
+            name: Some("OpenAI compatible".into()),
+            base_url: "https://example.test/v1".into(),
+            api_key: Some("credential-value".into()),
+        })
+        .unwrap();
+    (directory, config, secrets)
+}
+
+#[test]
+fn embedding_save_validates_provider_model_and_dimensions_and_resets_readiness() {
+    let (_directory, config, secrets) = seeded_embedding_store();
+    let service = EmbeddingService::new(&config, &secrets, &ReadyEmbeddingProbe);
+
+    assert_eq!(
+        service
+            .save(EmbeddingConfigSaveInput {
+                provider_id: "missing".into(),
+                ..embedding_input("primary")
+            })
+            .unwrap_err()
+            .code(),
+        "CONFIG_REFERENCE_MISSING"
+    );
+    assert_eq!(
+        service
+            .save(EmbeddingConfigSaveInput {
+                model_id: " ".into(),
+                ..embedding_input("primary")
+            })
+            .unwrap_err()
+            .code(),
+        "EMBEDDING_FIELDS_INVALID"
+    );
+    assert_eq!(
+        service
+            .save(EmbeddingConfigSaveInput {
+                dimensions: 0,
+                ..embedding_input("primary")
+            })
+            .unwrap_err()
+            .code(),
+        "EMBEDDING_FIELDS_INVALID"
+    );
+
+    let saved = service.save(embedding_input("primary")).unwrap();
+    assert_eq!(saved.config_version, 1);
+    assert!(!saved.ready);
+    assert!(!saved.active);
+    assert_eq!(saved.status.as_deref(), Some("not_tested"));
+    assert_eq!(saved.distance, EmbeddingDistance::Cosine);
+
+    let tested = service.test("primary").unwrap();
+    assert!(tested.ready);
+    assert!(service.activate("primary").unwrap().active);
+
+    let edited = service
+        .save(EmbeddingConfigSaveInput {
+            dimensions: 8,
+            ..embedding_input("primary")
+        })
+        .unwrap();
+    assert_eq!(edited.config_version, 2);
+    assert!(!edited.ready);
+    assert!(!edited.active);
+    assert!(
+        config
+            .load()
+            .unwrap()
+            .knowledge
+            .active_embedding_config_id
+            .is_none()
+    );
+}
+
+#[test]
+fn embedding_test_reads_internal_credential_and_requires_exact_dimension() {
+    let (_directory, config, secrets) = seeded_embedding_store();
+    let service = EmbeddingService::new(&config, &secrets, &ReadyEmbeddingProbe);
+    service.save(embedding_input("primary")).unwrap();
+
+    let tested = service.test("primary").unwrap();
+    assert!(tested.ready);
+    assert_eq!(tested.dimensions, 3);
+
+    let mismatch = EmbeddingService::new(&config, &secrets, &WrongDimensionProbe);
+    assert_eq!(
+        mismatch.test("primary").unwrap_err().code(),
+        "EMBEDDING_DIMENSION_MISMATCH"
+    );
+    let loaded = config.load().unwrap();
+    assert!(!loaded.knowledge.embedding_configs[0].ready);
+    assert_eq!(
+        loaded.knowledge.embedding_configs[0].status.as_deref(),
+        Some("test_failed")
+    );
+}
+
+#[test]
+fn embedding_activation_requires_test_and_keeps_a_single_active_config() {
+    let (_directory, config, secrets) = seeded_embedding_store();
+    let service = EmbeddingService::new(&config, &secrets, &ReadyEmbeddingProbe);
+    service.save(embedding_input("primary")).unwrap();
+    service.save(embedding_input("secondary")).unwrap();
+
+    assert_eq!(
+        service.activate("primary").unwrap_err().code(),
+        "EMBEDDING_NOT_READY"
+    );
+    service.test("primary").unwrap();
+    service.test("secondary").unwrap();
+    assert!(service.activate("primary").unwrap().active);
+    assert!(service.activate("secondary").unwrap().active);
+
+    let loaded = config.load().unwrap();
+    assert_eq!(
+        loaded.knowledge.active_embedding_config_id.as_deref(),
+        Some("secondary")
+    );
+    assert!(!loaded.knowledge.embedding_configs[0].active);
+    assert!(loaded.knowledge.embedding_configs[1].active);
+}
+
+struct VersionBumpProbe {
+    path: std::path::PathBuf,
+}
+
+impl EmbeddingProbe for VersionBumpProbe {
+    fn embed(
+        &self,
+        _: &ProviderEndpoint,
+        _: Option<&str>,
+        _: &str,
+        _: u32,
+        _: &str,
+    ) -> Result<Vec<f32>, EmbeddingError> {
+        let mut current: crate::config::AppConfigV1 =
+            serde_json::from_str(&std::fs::read_to_string(&self.path).unwrap()).unwrap();
+        current.knowledge.embedding_configs[0].config_version += 1;
+        std::fs::write(&self.path, serde_json::to_string(&current).unwrap()).unwrap();
+        Ok(vec![0.25, 0.25, 0.25])
+    }
+}
+
+#[test]
+fn failed_retest_deactivates_embedding_and_stale_test_is_rejected() {
+    let (directory, config, secrets) = seeded_embedding_store();
+    let service = EmbeddingService::new(&config, &secrets, &ReadyEmbeddingProbe);
+    service.save(embedding_input("primary")).unwrap();
+    service.test("primary").unwrap();
+    service.activate("primary").unwrap();
+
+    let failed = EmbeddingService::new(&config, &secrets, &FailEmbeddingProbe);
+    assert_eq!(
+        failed.test("primary").unwrap_err().code(),
+        "EMBEDDING_TIMEOUT"
+    );
+    let loaded = config.load().unwrap();
+    assert!(loaded.knowledge.active_embedding_config_id.is_none());
+    assert!(!loaded.knowledge.embedding_configs[0].active);
+    assert!(!loaded.knowledge.embedding_configs[0].ready);
+
+    service.save(embedding_input("primary")).unwrap();
+    let stale_probe = VersionBumpProbe {
+        path: directory.path().join("config.json"),
+    };
+    let stale = EmbeddingService::new(&config, &secrets, &stale_probe);
+    assert_eq!(stale.test("primary").unwrap_err().code(), "EMBEDDING_STALE");
+    assert!(!config.load().unwrap().knowledge.embedding_configs[0].ready);
+}
+
+#[test]
+fn embedding_delete_clears_active_id_and_provider_edit_invalidates_references() {
+    let (_directory, config, secrets) = seeded_embedding_store();
+    let service = EmbeddingService::new(&config, &secrets, &ReadyEmbeddingProbe);
+    service.save(embedding_input("primary")).unwrap();
+    service.test("primary").unwrap();
+    service.activate("primary").unwrap();
+
+    service.delete("primary").unwrap();
+    let after_delete = config.load().unwrap();
+    assert!(after_delete.knowledge.embedding_configs.is_empty());
+    assert!(after_delete.knowledge.active_embedding_config_id.is_none());
+
+    service.save(embedding_input("primary")).unwrap();
+    service.test("primary").unwrap();
+    service.activate("primary").unwrap();
+    ProviderService::new(&config, &secrets, &FakeProbe)
+        .save(ProviderSaveInput {
+            id: "openai".into(),
+            name: Some("Renamed".into()),
+            base_url: "https://example.test/v2".into(),
+            api_key: None,
+        })
+        .unwrap();
+    let loaded = config.load().unwrap();
+    assert!(!loaded.knowledge.embedding_configs[0].ready);
+    assert!(!loaded.knowledge.embedding_configs[0].active);
+    assert_eq!(
+        loaded.knowledge.embedding_configs[0].status.as_deref(),
+        Some("configuration_changed")
+    );
+    assert!(loaded.knowledge.active_embedding_config_id.is_none());
 }
