@@ -5,10 +5,16 @@ use std::{
     io::{BufRead, BufReader, Read},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+    },
 };
 
 use super::pcm::{PcmRing, downsample_48k_to_16k};
+
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AudioError {
@@ -36,6 +42,12 @@ impl fmt::Display for AudioError {
 }
 
 impl std::error::Error for AudioError {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SidecarPoll {
+    Alive,
+    Exited,
+}
 
 pub trait PlaybackSink {
     fn play_pcm(&mut self, pcm: &[u8], sample_rate: u32);
@@ -104,7 +116,9 @@ struct CaptureState {
 #[derive(Debug)]
 pub struct AudioCapture {
     state: Arc<Mutex<CaptureState>>,
-    child: Option<Child>,
+    child: Mutex<Option<Child>>,
+    sidecar_dead: Arc<AtomicBool>,
+    sidecar_epoch: Arc<AtomicU64>,
     spawn: Option<(PathBuf, u32)>,
     restarts: u8,
 }
@@ -153,6 +167,15 @@ impl AudioCapture {
         self.lock().ring.overrun_count()
     }
 
+    pub fn poll_sidecar(&self) -> Result<SidecarPoll, AudioError> {
+        self.refresh_sidecar_exit();
+        if self.sidecar_dead.load(Ordering::SeqCst) {
+            Ok(SidecarPoll::Exited)
+        } else {
+            Ok(SidecarPoll::Alive)
+        }
+    }
+
     pub fn restart_once(&mut self) -> Result<(), AudioError> {
         if self.restarts >= 1 {
             return Err(AudioError::SidecarFailed);
@@ -162,6 +185,7 @@ impl AudioCapture {
             self.stop_child();
             self.start_child(&exe, pid)?;
         }
+        self.sidecar_dead.store(false, Ordering::SeqCst);
         Ok(())
     }
 
@@ -171,7 +195,9 @@ impl AudioCapture {
                 ring: PcmRing::new(),
                 last_peak: 0.0,
             })),
-            child: None,
+            child: Mutex::new(None),
+            sidecar_dead: Arc::new(AtomicBool::new(false)),
+            sidecar_epoch: Arc::new(AtomicU64::new(0)),
             spawn: None,
             restarts: 0,
         }
@@ -184,28 +210,57 @@ impl AudioCapture {
     }
 
     fn start_child(&mut self, exe: &Path, pid: u32) -> Result<(), AudioError> {
-        let mut child = Command::new(exe)
+        let epoch = self.sidecar_epoch.fetch_add(1, Ordering::SeqCst) + 1;
+        self.sidecar_dead.store(false, Ordering::SeqCst);
+        let mut command = Command::new(exe);
+        command
             .args(bridge_command_args(pid))
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .stdin(Stdio::null())
-            .spawn()
-            .map_err(|_| AudioError::SpawnFailed)?;
+            .stdin(Stdio::null());
+        hide_windows_console(&mut command);
+        let mut child = command.spawn().map_err(|_| AudioError::SpawnFailed)?;
         let stdout = child.stdout.take().ok_or(AudioError::SpawnFailed)?;
         let stderr = child.stderr.take().ok_or(AudioError::SpawnFailed)?;
         let pcm_state = Arc::clone(&self.state);
-        std::thread::spawn(move || drain_pcm(stdout, pcm_state));
+        let pcm_dead = Arc::clone(&self.sidecar_dead);
+        let pcm_epoch = Arc::clone(&self.sidecar_epoch);
+        std::thread::spawn(move || drain_pcm(stdout, pcm_state, pcm_dead, pcm_epoch, epoch));
         let event_state = Arc::clone(&self.state);
-        std::thread::spawn(move || drain_events(stderr, event_state));
-        self.child = Some(child);
+        let event_dead = Arc::clone(&self.sidecar_dead);
+        let event_epoch = Arc::clone(&self.sidecar_epoch);
+        std::thread::spawn(move || {
+            drain_events(stderr, event_state, event_dead, event_epoch, epoch)
+        });
+        *self.child_lock() = Some(child);
         Ok(())
     }
 
     fn stop_child(&mut self) {
-        if let Some(mut child) = self.child.take() {
+        if let Some(mut child) = self.child_lock().take() {
             let _ = child.kill();
             let _ = child.wait();
         }
+    }
+
+    fn refresh_sidecar_exit(&self) {
+        if let Some(child) = self.child_lock().as_mut() {
+            match child.try_wait() {
+                Ok(Some(_)) | Err(_) => self.sidecar_dead.store(true, Ordering::SeqCst),
+                Ok(None) => {}
+            }
+        }
+    }
+
+    fn child_lock(&self) -> std::sync::MutexGuard<'_, Option<Child>> {
+        self.child
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    #[cfg(test)]
+    fn mark_sidecar_exited(&self) {
+        self.sidecar_dead.store(true, Ordering::SeqCst);
     }
 }
 
@@ -215,11 +270,38 @@ impl Drop for AudioCapture {
     }
 }
 
-fn drain_pcm(mut stdout: impl Read, state: Arc<Mutex<CaptureState>>) {
+fn hide_windows_console(command: &mut Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = command;
+    }
+}
+
+fn mark_sidecar_dead(dead: &AtomicBool, epoch: &AtomicU64, mine: u64) {
+    if epoch.load(Ordering::SeqCst) == mine {
+        dead.store(true, Ordering::SeqCst);
+    }
+}
+
+fn drain_pcm(
+    mut stdout: impl Read,
+    state: Arc<Mutex<CaptureState>>,
+    dead: Arc<AtomicBool>,
+    epoch: Arc<AtomicU64>,
+    mine: u64,
+) {
     let mut buf = [0_u8; 8192];
     loop {
         match stdout.read(&mut buf) {
-            Ok(0) | Err(_) => break,
+            Ok(0) | Err(_) => {
+                mark_sidecar_dead(&dead, &epoch, mine);
+                break;
+            }
             Ok(n) => state
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -229,7 +311,13 @@ fn drain_pcm(mut stdout: impl Read, state: Arc<Mutex<CaptureState>>) {
     }
 }
 
-fn drain_events(stderr: impl Read, state: Arc<Mutex<CaptureState>>) {
+fn drain_events(
+    stderr: impl Read,
+    state: Arc<Mutex<CaptureState>>,
+    dead: Arc<AtomicBool>,
+    epoch: Arc<AtomicU64>,
+    mine: u64,
+) {
     for line in BufReader::new(stderr).lines().map_while(Result::ok) {
         if let Some(peak) = parse_level_peak(&line) {
             state
@@ -238,13 +326,14 @@ fn drain_events(stderr: impl Read, state: Arc<Mutex<CaptureState>>) {
                 .last_peak = peak;
         }
     }
+    mark_sidecar_dead(&dead, &epoch, mine);
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        AudioCapture, AudioError, NoopSink, PlaybackSink, RecordingSink, bridge_command_args,
-        parse_level_peak,
+        AudioCapture, AudioError, NoopSink, PlaybackSink, RecordingSink, SidecarPoll,
+        bridge_command_args, parse_level_peak,
     };
     use crate::audio::pcm::RING_CAPACITY_BYTES;
     use std::path::PathBuf;
@@ -300,6 +389,37 @@ mod tests {
         capture
             .restart_once()
             .expect("first sidecar restart is allowed");
+        let error = capture
+            .restart_once()
+            .expect_err("second crash is terminal");
+        assert_eq!(error, AudioError::SidecarFailed);
+        assert_eq!(error.code(), "SESSION_SIDECAR_FAILED");
+    }
+
+    #[test]
+    fn poll_sidecar_exit_allows_restart_once_then_fails() {
+        let mut capture = AudioCapture::from_injected();
+        assert_eq!(
+            capture.poll_sidecar().expect("injected starts alive"),
+            SidecarPoll::Alive
+        );
+        capture.mark_sidecar_exited();
+        assert_eq!(
+            capture.poll_sidecar().expect("injected exit is visible"),
+            SidecarPoll::Exited
+        );
+        capture
+            .restart_once()
+            .expect("first sidecar restart is allowed");
+        assert_eq!(
+            capture.poll_sidecar().expect("restart clears exit"),
+            SidecarPoll::Alive
+        );
+        capture.mark_sidecar_exited();
+        assert_eq!(
+            capture.poll_sidecar().expect("second crash is visible"),
+            SidecarPoll::Exited
+        );
         let error = capture
             .restart_once()
             .expect_err("second crash is terminal");
