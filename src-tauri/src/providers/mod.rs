@@ -1,9 +1,19 @@
+mod cascade;
 mod embedding;
 mod livekit;
 mod openai_compatible;
 
 use std::fmt;
 
+pub use cascade::{
+    CascadeError, ChatMessage, ChatModel, OpenAiCompatibleCascade, SpeechToText, TextToSpeech,
+};
+#[cfg(test)]
+pub(crate) use cascade::{
+    build_asr_multipart, build_llm_request, build_tts_request, json_body_too_large,
+    normalize_chat_completions_url, normalize_speech_url, normalize_transcriptions_url,
+    parse_chat_completion, parse_transcript, parse_tts_pcm, pcm_to_wav, tts_body_too_large,
+};
 pub use embedding::{EmbeddingError, EmbeddingProbe, OpenAiCompatibleEmbeddingProbe};
 pub use livekit::{LiveKitError, LiveKitProbe, OfficialLiveKitProbe};
 #[cfg(test)]

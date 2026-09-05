@@ -1,5 +1,491 @@
 use super::{normalize_models_url, parse_model_catalog};
 
+mod cascade {
+    use super::super::{
+        CascadeError, ChatMessage, ChatModel, OpenAiCompatibleCascade, ProviderEndpoint,
+        SpeechToText, TextToSpeech, build_asr_multipart, build_llm_request, build_tts_request,
+        json_body_too_large, normalize_chat_completions_url, normalize_speech_url,
+        normalize_transcriptions_url, parse_chat_completion, parse_transcript, parse_tts_pcm,
+        pcm_to_wav, tts_body_too_large,
+    };
+
+    fn le_u16(bytes: &[u8], offset: usize) -> u16 {
+        u16::from_le_bytes(bytes[offset..offset + 2].try_into().unwrap())
+    }
+
+    fn le_u32(bytes: &[u8], offset: usize) -> u32 {
+        u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap())
+    }
+
+    #[test]
+    fn pcm_to_wav_writes_mono_16bit_riff_header() {
+        let pcm = [0x11_u8, 0x22, 0x33, 0x44];
+        let wav = pcm_to_wav(&pcm, 16_000);
+        assert_eq!(&wav[0..4], b"RIFF");
+        assert_eq!(&wav[8..12], b"WAVE");
+        assert_eq!(&wav[12..16], b"fmt ");
+        assert_eq!(le_u32(&wav, 16), 16);
+        assert_eq!(le_u16(&wav, 20), 1);
+        assert_eq!(le_u16(&wav, 22), 1);
+        assert_eq!(le_u32(&wav, 24), 16_000);
+        assert_eq!(le_u32(&wav, 28), 16_000 * 2);
+        assert_eq!(le_u16(&wav, 32), 2);
+        assert_eq!(le_u16(&wav, 34), 16);
+        assert_eq!(&wav[36..40], b"data");
+        assert_eq!(le_u32(&wav, 40), 4);
+        assert_eq!(&wav[44..], &pcm);
+        assert_eq!(wav.len(), 48);
+        assert_eq!(le_u32(&wav, 4), 40);
+    }
+
+    #[test]
+    fn joins_openai_compatible_cascade_urls() {
+        assert_eq!(
+            normalize_transcriptions_url("https://example.test/v1")
+                .unwrap()
+                .as_str(),
+            "https://example.test/v1/audio/transcriptions"
+        );
+        assert_eq!(
+            normalize_transcriptions_url("https://example.test/v1/")
+                .unwrap()
+                .as_str(),
+            "https://example.test/v1/audio/transcriptions"
+        );
+        assert_eq!(
+            normalize_transcriptions_url("https://example.test/v1/audio/transcriptions")
+                .unwrap()
+                .as_str(),
+            "https://example.test/v1/audio/transcriptions"
+        );
+        assert_eq!(
+            normalize_chat_completions_url("https://example.test/v1")
+                .unwrap()
+                .as_str(),
+            "https://example.test/v1/chat/completions"
+        );
+        assert_eq!(
+            normalize_speech_url("https://example.test/v1")
+                .unwrap()
+                .as_str(),
+            "https://example.test/v1/audio/speech"
+        );
+        assert!(normalize_transcriptions_url("ftp://example.test/v1").is_err());
+        assert!(normalize_chat_completions_url("https://user@example.test/v1").is_err());
+        assert!(normalize_speech_url("https://example.test/v1?marker=synthetic").is_err());
+        assert!(normalize_speech_url("https://example.test/v1#synthetic").is_err());
+    }
+
+    #[test]
+    fn empty_transcript_and_llm_and_odd_pcm_fail_without_body() {
+        let transcript =
+            parse_transcript(br#"{"text":"","secret":"must-not-escape"}"#).unwrap_err();
+        assert_eq!(transcript.code(), "ASR_RESPONSE_INVALID");
+        assert!(!transcript.to_string().contains("must-not-escape"));
+
+        let blank = parse_transcript(br#"{"text":"   "}"#).unwrap_err();
+        assert_eq!(blank.code(), "ASR_RESPONSE_INVALID");
+
+        let empty_llm = parse_chat_completion(
+            br#"{"choices":[{"message":{"content":""}}],"marker":"must-not-escape"}"#,
+        )
+        .unwrap_err();
+        assert_eq!(empty_llm.code(), "LLM_RESPONSE_EMPTY");
+        assert!(!empty_llm.to_string().contains("must-not-escape"));
+
+        let whitespace_llm =
+            parse_chat_completion(br#"{"choices":[{"message":{"content":"  "}}]}"#).unwrap_err();
+        assert_eq!(whitespace_llm.code(), "LLM_RESPONSE_EMPTY");
+
+        let odd = parse_tts_pcm(&[0x00]).unwrap_err();
+        assert_eq!(odd.code(), "TTS_PCM_INVALID");
+        assert!(!odd.to_string().contains('\0'));
+    }
+
+    #[test]
+    fn rejects_json_and_tts_bodies_over_caps() {
+        assert!(!json_body_too_large(1024 * 1024));
+        assert!(json_body_too_large(1024 * 1024 + 1));
+        assert!(!tts_body_too_large(8 * 1024 * 1024));
+        assert!(tts_body_too_large(8 * 1024 * 1024 + 1));
+    }
+
+    #[test]
+    fn asr_multipart_contains_model_and_wav_without_credential() {
+        let (body, content_type) =
+            build_asr_multipart("qwen-asr", b"RIFFaudio", "voice-route-test");
+        assert_eq!(
+            content_type,
+            "multipart/form-data; boundary=voice-route-test"
+        );
+        assert!(
+            body.windows(b"qwen-asr".len())
+                .any(|part| part == b"qwen-asr")
+        );
+        assert!(
+            body.windows(b"RIFFaudio".len())
+                .any(|part| part == b"RIFFaudio")
+        );
+        assert!(
+            body.windows(b"audio.wav".len())
+                .any(|part| part == b"audio.wav")
+        );
+        assert!(!body.windows(b"secret".len()).any(|part| part == b"secret"));
+    }
+
+    #[test]
+    fn llm_and_tts_request_bodies_match_protocol() {
+        let messages = [ChatMessage {
+            role: "user".into(),
+            content: "候选人回答".into(),
+        }];
+        assert_eq!(
+            build_llm_request("qwen-plus", &messages),
+            serde_json::json!({
+                "model": "qwen-plus",
+                "messages": [{"role": "user", "content": "候选人回答"}],
+                "temperature": 0.3,
+            })
+        );
+        assert_eq!(
+            build_tts_request("qwen-tts", "Cherry", "你好"),
+            serde_json::json!({
+                "model": "qwen-tts",
+                "input": "你好",
+                "voice": "Cherry",
+                "response_format": "pcm",
+            })
+        );
+    }
+
+    struct EmptyCascade;
+
+    impl SpeechToText for EmptyCascade {
+        fn transcribe(
+            &self,
+            _: &ProviderEndpoint,
+            _: Option<&str>,
+            _: &str,
+            _: &[u8],
+            _: u32,
+        ) -> Result<String, CascadeError> {
+            parse_transcript(br#"{"text":""}"#)
+        }
+    }
+
+    impl ChatModel for EmptyCascade {
+        fn complete(
+            &self,
+            _: &ProviderEndpoint,
+            _: Option<&str>,
+            _: &str,
+            _: &[ChatMessage],
+        ) -> Result<String, CascadeError> {
+            parse_chat_completion(br#"{"choices":[{"message":{"content":""}}]}"#)
+        }
+    }
+
+    impl TextToSpeech for EmptyCascade {
+        fn synthesize(
+            &self,
+            _: &ProviderEndpoint,
+            _: Option<&str>,
+            _: &str,
+            _: &str,
+            _: &str,
+        ) -> Result<Vec<u8>, CascadeError> {
+            parse_tts_pcm(&[0x01])
+        }
+    }
+
+    #[test]
+    fn failing_double_rejects_empty_transcript_llm_and_odd_pcm() {
+        let endpoint = ProviderEndpoint {
+            provider_id: "provider-1".into(),
+            base_url: "https://example.test/v1".into(),
+        };
+        assert_eq!(
+            EmptyCascade
+                .transcribe(&endpoint, None, "asr", &[], 16_000)
+                .unwrap_err()
+                .code(),
+            "ASR_RESPONSE_INVALID"
+        );
+        assert_eq!(
+            EmptyCascade
+                .complete(&endpoint, None, "llm", &[])
+                .unwrap_err()
+                .code(),
+            "LLM_RESPONSE_EMPTY"
+        );
+        assert_eq!(
+            EmptyCascade
+                .synthesize(&endpoint, None, "tts", "alloy", "hi")
+                .unwrap_err()
+                .code(),
+            "TTS_PCM_INVALID"
+        );
+        let _ = OpenAiCompatibleCascade::new();
+    }
+}
+
+mod cascade_http {
+    use std::{
+        io::{Read, Write},
+        net::{TcpListener, TcpStream},
+        sync::mpsc::{self, Receiver},
+        thread,
+        time::Duration,
+    };
+
+    use super::super::{
+        ChatMessage, ChatModel, OpenAiCompatibleCascade, ProviderEndpoint, SpeechToText,
+        TextToSpeech,
+    };
+
+    struct CapturedRequest {
+        request_line: String,
+        headers: String,
+        body: Vec<u8>,
+    }
+
+    fn serve_once(response: Vec<u8>) -> (String, Receiver<CapturedRequest>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let (sender, receiver) = mpsc::channel();
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let request = read_request(&mut stream);
+            stream.write_all(&response).unwrap();
+            let _ = sender.send(request);
+        });
+        (format!("http://{address}/v1"), receiver)
+    }
+
+    fn read_request(stream: &mut TcpStream) -> CapturedRequest {
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let mut received = Vec::new();
+        let mut buffer = [0_u8; 4096];
+        let header_end = loop {
+            let count = stream.read(&mut buffer).unwrap();
+            assert!(count > 0, "request ended before headers completed");
+            received.extend_from_slice(&buffer[..count]);
+            if let Some(position) = received.windows(4).position(|part| part == b"\r\n\r\n") {
+                break position + 4;
+            }
+        };
+        let headers = String::from_utf8(received[..header_end].to_vec()).unwrap();
+        let content_length = headers
+            .lines()
+            .find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.eq_ignore_ascii_case("content-length")
+                    .then(|| value.trim().parse::<usize>().unwrap())
+            })
+            .unwrap();
+        while received.len() - header_end < content_length {
+            let count = stream.read(&mut buffer).unwrap();
+            assert!(count > 0, "request ended before body completed");
+            received.extend_from_slice(&buffer[..count]);
+        }
+        CapturedRequest {
+            request_line: headers.lines().next().unwrap().to_owned(),
+            headers,
+            body: received[header_end..header_end + content_length].to_vec(),
+        }
+    }
+
+    fn response(status: &str, body: &[u8], content_type: &str, extra_headers: &str) -> Vec<u8> {
+        format!(
+            "HTTP/1.1 {status}\r\nContent-Length: {}\r\nContent-Type: {content_type}\r\n{extra_headers}Connection: close\r\n\r\n",
+            body.len()
+        )
+        .into_bytes()
+        .into_iter()
+        .chain(body.iter().copied())
+        .collect()
+    }
+
+    fn endpoint(base_url: String) -> ProviderEndpoint {
+        ProviderEndpoint {
+            provider_id: "provider-1".into(),
+            base_url,
+        }
+    }
+
+    #[test]
+    fn transcribes_wav_multipart_and_returns_text() {
+        let body = r#"{"text":"你好候选人"}"#.as_bytes();
+        let (base_url, captured) = serve_once(response("200 OK", body, "application/json", ""));
+        let adapter = OpenAiCompatibleCascade::new().unwrap();
+
+        let text = adapter
+            .transcribe(
+                &endpoint(base_url),
+                Some("synthetic-credential-marker"),
+                "qwen-asr",
+                &[0x11, 0x22],
+                16_000,
+            )
+            .unwrap();
+
+        assert_eq!(text, "你好候选人");
+        let captured = captured.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(
+            captured.request_line,
+            "POST /v1/audio/transcriptions HTTP/1.1"
+        );
+        let headers = captured.headers.to_ascii_lowercase();
+        assert!(headers.contains("authorization: bearer synthetic-credential-marker\r\n"));
+        assert!(headers.contains("multipart/form-data; boundary="));
+        assert!(
+            captured
+                .body
+                .windows(b"qwen-asr".len())
+                .any(|part| part == b"qwen-asr")
+        );
+        assert!(
+            captured
+                .body
+                .windows(b"RIFF".len())
+                .any(|part| part == b"RIFF")
+        );
+        assert!(
+            !captured
+                .body
+                .windows(b"secret".len())
+                .any(|part| part == b"secret")
+        );
+    }
+
+    #[test]
+    fn completes_chat_with_temperature_and_optional_auth() {
+        let body = r#"{"choices":[{"message":{"content":"下一题"}}]}"#.as_bytes();
+        let (base_url, captured) = serve_once(response("200 OK", body, "application/json", ""));
+        let adapter = OpenAiCompatibleCascade::new().unwrap();
+        let messages = [ChatMessage {
+            role: "user".into(),
+            content: "候选人回答".into(),
+        }];
+
+        let reply = adapter
+            .complete(&endpoint(base_url), None, "qwen-plus", &messages)
+            .unwrap();
+
+        assert_eq!(reply, "下一题");
+        let captured = captured.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(captured.request_line, "POST /v1/chat/completions HTTP/1.1");
+        assert!(
+            !captured
+                .headers
+                .to_ascii_lowercase()
+                .contains("authorization:")
+        );
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&captured.body).unwrap(),
+            serde_json::json!({
+                "model": "qwen-plus",
+                "messages": [{"role": "user", "content": "候选人回答"}],
+                "temperature": 0.3,
+            })
+        );
+    }
+
+    #[test]
+    fn synthesizes_even_pcm_and_rejects_unauthorized_without_body() {
+        let pcm = [0x00_u8, 0x01, 0x02, 0x03];
+        let (base_url, captured) =
+            serve_once(response("200 OK", &pcm, "application/octet-stream", ""));
+        let adapter = OpenAiCompatibleCascade::new().unwrap();
+
+        let out = adapter
+            .synthesize(&endpoint(base_url), None, "qwen-tts", "Cherry", "你好")
+            .unwrap();
+        assert_eq!(out, pcm);
+        let captured = captured.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(captured.request_line, "POST /v1/audio/speech HTTP/1.1");
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&captured.body).unwrap(),
+            serde_json::json!({
+                "model": "qwen-tts",
+                "input": "你好",
+                "voice": "Cherry",
+                "response_format": "pcm",
+            })
+        );
+
+        let marker = br#"{"message":"synthetic-upstream-marker"}"#;
+        let (base_url, _) =
+            serve_once(response("401 Unauthorized", marker, "application/json", ""));
+        let error = adapter
+            .transcribe(&endpoint(base_url), None, "qwen-asr", &[0x00, 0x01], 16_000)
+            .unwrap_err();
+        assert_eq!(error.code(), "ASR_UNAUTHORIZED");
+        assert!(!error.to_string().contains("synthetic-upstream-marker"));
+    }
+
+    #[test]
+    fn rejects_redirect_oversize_json_and_odd_tts_pcm() {
+        let adapter = OpenAiCompatibleCascade::new().unwrap();
+        let (base_url, _) = serve_once(response(
+            "302 Found",
+            b"",
+            "application/json",
+            "Location: http://127.0.0.1:9/capture\r\n",
+        ));
+        assert_eq!(
+            adapter
+                .complete(&endpoint(base_url), None, "qwen-plus", &[])
+                .unwrap_err()
+                .code(),
+            "LLM_REQUEST_FAILED"
+        );
+
+        let (base_url, _) = serve_once(response(
+            "200 OK",
+            &vec![b'x'; 1024 * 1024 + 1],
+            "application/json",
+            "",
+        ));
+        assert_eq!(
+            adapter
+                .complete(&endpoint(base_url), None, "qwen-plus", &[])
+                .unwrap_err()
+                .code(),
+            "LLM_RESPONSE_TOO_LARGE"
+        );
+
+        let (base_url, _) = serve_once(response("200 OK", &[0x00], "application/octet-stream", ""));
+        assert_eq!(
+            adapter
+                .synthesize(&endpoint(base_url), None, "qwen-tts", "alloy", "hi")
+                .unwrap_err()
+                .code(),
+            "TTS_PCM_INVALID"
+        );
+    }
+
+    #[test]
+    fn rejects_tts_response_over_eight_mebibytes() {
+        let adapter = OpenAiCompatibleCascade::new().unwrap();
+        let (base_url, _) = serve_once(response(
+            "200 OK",
+            &vec![0_u8; 8 * 1024 * 1024 + 1],
+            "application/octet-stream",
+            "",
+        ));
+        assert_eq!(
+            adapter
+                .synthesize(&endpoint(base_url), None, "qwen-tts", "alloy", "hi")
+                .unwrap_err()
+                .code(),
+            "TTS_RESPONSE_TOO_LARGE"
+        );
+    }
+}
+
 #[test]
 fn normalizes_openai_compatible_models_url() {
     assert_eq!(

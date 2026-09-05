@@ -7,14 +7,22 @@ use super::{DiscoveredModel, ProviderEndpoint, ProviderError, ProviderProbe};
 
 pub(crate) const MAX_RESPONSE_BYTES: u64 = 1024 * 1024;
 
-pub(crate) fn build_bounded_client() -> Result<Client, reqwest::Error> {
+fn build_client(timeout: Duration) -> Result<Client, reqwest::Error> {
     Client::builder()
-        .timeout(Duration::from_secs(10))
+        .timeout(timeout)
         .connect_timeout(Duration::from_secs(5))
         .redirect(Policy::none())
         .no_proxy()
         .tls_backend_rustls()
         .build()
+}
+
+pub(crate) fn build_bounded_client() -> Result<Client, reqwest::Error> {
+    build_client(Duration::from_secs(10))
+}
+
+pub(crate) fn build_cascade_client() -> Result<Client, reqwest::Error> {
+    build_client(Duration::from_secs(30))
 }
 
 pub(crate) enum BoundedBodyError {
@@ -25,18 +33,25 @@ pub(crate) enum BoundedBodyError {
 pub(crate) fn read_bounded_body(
     response: reqwest::blocking::Response,
 ) -> Result<Vec<u8>, BoundedBodyError> {
+    read_bounded_body_limited(response, MAX_RESPONSE_BYTES)
+}
+
+pub(crate) fn read_bounded_body_limited(
+    response: reqwest::blocking::Response,
+    max_bytes: u64,
+) -> Result<Vec<u8>, BoundedBodyError> {
     if response
         .content_length()
-        .is_some_and(|length| length > MAX_RESPONSE_BYTES)
+        .is_some_and(|length| length > max_bytes)
     {
         return Err(BoundedBodyError::TooLarge);
     }
     let mut bytes = Vec::new();
     response
-        .take(MAX_RESPONSE_BYTES + 1)
+        .take(max_bytes + 1)
         .read_to_end(&mut bytes)
         .map_err(|_| BoundedBodyError::Failed)?;
-    if bytes.len() as u64 > MAX_RESPONSE_BYTES {
+    if bytes.len() as u64 > max_bytes {
         return Err(BoundedBodyError::TooLarge);
     }
     Ok(bytes)
