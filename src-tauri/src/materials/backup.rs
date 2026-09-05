@@ -177,7 +177,7 @@ fn online_backup_into(database: &Database, source_path: &Path) -> Result<(), Bac
         .map_err(|_| BackupError::Integrity)
 }
 
-fn write_scrubbed_config(store: &ConfigStore, path: &Path) -> Result<(), BackupError> {
+pub(crate) fn write_scrubbed_config(store: &ConfigStore, path: &Path) -> Result<(), BackupError> {
     let config = store.load().map_err(|_| BackupError::Operation)?;
     let bytes = serde_json::to_vec_pretty(&config).map_err(|_| BackupError::Operation)?;
     reject_secret_bytes(&bytes)?;
@@ -356,12 +356,12 @@ fn relative_key(root: &Path, file: &Path) -> Result<String, BackupError> {
         .join("/"))
 }
 
-fn file_sha256(path: &Path) -> Result<String, BackupError> {
+pub(crate) fn file_sha256(path: &Path) -> Result<String, BackupError> {
     let bytes = fs::read(path).map_err(|_| BackupError::Operation)?;
     Ok(sha256_hex(&bytes))
 }
 
-fn reject_secret_bytes(bytes: &[u8]) -> Result<(), BackupError> {
+pub(crate) fn reject_secret_bytes(bytes: &[u8]) -> Result<(), BackupError> {
     reject_secret_text(&String::from_utf8_lossy(bytes))
 }
 
