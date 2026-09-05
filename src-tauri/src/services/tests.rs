@@ -1050,3 +1050,81 @@ fn livekit_test_gates_enable_and_failed_retest_disables() {
     assert_eq!(*store.reads.lock().unwrap(), reads_before);
     assert!(!config.load().unwrap().transport.livekit.enabled);
 }
+
+#[test]
+fn livekit_issue_join_token_fails_closed_when_disabled_or_not_ready() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = ConfigStore::new(directory.path().join("config.json"));
+    config.restore_defaults().unwrap();
+    let secrets = SecretService::new("test", Arc::new(MemorySecretStore::default())).unwrap();
+    let service = LiveKitSettingsService::new(&config, &secrets, &ReadyLiveKitProbe);
+    service.save(livekit_input()).unwrap();
+    assert_eq!(
+        service
+            .issue_join_token("interview-room", "candidate-1")
+            .unwrap_err()
+            .code(),
+        "LIVEKIT_NOT_READY"
+    );
+    assert!(service.test().unwrap().ready);
+    assert_eq!(
+        service
+            .issue_join_token("interview-room", "candidate-1")
+            .unwrap_err()
+            .code(),
+        "LIVEKIT_DISABLED"
+    );
+}
+
+#[test]
+fn livekit_issue_join_token_rejects_empty_room_and_identity() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = ConfigStore::new(directory.path().join("config.json"));
+    config.restore_defaults().unwrap();
+    let secrets = SecretService::new("test", Arc::new(MemorySecretStore::default())).unwrap();
+    let service = LiveKitSettingsService::new(&config, &secrets, &ReadyLiveKitProbe);
+    service.save(livekit_input()).unwrap();
+    service.test().unwrap();
+    service.set_enabled(true).unwrap();
+    assert_eq!(
+        service
+            .issue_join_token("  ", "candidate-1")
+            .unwrap_err()
+            .code(),
+        "LIVEKIT_ROOM_INVALID"
+    );
+    assert_eq!(
+        service
+            .issue_join_token("interview-room", "\n")
+            .unwrap_err()
+            .code(),
+        "LIVEKIT_IDENTITY_INVALID"
+    );
+}
+
+#[test]
+fn livekit_issue_join_token_returns_short_lived_room_join_jwt() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = ConfigStore::new(directory.path().join("config.json"));
+    config.restore_defaults().unwrap();
+    let store = Arc::new(ScriptedSecretStore::new());
+    let secrets = SecretService::new("test", store.clone()).unwrap();
+    let service = LiveKitSettingsService::new(&config, &secrets, &ReadyLiveKitProbe);
+    service.save(livekit_input()).unwrap();
+    service.test().unwrap();
+    service.set_enabled(true).unwrap();
+    let issued = service
+        .issue_join_token(" interview-room ", " candidate-1 ")
+        .unwrap();
+    assert_eq!(issued.url, "wss://livekit.example.test");
+    assert_eq!(issued.room, "interview-room");
+    assert_eq!(issued.identity, "candidate-1");
+    assert_eq!(issued.expires_in_sec, 60);
+    assert!(!issued.token.contains("livekit-secret"));
+    assert!(!issued.token.is_empty());
+    let reads_before = *store.reads.lock().unwrap();
+    let _ = service
+        .issue_join_token("interview-room", "candidate-1")
+        .unwrap();
+    assert!(*store.reads.lock().unwrap() > reads_before);
+}

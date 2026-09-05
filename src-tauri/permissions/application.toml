@@ -134,6 +134,11 @@ description = "Allows enabling or disabling a tested LiveKit transport."
 commands.allow = ["livekit_settings_enable"]
 
 [[permission]]
+identifier = "allow-livekit-issue-join-token"
+description = "Allows minting a short-lived LiveKit room-join token when transport is enabled."
+commands.allow = ["livekit_issue_join_token"]
+
+[[permission]]
 identifier = "allow-material-list"
 description = "Allows listing local material metadata without extracted document text."
 commands.allow = ["material_list"]

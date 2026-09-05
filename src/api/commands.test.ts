@@ -16,6 +16,7 @@ import {
   discoverModelProvider,
   enableLiveKitSettings,
   finalizeSessionUtterance,
+  issueLiveKitJoinToken,
   getConfigPublic,
   importMaterial,
   listMaterials,
@@ -115,6 +116,7 @@ describe("Phase 3 service adapters", () => {
     await saveLiveKitSettings(livekit);
     await testLiveKitSettings();
     await enableLiveKitSettings(true);
+    await issueLiveKitJoinToken("interview-room", "candidate-1");
     expect(invokeMock).toHaveBeenNthCalledWith(1, "role_profile_save", { input: role });
     expect(invokeMock).toHaveBeenNthCalledWith(2, "role_profile_copy", { input: { sourceId: "interviewer", id: "copy" } });
     expect(invokeMock).toHaveBeenNthCalledWith(3, "role_profile_activate", { roleId: "interviewer" });
@@ -126,6 +128,10 @@ describe("Phase 3 service adapters", () => {
     expect(invokeMock).toHaveBeenNthCalledWith(9, "livekit_settings_save", { input: livekit });
     expect(invokeMock).toHaveBeenNthCalledWith(10, "livekit_settings_test");
     expect(invokeMock).toHaveBeenNthCalledWith(11, "livekit_settings_enable", { enabled: true });
+    expect(invokeMock).toHaveBeenNthCalledWith(12, "livekit_issue_join_token", {
+      room: "interview-room",
+      identity: "candidate-1",
+    });
   });
 });
 

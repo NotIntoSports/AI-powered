@@ -1,12 +1,16 @@
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use zeroize::Zeroizing;
 
 use crate::{
     config::{ConfigError, ConfigStore, LiveKitConfig, SecretSlot},
-    providers::{LiveKitError, LiveKitProbe},
+    providers::{LiveKitError, LiveKitProbe, room_join_token},
     secrets::{SecretError, SecretService},
 };
+
+const JOIN_TOKEN_TTL_SECS: u32 = 60;
 
 const API_KEY_REF: &str = "transport/livekit/api-key";
 const API_SECRET_REF: &str = "transport/livekit/api-secret";
@@ -27,9 +31,36 @@ pub struct LiveKitTestResult {
     pub ready: bool,
 }
 
+#[derive(Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct LiveKitJoinToken {
+    pub url: String,
+    pub token: String,
+    pub room: String,
+    pub identity: String,
+    pub expires_in_sec: u32,
+}
+
+impl fmt::Debug for LiveKitJoinToken {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LiveKitJoinToken")
+            .field("url", &self.url)
+            .field("token", &"[redacted]")
+            .field("room", &self.room)
+            .field("identity", &self.identity)
+            .field("expires_in_sec", &self.expires_in_sec)
+            .finish()
+    }
+}
+
 #[derive(Debug)]
 pub enum LiveKitSettingsError {
     NotReady,
+    Disabled,
+    RoomInvalid,
+    IdentityInvalid,
     Config(ConfigError),
     Secret(SecretError),
     Probe(LiveKitError),
@@ -40,6 +71,9 @@ impl LiveKitSettingsError {
     pub fn code(&self) -> &'static str {
         match self {
             Self::NotReady => "LIVEKIT_NOT_READY",
+            Self::Disabled => "LIVEKIT_DISABLED",
+            Self::RoomInvalid => "LIVEKIT_ROOM_INVALID",
+            Self::IdentityInvalid => "LIVEKIT_IDENTITY_INVALID",
             Self::Config(error) => error.code(),
             Self::Secret(error) => error.code(),
             Self::Probe(error) => error.code(),
@@ -227,6 +261,47 @@ impl<'a> LiveKitSettingsService<'a> {
             .load()
             .map(|config| config.transport.livekit)
             .map_err(LiveKitSettingsError::Config)
+    }
+
+    pub fn issue_join_token(
+        &self,
+        room: &str,
+        identity: &str,
+    ) -> Result<LiveKitJoinToken, LiveKitSettingsError> {
+        let room = room.trim();
+        let identity = identity.trim();
+        if room.is_empty() {
+            return Err(LiveKitSettingsError::RoomInvalid);
+        }
+        if identity.is_empty() {
+            return Err(LiveKitSettingsError::IdentityInvalid);
+        }
+        let config = self.config.load().map_err(LiveKitSettingsError::Config)?;
+        let livekit = &config.transport.livekit;
+        if !livekit.ready || livekit.status.as_deref() != Some("ready") {
+            return Err(LiveKitSettingsError::NotReady);
+        }
+        if !livekit.enabled {
+            return Err(LiveKitSettingsError::Disabled);
+        }
+        let url = livekit
+            .url
+            .as_deref()
+            .map(str::trim)
+            .filter(|url| !url.is_empty())
+            .ok_or(LiveKitSettingsError::NotReady)?
+            .to_owned();
+        let api_key = required_secret(self.secrets, &livekit.api_key)?;
+        let api_secret = required_secret(self.secrets, &livekit.api_secret)?;
+        let token = room_join_token(api_key.as_str(), api_secret.as_str(), room, identity)
+            .map_err(LiveKitSettingsError::Probe)?;
+        Ok(LiveKitJoinToken {
+            url,
+            token: token.as_str().to_owned(),
+            room: room.to_owned(),
+            identity: identity.to_owned(),
+            expires_in_sec: JOIN_TOKEN_TTL_SECS,
+        })
     }
 }
 

@@ -10,7 +10,8 @@ pub use embeddings::{
     EmbeddingConfigSaveInput, EmbeddingService, EmbeddingServiceError, EmbeddingTestResult,
 };
 pub use livekit::{
-    LiveKitSettingsError, LiveKitSettingsSaveInput, LiveKitSettingsService, LiveKitTestResult,
+    LiveKitJoinToken, LiveKitSettingsError, LiveKitSettingsSaveInput, LiveKitSettingsService,
+    LiveKitTestResult,
 };
 pub use materials::{
     EmbeddingSpace, MaterialSearchHit, MaterialService, MaterialServiceError, MaterialSummary,

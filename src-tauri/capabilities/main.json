@@ -32,6 +32,7 @@
     "allow-livekit-settings-save",
     "allow-livekit-settings-test",
     "allow-livekit-settings-enable",
+    "allow-livekit-issue-join-token",
     "allow-material-list",
     "allow-material-import",
     "allow-material-search",

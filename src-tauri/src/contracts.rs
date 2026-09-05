@@ -10,10 +10,10 @@ use crate::config::{
 };
 #[cfg(test)]
 use crate::services::{
-    DiscoveredModelDto, EmbeddingConfigSaveInput, EmbeddingTestResult, LiveKitSettingsSaveInput,
-    LiveKitTestResult, MaterialSearchHit, MaterialSummary, ModelDiscoveryResult, ProviderSaveInput,
-    ProviderTestResult, RoleProfileCopyInput, RoleProfileSaveInput, VoiceRouteSaveInput,
-    VoiceRouteTestResult,
+    DiscoveredModelDto, EmbeddingConfigSaveInput, EmbeddingTestResult, LiveKitJoinToken,
+    LiveKitSettingsSaveInput, LiveKitTestResult, MaterialSearchHit, MaterialSummary,
+    ModelDiscoveryResult, ProviderSaveInput, ProviderTestResult, RoleProfileCopyInput,
+    RoleProfileSaveInput, VoiceRouteSaveInput, VoiceRouteTestResult,
 };
 
 use serde::{Serialize, Serializer, ser::SerializeMap};
@@ -268,6 +268,7 @@ fn generated_bindings() -> String {
         EmbeddingTestResult::decl(&config),
         LiveKitSettingsSaveInput::decl(&config),
         LiveKitTestResult::decl(&config),
+        LiveKitJoinToken::decl(&config),
         MaterialSummary::decl(&config),
         MaterialSearchHit::decl(&config),
         PreflightIssue::decl(&config),
@@ -352,6 +353,7 @@ mod tests {
         assert!(bindings.contains("export type RoleProfileSaveInput"));
         assert!(bindings.contains("export type EmbeddingConfigSaveInput"));
         assert!(bindings.contains("export type LiveKitSettingsSaveInput"));
+        assert!(bindings.contains("export type LiveKitJoinToken"));
         assert!(
             bindings.contains("export type MaterialSummary"),
             "unexpected bindings:\n{bindings}"
@@ -378,6 +380,7 @@ mod tests {
             "AudioLevelEvent",
             "AgentCommandInput",
             "AgentCommandResult",
+            "LiveKitJoinToken",
         ] {
             assert!(
                 bindings.contains(&format!("export type {name}")),

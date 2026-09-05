@@ -17,6 +17,7 @@ pub(crate) use cascade::{
     parse_chat_completion, parse_transcript, parse_tts_pcm, pcm_to_wav, tts_body_too_large,
 };
 pub use embedding::{EmbeddingError, EmbeddingProbe, OpenAiCompatibleEmbeddingProbe};
+pub(crate) use livekit::room_join_token;
 pub use livekit::{LiveKitError, LiveKitProbe, OfficialLiveKitProbe};
 #[cfg(test)]
 pub(crate) use livekit::{control_url, room_list_token};

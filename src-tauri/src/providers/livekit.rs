@@ -18,6 +18,8 @@ pub enum LiveKitError {
     ResponseTooLarge,
     ResponseInvalid,
     TokenFailed,
+    RoomInvalid,
+    IdentityInvalid,
 }
 
 impl LiveKitError {
@@ -32,6 +34,8 @@ impl LiveKitError {
             Self::ResponseTooLarge => "LIVEKIT_RESPONSE_TOO_LARGE",
             Self::ResponseInvalid => "LIVEKIT_RESPONSE_INVALID",
             Self::TokenFailed => "LIVEKIT_TOKEN_FAILED",
+            Self::RoomInvalid => "LIVEKIT_ROOM_INVALID",
+            Self::IdentityInvalid => "LIVEKIT_IDENTITY_INVALID",
         }
     }
 }
@@ -110,6 +114,39 @@ pub(crate) fn room_list_token(
             can_publish: false,
             can_subscribe: false,
             can_publish_data: false,
+            ..VideoGrants::default()
+        })
+        .to_jwt()
+        .map_err(|_| LiveKitError::TokenFailed)?;
+    Ok(Zeroizing::new(jwt))
+}
+
+pub(crate) fn room_join_token(
+    api_key: &str,
+    api_secret: &str,
+    room: &str,
+    identity: &str,
+) -> Result<Zeroizing<String>, LiveKitError> {
+    let room = room.trim();
+    let identity = identity.trim();
+    if room.is_empty() {
+        return Err(LiveKitError::RoomInvalid);
+    }
+    if identity.is_empty() {
+        return Err(LiveKitError::IdentityInvalid);
+    }
+    let jwt = AccessToken::with_api_key(api_key, api_secret)
+        .with_identity(identity)
+        .with_ttl(Duration::from_secs(60))
+        .with_grants(VideoGrants {
+            room_join: true,
+            can_publish: true,
+            can_subscribe: true,
+            can_publish_data: true,
+            room_list: false,
+            room_create: false,
+            room_admin: false,
+            room: room.to_owned(),
             ..VideoGrants::default()
         })
         .to_jwt()

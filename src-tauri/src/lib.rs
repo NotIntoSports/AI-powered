@@ -71,6 +71,7 @@ pub fn run() {
             commands::livekit_settings_save,
             commands::livekit_settings_test,
             commands::livekit_settings_enable,
+            commands::livekit_issue_join_token,
             commands::material_list,
             commands::material_import,
             commands::material_search,

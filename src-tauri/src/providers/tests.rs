@@ -804,7 +804,9 @@ mod livekit {
         time::Duration,
     };
 
-    use super::super::{LiveKitProbe, OfficialLiveKitProbe, control_url, room_list_token};
+    use super::super::{
+        LiveKitProbe, OfficialLiveKitProbe, control_url, room_join_token, room_list_token,
+    };
 
     struct CapturedRequest {
         request_line: String,
@@ -894,6 +896,49 @@ mod livekit {
         assert_ne!(payload["video"]["roomJoin"], true);
         assert_ne!(payload["video"]["roomCreate"], true);
         assert!(!token.contains("secret-marker"));
+    }
+
+    #[test]
+    fn room_join_token_has_short_expiry_and_room_grants() {
+        let token =
+            room_join_token("devkey", "secret-marker", "interview-room", "candidate-1").unwrap();
+        let payload = decode_jwt_payload(token.as_str());
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let exp = payload["exp"].as_i64().unwrap();
+        assert!((55..=65).contains(&(exp - now)), "exp delta {}", exp - now);
+        assert_eq!(payload["video"]["roomJoin"], true);
+        assert_eq!(payload["video"]["canPublish"], true);
+        assert_eq!(payload["video"]["canSubscribe"], true);
+        assert_eq!(payload["video"]["canPublishData"], true);
+        assert_ne!(payload["video"]["roomList"], true);
+        assert_ne!(payload["video"]["roomAdmin"], true);
+        assert_ne!(payload["video"]["roomCreate"], true);
+        assert_eq!(payload["video"]["room"], "interview-room");
+        let identity = payload["sub"]
+            .as_str()
+            .or_else(|| payload["identity"].as_str())
+            .unwrap();
+        assert_eq!(identity, "candidate-1");
+        assert!(!token.contains("secret-marker"));
+    }
+
+    #[test]
+    fn room_join_token_rejects_empty_room_and_identity() {
+        assert_eq!(
+            room_join_token("devkey", "secret-marker", "  ", "candidate-1")
+                .unwrap_err()
+                .code(),
+            "LIVEKIT_ROOM_INVALID"
+        );
+        assert_eq!(
+            room_join_token("devkey", "secret-marker", "interview-room", "\t")
+                .unwrap_err()
+                .code(),
+            "LIVEKIT_IDENTITY_INVALID"
+        );
     }
 
     #[test]

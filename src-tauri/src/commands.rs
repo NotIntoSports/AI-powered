@@ -25,12 +25,13 @@ use crate::{
     },
     services::{
         EmbeddingConfigSaveInput, EmbeddingService, EmbeddingServiceError, EmbeddingTestResult,
-        LiveKitSettingsError, LiveKitSettingsSaveInput, LiveKitSettingsService, LiveKitTestResult,
-        MaterialSearchHit, MaterialService, MaterialServiceError, MaterialSummary,
-        ModelDiscoveryResult, ProviderSaveInput, ProviderService, ProviderServiceError,
-        ProviderTestResult, RoleProfileCopyInput, RoleProfileSaveInput, RoleProfileService,
-        RoleProfileServiceError, SessionProbes, SessionServiceError, SessionStartOutcome,
-        VoiceRouteSaveInput, VoiceRouteService, VoiceRouteServiceError, VoiceRouteTestResult,
+        LiveKitJoinToken, LiveKitSettingsError, LiveKitSettingsSaveInput, LiveKitSettingsService,
+        LiveKitTestResult, MaterialSearchHit, MaterialService, MaterialServiceError,
+        MaterialSummary, ModelDiscoveryResult, ProviderSaveInput, ProviderService,
+        ProviderServiceError, ProviderTestResult, RoleProfileCopyInput, RoleProfileSaveInput,
+        RoleProfileService, RoleProfileServiceError, SessionProbes, SessionServiceError,
+        SessionStartOutcome, VoiceRouteSaveInput, VoiceRouteService, VoiceRouteServiceError,
+        VoiceRouteTestResult,
     },
     sessions::{SessionExportError, SessionExportFormat, SessionStore, export_session},
 };
@@ -198,7 +199,9 @@ fn livekit_service_error<T: ts_rs::TS>(error: LiveKitSettingsError) -> CommandRe
     if let Some(field) = match code {
         "CONFIG_URL_INVALID" | "LIVEKIT_ENDPOINT_INVALID" => Some("url"),
         "LIVEKIT_CREDENTIALS_MISSING" => Some("apiKey"),
-        "LIVEKIT_NOT_READY" => Some("enabled"),
+        "LIVEKIT_NOT_READY" | "LIVEKIT_DISABLED" => Some("enabled"),
+        "LIVEKIT_ROOM_INVALID" => Some("room"),
+        "LIVEKIT_IDENTITY_INVALID" => Some("identity"),
         _ => None,
     } {
         public = public.with_field(field);
@@ -1576,6 +1579,25 @@ pub fn livekit_settings_enable(
         .map_or_else(livekit_service_error, |data| CommandResult::Ok { data })
 }
 
+#[tauri::command(async)]
+pub fn livekit_issue_join_token(
+    state: State<'_, AppState>,
+    room: String,
+    identity: String,
+) -> CommandResult<LiveKitJoinToken> {
+    let _guard = match service_guard(&state) {
+        Ok(guard) => guard,
+        Err(error) => return error,
+    };
+    let probe = match livekit_probe() {
+        Ok(probe) => probe,
+        Err(error) => return error,
+    };
+    LiveKitSettingsService::new(&state.config, &state.secrets, &probe)
+        .issue_join_token(&room, &identity)
+        .map_or_else(livekit_service_error, |data| CommandResult::Ok { data })
+}
+
 #[tauri::command]
 pub fn config_restore_last_good(state: State<'_, AppState>) -> CommandResult<StartupState> {
     let _guard = match service_guard(&state) {
@@ -1792,6 +1814,24 @@ mod tests {
                 .unwrap();
         assert_eq!(livekit["error"]["code"], "LIVEKIT_NOT_READY");
         assert_eq!(livekit["error"]["retryable"], false);
+        let disabled =
+            serde_json::to_value(livekit_service_error::<()>(LiveKitSettingsError::Disabled))
+                .unwrap();
+        assert_eq!(disabled["error"]["code"], "LIVEKIT_DISABLED");
+        assert_eq!(disabled["error"]["field"], "enabled");
+        let room = serde_json::to_value(livekit_service_error::<()>(
+            LiveKitSettingsError::RoomInvalid,
+        ))
+        .unwrap();
+        assert_eq!(room["error"]["code"], "LIVEKIT_ROOM_INVALID");
+        assert_eq!(room["error"]["field"], "room");
+        assert!(!room["error"]["message"].as_str().unwrap().contains("eyJ"));
+        let identity = serde_json::to_value(livekit_service_error::<()>(
+            LiveKitSettingsError::IdentityInvalid,
+        ))
+        .unwrap();
+        assert_eq!(identity["error"]["code"], "LIVEKIT_IDENTITY_INVALID");
+        assert_eq!(identity["error"]["field"], "identity");
     }
 
     #[test]
@@ -1813,6 +1853,22 @@ mod tests {
             .unwrap();
         assert!(last_good.contains("service_guard"));
         assert!(defaults.contains("service_guard"));
+    }
+
+    #[test]
+    fn livekit_issue_join_token_takes_the_service_guard() {
+        let source = include_str!("commands.rs");
+        let name = "livekit_issue_join_token";
+        let body = command_body(source, name);
+        let until_next = body
+            .split("\nfn ")
+            .next()
+            .and_then(|chunk| chunk.split("\npub fn ").next())
+            .unwrap_or(body);
+        assert!(
+            until_next.contains("service_guard"),
+            "{name} must take service_guard"
+        );
     }
 
     #[test]

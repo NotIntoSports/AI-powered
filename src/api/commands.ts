@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
-import type { AgentCommandInput, AgentCommandResult, CommandResult, DiagnosticsExportResult, EmbeddingConfig, EmbeddingConfigSaveInput, EmbeddingTestResult, FoundationStatus, LiveKitConfig, LiveKitSettingsSaveInput, LiveKitTestResult, MaterialSearchHit, MaterialSummary, ModelDiscoveryResult, ProviderConfig, ProviderSaveInput, ProviderTestResult, PublicConfig, RoleProfileConfig, RoleProfileCopyInput, RoleProfileSaveInput, RuntimeStatus, SessionDetail, SessionExportResult, SessionStartResult, SessionSummary, SessionTurnView, StartupState, VoiceRouteConfig, VoiceRouteSaveInput, VoiceRouteTestResult } from "../generated/bindings";
+import type { AgentCommandInput, AgentCommandResult, CommandResult, DiagnosticsExportResult, EmbeddingConfig, EmbeddingConfigSaveInput, EmbeddingTestResult, FoundationStatus, LiveKitConfig, LiveKitJoinToken, LiveKitSettingsSaveInput, LiveKitTestResult, MaterialSearchHit, MaterialSummary, ModelDiscoveryResult, ProviderConfig, ProviderSaveInput, ProviderTestResult, PublicConfig, RoleProfileConfig, RoleProfileCopyInput, RoleProfileSaveInput, RuntimeStatus, SessionDetail, SessionExportResult, SessionStartResult, SessionSummary, SessionTurnView, StartupState, VoiceRouteConfig, VoiceRouteSaveInput, VoiceRouteTestResult } from "../generated/bindings";
 
 export function getFoundationStatus() {
   return invoke<CommandResult<FoundationStatus>>("foundation_get_status");
@@ -96,6 +96,10 @@ export function testLiveKitSettings() {
 
 export function enableLiveKitSettings(enabled: boolean) {
   return invoke<CommandResult<LiveKitConfig>>("livekit_settings_enable", { enabled });
+}
+
+export function issueLiveKitJoinToken(room: string, identity: string) {
+  return invoke<CommandResult<LiveKitJoinToken>>("livekit_issue_join_token", { room, identity });
 }
 
 export function restoreLastGoodConfig() {
