@@ -9,6 +9,7 @@ pub mod database;
 pub mod diagnostics;
 pub mod error;
 pub mod materials;
+pub mod obs;
 pub mod providers;
 pub mod runtime;
 pub mod secrets;
