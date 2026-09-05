@@ -91,3 +91,120 @@
   color: var(--shell-text-muted);
   opacity: 0.8;
 }
+
+
+.services-page {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.services-intro,
+.services-message {
+  margin: 0;
+  color: var(--shell-text-muted);
+}
+
+.services-message {
+  min-height: 1.5rem;
+}
+
+.services-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+
+.service-panel,
+.service-card {
+  border: 1px solid var(--shell-border);
+  border-radius: 0.75rem;
+  background: var(--shell-sidebar-bg);
+}
+
+.service-panel {
+  padding: 1rem;
+}
+
+.service-panel h2,
+.service-card h3 {
+  margin-top: 0;
+}
+
+.service-form,
+.service-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.service-form label {
+  display: grid;
+  gap: 0.3rem;
+  font-size: 0.9rem;
+}
+
+.service-form input,
+.service-form select {
+  min-width: 0;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--shell-border);
+  border-radius: 0.45rem;
+  background: var(--shell-main-bg);
+  color: inherit;
+}
+
+.service-form small {
+  color: var(--shell-text-muted);
+}
+
+.provider-model-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6rem;
+}
+
+.service-list {
+  margin-top: 1rem;
+}
+
+.service-card {
+  padding: 0.8rem;
+}
+
+.service-card p {
+  overflow-wrap: anywhere;
+}
+
+.service-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.service-form button,
+.service-actions button {
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--shell-border);
+  background: var(--shell-hover);
+  color: var(--shell-text);
+  border-radius: 0.45rem;
+  cursor: pointer;
+}
+
+.service-form button:disabled,
+.service-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.service-form :focus-visible,
+.service-actions :focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+@media (max-width: 900px) {
+  .services-grid {
+    grid-template-columns: 1fr;
+  }
+}

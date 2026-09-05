@@ -1,31 +1,74 @@
-import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import * as commands from "../../api/commands";
 import { ServicesPage } from "./services-page";
 
-describe("ServicesPage", () => {
-  afterEach(cleanup);
+vi.mock("../../api/commands", () => ({
+  getConfigPublic: vi.fn(),
+  saveModelProvider: vi.fn(),
+  testModelProvider: vi.fn(),
+  discoverModelProvider: vi.fn(),
+  activateModelProvider: vi.fn(),
+  deleteModelProvider: vi.fn(),
+  saveSpeechRoute: vi.fn(),
+  testSpeechRoute: vi.fn(),
+  activateSpeechRoute: vi.fn(),
+  deleteSpeechRoute: vi.fn(),
+}));
 
-  it("renders the services heading", () => {
+const emptyConfig = {
+  configVersion: 1,
+  application: { locale: null },
+  models: { providers: [], activeProviderId: null },
+  speech: { voiceRoutes: [], activeVoiceRouteId: null },
+  transport: { livekitUrl: null },
+  knowledge: { embeddingProviderId: null },
+  storage: { exportDirectory: null },
+  roleProfiles: [],
+  diagnostics: { logRetentionDays: 14 },
+};
+
+describe("ServicesPage", () => {
+  beforeEach(() => {
+    vi.mocked(commands.getConfigPublic).mockResolvedValue({ ok: true, data: emptyConfig });
+  });
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+  });
+
+  it("renders provider and voice route management", async () => {
     render(<ServicesPage />);
     expect(screen.getByRole("heading", { level: 1 }).textContent).toContain("服务");
+    expect(await screen.findByRole("heading", { name: "模型供应商" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "语音线路" })).toBeTruthy();
   });
 
-  it("renders non-empty capabilities", () => {
+  it("submits a provider key and clears the password field", async () => {
+    vi.mocked(commands.saveModelProvider).mockResolvedValue({
+      ok: true,
+      data: { id: "openai", name: "OpenAI", baseUrl: "https://example.test/v1", credential: { reference: "providers/openai/api-key", configured: true } },
+    });
     render(<ServicesPage />);
-    const items = screen.getAllByRole("listitem");
-    expect(items.length).toBeGreaterThan(0);
+    await screen.findByRole("heading", { name: "模型供应商" });
+    fireEvent.change(screen.getByLabelText("供应商 ID"), { target: { value: "openai" } });
+    fireEvent.change(screen.getByLabelText("显示名称"), { target: { value: "OpenAI" } });
+    fireEvent.change(screen.getByLabelText("接口基址"), { target: { value: "https://example.test/v1" } });
+    const key = screen.getByLabelText(/API Key/) as HTMLInputElement;
+    fireEvent.change(key, { target: { value: "secret-marker" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存供应商" }));
+    await waitFor(() => expect(commands.saveModelProvider).toHaveBeenCalled());
+    expect(key.value).toBe("");
+    expect(document.body.textContent).not.toContain("secret-marker");
   });
 
-  it("does not call fetch", () => {
+  it("does not call fetch or contain old API paths", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
-    render(<ServicesPage />);
-    expect(fetchSpy).not.toHaveBeenCalled();
-    fetchSpy.mockRestore();
-  });
-
-  it("does not contain /api/ paths", () => {
     const { container } = render(<ServicesPage />);
+    await screen.findByRole("heading", { name: "模型供应商" });
+    expect(fetchSpy).not.toHaveBeenCalled();
     expect(container.innerHTML).not.toMatch(/\/api\//);
+    fetchSpy.mockRestore();
   });
 });
