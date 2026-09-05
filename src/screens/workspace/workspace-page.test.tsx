@@ -1,10 +1,28 @@
 import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import * as commands from "../../api/commands";
 import { WorkspacePage } from "./workspace-page";
 
+vi.mock("../../api/commands", () => ({
+  startSession: vi.fn(),
+  stopSession: vi.fn(),
+  setSessionMode: vi.fn(),
+  getRuntimeStatus: vi.fn(),
+  getSession: vi.fn(),
+}));
+
 describe("WorkspacePage", () => {
-  afterEach(cleanup);
+  beforeEach(() => {
+    vi.mocked(commands.getRuntimeStatus).mockResolvedValue({
+      ok: true,
+      data: { phase: "idle", mode: "ai_active", seq: 0, unusedMaterials: false, lastErrorCode: null },
+    });
+  });
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+  });
 
   it("renders the workspace heading", () => {
     render(<WorkspacePage />);
@@ -27,5 +45,11 @@ describe("WorkspacePage", () => {
   it("does not contain /api/ paths", () => {
     const { container } = render(<WorkspacePage />);
     expect(container.innerHTML).not.toMatch(/\/api\//);
+  });
+
+  it("includes the workspace session and drops the leftover placeholder", async () => {
+    render(<WorkspacePage />);
+    expect(await screen.findByRole("heading", { name: "当前会话" })).toBeTruthy();
+    expect(screen.queryByText(/尚未接入业务逻辑/)).toBeNull();
   });
 });

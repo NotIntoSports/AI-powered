@@ -1,10 +1,24 @@
 import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import * as commands from "../../api/commands";
 import { RecordsPage } from "./records-page";
 
+vi.mock("../../api/commands", () => ({
+  listSessions: vi.fn(),
+  getSession: vi.fn(),
+  exportSession: vi.fn(),
+  deleteSession: vi.fn(),
+}));
+
 describe("RecordsPage", () => {
-  afterEach(cleanup);
+  beforeEach(() => {
+    vi.mocked(commands.listSessions).mockResolvedValue({ ok: true, data: [] });
+  });
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+  });
 
   it("renders the records heading", () => {
     render(<RecordsPage />);
@@ -27,5 +41,11 @@ describe("RecordsPage", () => {
   it("does not contain /api/ paths", () => {
     const { container } = render(<RecordsPage />);
     expect(container.innerHTML).not.toMatch(/\/api\//);
+  });
+
+  it("includes the records list and drops the leftover placeholder", async () => {
+    render(<RecordsPage />);
+    expect(await screen.findByRole("heading", { name: "会话记录" })).toBeTruthy();
+    expect(screen.queryByText(/尚未接入业务逻辑/)).toBeNull();
   });
 });
