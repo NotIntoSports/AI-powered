@@ -20,6 +20,7 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 pub enum AudioError {
     ExeMissing,
     InvalidPid,
+    ProcessNotAvailable,
     SpawnFailed,
     SidecarFailed,
 }
@@ -29,6 +30,7 @@ impl AudioError {
         match self {
             Self::ExeMissing => "SESSION_SIDECAR_MISSING",
             Self::InvalidPid => "SESSION_SIDECAR_INVALID_PID",
+            Self::ProcessNotAvailable => "MEETING_PROCESS_NOT_AVAILABLE",
             Self::SpawnFailed => "SESSION_SIDECAR_SPAWN_FAILED",
             Self::SidecarFailed => "SESSION_SIDECAR_FAILED",
         }
@@ -128,9 +130,18 @@ impl AudioCapture {
         Self::empty()
     }
 
-    pub fn spawn_bridge(exe: &Path, pid: u32) -> Result<Self, AudioError> {
+    pub fn spawn_bridge(
+        exe: &Path,
+        pid: u32,
+        enumerator: &impl crate::processes::ProcessEnumerator,
+    ) -> Result<Self, AudioError> {
         if pid == 0 {
             return Err(AudioError::InvalidPid);
+        }
+        let allowed = crate::processes::list_meeting_processes(enumerator)
+            .map_err(|_| AudioError::SpawnFailed)?;
+        if !allowed.iter().any(|process| process.pid == pid) {
+            return Err(AudioError::ProcessNotAvailable);
         }
         if !exe.is_file() {
             return Err(AudioError::ExeMissing);
@@ -336,7 +347,20 @@ mod tests {
         bridge_command_args, parse_level_peak,
     };
     use crate::audio::pcm::RING_CAPACITY_BYTES;
+    use crate::processes::{FailingProcessEnumerator, InjectedProcessEnumerator, MeetingProcess};
     use std::path::PathBuf;
+
+    fn meeting(pid: u32, name: &str, title: &str) -> MeetingProcess {
+        MeetingProcess {
+            pid,
+            name: name.to_string(),
+            title: title.to_string(),
+        }
+    }
+
+    fn allowed_zoom(pid: u32) -> InjectedProcessEnumerator {
+        InjectedProcessEnumerator::new(vec![meeting(pid, "zoom.exe", "Standup")])
+    }
 
     fn le_i16(samples: &[i16]) -> Vec<u8> {
         samples
@@ -431,16 +455,51 @@ mod tests {
     fn spawn_bridge_skips_when_exe_absent() {
         let missing = PathBuf::from("definitely-missing-AudioBridge.exe");
         assert!(!missing.is_file());
-        let error = AudioCapture::spawn_bridge(&missing, 4242).expect_err("missing exe");
+        let enumerator = allowed_zoom(4242);
+        let error =
+            AudioCapture::spawn_bridge(&missing, 4242, &enumerator).expect_err("missing exe");
         assert_eq!(error, AudioError::ExeMissing);
         assert_eq!(error.code(), "SESSION_SIDECAR_MISSING");
+        assert!(enumerator.call_count() >= 1);
     }
 
     #[test]
     fn spawn_bridge_rejects_pid_zero() {
         let missing = PathBuf::from("definitely-missing-AudioBridge.exe");
-        let error = AudioCapture::spawn_bridge(&missing, 0).expect_err("pid 0");
+        let error = AudioCapture::spawn_bridge(&missing, 0, &allowed_zoom(1)).expect_err("pid 0");
         assert_eq!(error, AudioError::InvalidPid);
+    }
+
+    #[test]
+    fn spawn_bridge_rejects_pid_not_on_fresh_allowlist() {
+        let missing = PathBuf::from("definitely-missing-AudioBridge.exe");
+        let enumerator = allowed_zoom(100);
+        let listed = crate::processes::list_meeting_processes(&enumerator).expect("listed");
+        assert!(listed.iter().any(|process| process.pid == 100));
+        enumerator.set(Vec::new());
+        let error = AudioCapture::spawn_bridge(&missing, 100, &enumerator)
+            .expect_err("stale pid must be rejected");
+        assert_eq!(error, AudioError::ProcessNotAvailable);
+        assert_eq!(error.code(), "MEETING_PROCESS_NOT_AVAILABLE");
+        assert!(enumerator.call_count() >= 2);
+    }
+
+    #[test]
+    fn spawn_bridge_rejects_unknown_exe_even_when_title_present() {
+        let missing = PathBuf::from("definitely-missing-AudioBridge.exe");
+        let enumerator = InjectedProcessEnumerator::new(vec![meeting(77, "notepad.exe", "Notes")]);
+        let error = AudioCapture::spawn_bridge(&missing, 77, &enumerator)
+            .expect_err("notepad is not allowlisted");
+        assert_eq!(error, AudioError::ProcessNotAvailable);
+    }
+
+    #[test]
+    fn spawn_bridge_fails_closed_when_enumerator_errors() {
+        let missing = PathBuf::from("definitely-missing-AudioBridge.exe");
+        let error = AudioCapture::spawn_bridge(&missing, 100, &FailingProcessEnumerator)
+            .expect_err("enumeration failure");
+        assert_eq!(error, AudioError::SpawnFailed);
+        assert_eq!(error.code(), "SESSION_SIDECAR_SPAWN_FAILED");
     }
 
     #[test]

@@ -11,6 +11,7 @@ pub mod error;
 pub mod materials;
 pub mod obs;
 pub mod prerequisites;
+pub mod processes;
 pub mod providers;
 pub mod runtime;
 pub mod secrets;
