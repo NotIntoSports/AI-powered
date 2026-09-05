@@ -1,10 +1,14 @@
 mod embeddings;
+mod livekit;
 mod providers;
 mod roles;
 mod voice_routes;
 
 pub use embeddings::{
     EmbeddingConfigSaveInput, EmbeddingService, EmbeddingServiceError, EmbeddingTestResult,
+};
+pub use livekit::{
+    LiveKitSettingsError, LiveKitSettingsSaveInput, LiveKitSettingsService, LiveKitTestResult,
 };
 pub use providers::{
     DiscoveredModelDto, ModelDiscoveryResult, ProviderSaveInput, ProviderService,

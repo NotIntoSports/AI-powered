@@ -3,15 +3,16 @@ use std::sync::Arc;
 use crate::{
     config::{ConfigStore, EmbeddingDistance},
     providers::{
-        DiscoveredModel, EmbeddingError, EmbeddingProbe, ProviderEndpoint, ProviderError,
-        ProviderProbe,
+        DiscoveredModel, EmbeddingError, EmbeddingProbe, LiveKitError, LiveKitProbe,
+        ProviderEndpoint, ProviderError, ProviderProbe,
     },
-    secrets::{MemorySecretStore, SecretService},
+    secrets::{MemorySecretStore, SecretError, SecretService, SecretStore},
 };
 
 use super::{
-    EmbeddingConfigSaveInput, EmbeddingService, ProviderSaveInput, ProviderService,
-    RoleProfileCopyInput, RoleProfileSaveInput, RoleProfileService,
+    EmbeddingConfigSaveInput, EmbeddingService, LiveKitSettingsSaveInput, LiveKitSettingsService,
+    ProviderSaveInput, ProviderService, RoleProfileCopyInput, RoleProfileSaveInput,
+    RoleProfileService,
 };
 
 fn role_input(id: &str) -> RoleProfileSaveInput {
@@ -803,4 +804,249 @@ fn embedding_delete_clears_active_id_and_provider_edit_invalidates_references() 
         Some("configuration_changed")
     );
     assert!(loaded.knowledge.active_embedding_config_id.is_none());
+}
+
+struct ReadyLiveKitProbe;
+
+impl LiveKitProbe for ReadyLiveKitProbe {
+    fn test(&self, url: &str, api_key: &str, api_secret: &str) -> Result<(), LiveKitError> {
+        assert!(url.starts_with("ws"));
+        assert_eq!(api_key, "livekit-key");
+        assert_eq!(api_secret, "livekit-secret");
+        Ok(())
+    }
+}
+
+struct FailLiveKitProbe;
+
+impl LiveKitProbe for FailLiveKitProbe {
+    fn test(&self, _: &str, _: &str, _: &str) -> Result<(), LiveKitError> {
+        Err(LiveKitError::Unauthorized)
+    }
+}
+
+struct ScriptedSecretStore {
+    inner: MemorySecretStore,
+    fail_set_suffix: std::sync::Mutex<Option<String>>,
+    fail_delete_suffix: std::sync::Mutex<Option<String>>,
+    reads: std::sync::Mutex<u32>,
+}
+
+impl ScriptedSecretStore {
+    fn new() -> Self {
+        Self {
+            inner: MemorySecretStore::default(),
+            fail_set_suffix: std::sync::Mutex::new(None),
+            fail_delete_suffix: std::sync::Mutex::new(None),
+            reads: std::sync::Mutex::new(0),
+        }
+    }
+}
+
+impl SecretStore for ScriptedSecretStore {
+    fn set(&self, reference: &str, value: &str) -> Result<(), SecretError> {
+        if self
+            .fail_set_suffix
+            .lock()
+            .unwrap()
+            .as_deref()
+            .is_some_and(|suffix| reference.ends_with(suffix))
+        {
+            return Err(SecretError::Backend);
+        }
+        self.inner.set(reference, value)
+    }
+
+    fn get(&self, reference: &str) -> Result<Option<zeroize::Zeroizing<String>>, SecretError> {
+        *self.reads.lock().unwrap() += 1;
+        self.inner.get(reference)
+    }
+
+    fn delete(&self, reference: &str) -> Result<bool, SecretError> {
+        if self
+            .fail_delete_suffix
+            .lock()
+            .unwrap()
+            .as_deref()
+            .is_some_and(|suffix| reference.ends_with(suffix))
+        {
+            return Err(SecretError::Backend);
+        }
+        self.inner.delete(reference)
+    }
+
+    fn contains(&self, reference: &str) -> Result<bool, SecretError> {
+        self.inner.contains(reference)
+    }
+}
+
+fn livekit_input() -> LiveKitSettingsSaveInput {
+    LiveKitSettingsSaveInput {
+        url: Some("wss://livekit.example.test".into()),
+        api_key: Some("livekit-key".into()),
+        api_secret: Some("livekit-secret".into()),
+    }
+}
+
+#[test]
+fn livekit_save_writes_two_canonical_secrets_and_preserves_blanks() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = ConfigStore::new(directory.path().join("config.json"));
+    config.restore_defaults().unwrap();
+    let secrets = SecretService::new("test", Arc::new(MemorySecretStore::default())).unwrap();
+    let service = LiveKitSettingsService::new(&config, &secrets, &ReadyLiveKitProbe);
+
+    let saved = service.save(livekit_input()).unwrap();
+    assert_eq!(saved.url.as_deref(), Some("wss://livekit.example.test"));
+    assert_eq!(
+        saved.api_key.as_ref().map(|slot| slot.reference.as_str()),
+        Some("transport/livekit/api-key")
+    );
+    assert_eq!(
+        saved
+            .api_secret
+            .as_ref()
+            .map(|slot| slot.reference.as_str()),
+        Some("transport/livekit/api-secret")
+    );
+    assert!(!saved.ready);
+    assert!(!saved.enabled);
+    assert_eq!(saved.status.as_deref(), Some("not_tested"));
+    assert_eq!(
+        secrets
+            .read_internal("transport/livekit/api-key")
+            .unwrap()
+            .unwrap()
+            .as_str(),
+        "livekit-key"
+    );
+
+    service
+        .save(LiveKitSettingsSaveInput {
+            url: Some("wss://livekit.example.test/updated".into()),
+            api_key: Some("   ".into()),
+            api_secret: None,
+        })
+        .unwrap();
+    assert_eq!(
+        secrets
+            .read_internal("transport/livekit/api-key")
+            .unwrap()
+            .unwrap()
+            .as_str(),
+        "livekit-key"
+    );
+    assert_eq!(
+        config.load().unwrap().transport.livekit.url.as_deref(),
+        Some("wss://livekit.example.test/updated")
+    );
+}
+
+#[test]
+fn livekit_partial_secret_failure_and_config_failure_roll_back() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = ConfigStore::new(directory.path().join("config.json"));
+    config.restore_defaults().unwrap();
+    let store = Arc::new(ScriptedSecretStore::new());
+    *store.fail_set_suffix.lock().unwrap() = Some("transport/livekit/api-secret".into());
+    let secrets = SecretService::new("test", store.clone()).unwrap();
+    let service = LiveKitSettingsService::new(&config, &secrets, &ReadyLiveKitProbe);
+
+    assert_eq!(
+        service.save(livekit_input()).unwrap_err().code(),
+        "SECRET_BACKEND_UNAVAILABLE"
+    );
+    assert!(
+        secrets
+            .read_internal("transport/livekit/api-key")
+            .unwrap()
+            .is_none()
+    );
+
+    *store.fail_set_suffix.lock().unwrap() = None;
+    let secrets = SecretService::new("test", Arc::new(MemorySecretStore::default())).unwrap();
+    let service = LiveKitSettingsService::new(&config, &secrets, &ReadyLiveKitProbe);
+    assert_eq!(
+        service
+            .save(LiveKitSettingsSaveInput {
+                url: Some("https://not-websocket.example.test".into()),
+                api_key: Some("livekit-key".into()),
+                api_secret: Some("livekit-secret".into()),
+            })
+            .unwrap_err()
+            .code(),
+        "CONFIG_URL_INVALID"
+    );
+    assert!(
+        secrets
+            .read_internal("transport/livekit/api-key")
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        secrets
+            .read_internal("transport/livekit/api-secret")
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[test]
+fn livekit_rollback_failure_uses_stable_code() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = ConfigStore::new(directory.path().join("config.json"));
+    config.restore_defaults().unwrap();
+    let store = Arc::new(ScriptedSecretStore::new());
+    let secrets = SecretService::new("test", store.clone()).unwrap();
+    let service = LiveKitSettingsService::new(&config, &secrets, &ReadyLiveKitProbe);
+    *store.fail_delete_suffix.lock().unwrap() = Some("transport/livekit/api-secret".into());
+    *store.fail_set_suffix.lock().unwrap() = None;
+    assert_eq!(
+        service
+            .save(LiveKitSettingsSaveInput {
+                url: Some("https://not-websocket.example.test".into()),
+                api_key: Some("livekit-key".into()),
+                api_secret: Some("livekit-secret".into()),
+            })
+            .unwrap_err()
+            .code(),
+        "SECRET_ROLLBACK_FAILED"
+    );
+}
+
+#[test]
+fn livekit_test_gates_enable_and_failed_retest_disables() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = ConfigStore::new(directory.path().join("config.json"));
+    config.restore_defaults().unwrap();
+    let store = Arc::new(ScriptedSecretStore::new());
+    let secrets = SecretService::new("test", store.clone()).unwrap();
+    let service = LiveKitSettingsService::new(&config, &secrets, &ReadyLiveKitProbe);
+    service.save(livekit_input()).unwrap();
+    assert_eq!(
+        service.set_enabled(true).unwrap_err().code(),
+        "LIVEKIT_NOT_READY"
+    );
+    assert!(service.test().unwrap().ready);
+    assert!(service.set_enabled(true).unwrap().enabled);
+
+    let failed = LiveKitSettingsService::new(&config, &secrets, &FailLiveKitProbe);
+    assert_eq!(failed.test().unwrap_err().code(), "LIVEKIT_UNAUTHORIZED");
+    let loaded = config.load().unwrap();
+    assert!(!loaded.transport.livekit.ready);
+    assert!(!loaded.transport.livekit.enabled);
+    assert_eq!(
+        loaded.transport.livekit.status.as_deref(),
+        Some("test_failed")
+    );
+
+    LiveKitSettingsService::new(&config, &secrets, &ReadyLiveKitProbe)
+        .test()
+        .unwrap();
+    let reads_before = *store.reads.lock().unwrap();
+    LiveKitSettingsService::new(&config, &secrets, &ReadyLiveKitProbe)
+        .set_enabled(false)
+        .unwrap();
+    assert_eq!(*store.reads.lock().unwrap(), reads_before);
+    assert!(!config.load().unwrap().transport.livekit.enabled);
 }

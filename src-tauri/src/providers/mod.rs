@@ -1,9 +1,13 @@
 mod embedding;
+mod livekit;
 mod openai_compatible;
 
 use std::fmt;
 
 pub use embedding::{EmbeddingError, EmbeddingProbe, OpenAiCompatibleEmbeddingProbe};
+pub use livekit::{LiveKitError, LiveKitProbe, OfficialLiveKitProbe};
+#[cfg(test)]
+pub(crate) use livekit::{control_url, room_list_token};
 pub use openai_compatible::OpenAiCompatibleProbe;
 #[cfg(test)]
 pub(crate) use openai_compatible::{normalize_models_url, parse_model_catalog};

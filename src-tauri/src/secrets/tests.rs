@@ -80,11 +80,13 @@ fn rejects_invalid_references_and_public_results_never_contain_values() {
 fn windows_credential_round_trip() {
     struct CredentialCleanup {
         service: SecretService,
-        reference: &'static str,
+        references: &'static [&'static str],
     }
     impl Drop for CredentialCleanup {
         fn drop(&mut self) {
-            let _ = self.service.delete(self.reference);
+            for reference in self.references {
+                let _ = self.service.delete(reference);
+            }
         }
     }
 
@@ -92,21 +94,34 @@ fn windows_credential_round_trip() {
     let namespace = format!("com.aivirtualassistant.desktop.test/{id}");
     let store: Arc<dyn SecretStore> = Arc::new(WindowsSecretStore::new());
     let secrets = SecretService::new(&namespace, store).unwrap();
-    let reference = "integration/round-trip";
-    let value = format!("credential-{id}");
+    const REFERENCES: &[&str] = &[
+        "providers/openai/api-key",
+        "transport/livekit/api-key",
+        "transport/livekit/api-secret",
+    ];
 
     let cleanup = CredentialCleanup {
         service: secrets.clone(),
-        reference,
+        references: REFERENCES,
     };
-    assert!(!secrets.status(reference).unwrap().configured);
-    secrets.set(reference, &value).unwrap();
-    assert!(secrets.status(reference).unwrap().configured);
-    assert_eq!(
-        secrets.read_internal(reference).unwrap().unwrap().as_str(),
-        value
-    );
-    assert!(!secrets.delete(reference).unwrap().configured);
-    assert!(!secrets.status(reference).unwrap().configured);
+    for (index, reference) in REFERENCES.iter().enumerate() {
+        let value = format!("credential-{id}-{index}");
+        let replacement = format!("replacement-{id}-{index}");
+        assert!(!secrets.status(reference).unwrap().configured);
+        secrets.set(reference, &value).unwrap();
+        assert!(secrets.status(reference).unwrap().configured);
+        assert_eq!(
+            secrets.read_internal(reference).unwrap().unwrap().as_str(),
+            value
+        );
+        secrets.set(reference, &replacement).unwrap();
+        assert_eq!(
+            secrets.read_internal(reference).unwrap().unwrap().as_str(),
+            replacement
+        );
+        assert!(!secrets.delete(reference).unwrap().configured);
+        assert!(!secrets.status(reference).unwrap().configured);
+        assert!(secrets.read_internal(reference).unwrap().is_none());
+    }
     drop(cleanup);
 }

@@ -39,4 +39,5 @@ keyring = { version = "=4.2.0", default-features = false, features = ["v1", "win
 windows-sys = { version = "=0.61.2", features = ["Win32_Storage_FileSystem", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 [dev-dependencies]
+base64 = "=0.22.1"
 tempfile = "=3.27.0"
