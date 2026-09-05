@@ -310,7 +310,7 @@ impl From<RoleProfileInput> for RoleProfileConfig {
             RoleProfileInput::Canonical(profile) => profile,
             RoleProfileInput::Legacy(profile) => Self {
                 name: profile.id.clone(),
-                id: profile.id,
+                id: migrate_legacy_role_id(&profile.id),
                 system_prompt: profile.instructions,
                 opening_message: String::new(),
                 style_instructions: String::new(),
@@ -500,8 +500,13 @@ impl AppConfigV1 {
         }
         for profile in &self.role_profiles {
             validate_stable_id(&profile.id)?;
+            // Version zero is the explicit compatibility marker for an inactive
+            // role migrated from the original `{ id, instructions }` shape.
+            // Preserve old instructions losslessly; activation/edit services
+            // must create a positive-version profile within the current limit.
+            let migrated_legacy_profile = profile.config_version == 0 && !profile.active;
             if profile.name.trim().is_empty()
-                || profile.system_prompt.len() > 32 * 1024
+                || (!migrated_legacy_profile && profile.system_prompt.len() > 32 * 1024)
                 || profile.opening_message.len() > 4 * 1024
                 || profile.style_instructions.len() > 8 * 1024
             {
@@ -735,18 +740,37 @@ fn ensure_unique<'a>(ids: impl Iterator<Item = &'a str>) -> Result<(), ConfigErr
 }
 
 fn validate_stable_id(id: &str) -> Result<(), ConfigError> {
-    if id.len() > 64
-        || id.is_empty()
-        || !id.bytes().all(|byte| {
-            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'-' | b'_')
-        })
-    {
+    if !is_stable_id(id) {
         return Err(ConfigError::new(
             "CONFIG_FIELD_INVALID",
             "ID must use lowercase ASCII letters, digits, hyphens, or underscores",
         ));
     }
     Ok(())
+}
+
+fn is_stable_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 64
+        && id.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'-' | b'_')
+        })
+}
+
+fn migrate_legacy_role_id(id: &str) -> String {
+    if is_stable_id(id) {
+        return id.to_owned();
+    }
+
+    // FNV-1a gives invalid legacy IDs a deterministic, non-secret, canonical
+    // identifier without truncating or exposing arbitrary legacy text in refs.
+    let hash = id
+        .as_bytes()
+        .iter()
+        .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+            (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
+        });
+    format!("legacy-{hash:016x}")
 }
 
 fn validate_url(raw: &str, schemes: &[&str]) -> Result<(), ConfigError> {

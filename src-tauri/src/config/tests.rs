@@ -251,6 +251,37 @@ fn legacy_role_embedding_and_livekit_fields_upgrade_to_safe_canonical_state() {
 }
 
 #[test]
+fn legacy_role_migration_preserves_noncanonical_id_and_oversized_instructions_safely() {
+    let legacy_id = "Interviewer / Panel 🧭";
+    let legacy_instructions = "旧版角色说明。".repeat(5_000);
+    assert!(legacy_instructions.len() > 32 * 1024);
+    let legacy_json = serde_json::json!({
+        "configVersion": 1,
+        "roleProfiles": [{
+            "id": legacy_id,
+            "instructions": legacy_instructions
+        }]
+    })
+    .to_string();
+
+    let config = AppConfigV1::from_json(&legacy_json).unwrap();
+    let profile = &config.role_profiles[0];
+    assert!(profile.id.starts_with("legacy-"));
+    assert!(profile.id.len() <= 64);
+    assert!(profile.id.bytes().all(|byte| {
+        byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'-' | b'_')
+    }));
+    assert_eq!(profile.name, legacy_id);
+    assert_eq!(profile.system_prompt, legacy_instructions);
+    assert!(!profile.active);
+    assert_eq!(profile.config_version, 0);
+
+    let canonical_json = serde_json::to_string(&config).unwrap();
+    assert!(!canonical_json.contains("instructions"));
+    assert_eq!(AppConfigV1::from_json(&canonical_json).unwrap(), config);
+}
+
+#[test]
 fn canonical_role_embedding_and_livekit_configuration_loads() {
     let config = AppConfigV1::from_json(
         r#"{

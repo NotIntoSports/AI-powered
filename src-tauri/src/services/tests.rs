@@ -67,6 +67,30 @@ fn provider_delete_rejects_referenced_provider() {
     assert_eq!(service.delete("p1").unwrap_err().code(), "PROVIDER_IN_USE");
 }
 
+#[test]
+fn provider_delete_rejects_provider_referenced_only_by_embedding_config() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("config.json");
+    std::fs::write(
+        &path,
+        r#"{
+            "configVersion":1,
+            "models":{"providers":[{"id":"p1","baseUrl":"https://example.test"}]},
+            "knowledge":{"embeddingConfigs":[{
+                "id":"embedding-1","providerId":"p1","modelId":"embed-1",
+                "dimensions":1536,"distance":"cosine","normalized":true,
+                "active":false,"ready":false,"status":null,"configVersion":1
+            }]}
+        }"#,
+    )
+    .unwrap();
+    let config = ConfigStore::new(path);
+    let secrets = SecretService::new("test", Arc::new(MemorySecretStore::default())).unwrap();
+    let service = ProviderService::new(&config, &secrets, &FakeProbe);
+
+    assert_eq!(service.delete("p1").unwrap_err().code(), "PROVIDER_IN_USE");
+}
+
 struct OpenProbe;
 
 impl ProviderProbe for OpenProbe {
