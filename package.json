@@ -27,8 +27,6 @@
     "make:windows": "npm run build && npm run build:standalone && npm run build:desktop && npm run build:audio-bridge && npm run prepare:prerequisites && electron-builder --win nsis --x64 && npm run test:packaged-runtime",
     "test:desktop-shell": "node --no-warnings --experimental-strip-types --test tests/desktop/*.test.mjs",
     "test:packaged-runtime": "node scripts/test-packaged-runtime.mjs",
-    "test:livekit-smoke": "node scripts/smoke-livekit.mjs",
-    "test:livekit-load": "node scripts/load-livekit-audio.mjs",
     "start": "next start -H 127.0.0.1",
     "test:transcription-turn": "node scripts/test-transcription-turn.mjs",
     "test:auto-answer-submit": "node scripts/test-auto-answer-submit.mjs",

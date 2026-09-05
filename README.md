@@ -59,16 +59,7 @@ Electron/Next.js remains in the tree as leftover packaging; it is not the daily 
 
 Windows 客户端安装、接线、OBS/VB-CABLE 与已知限制见下方「OBS 设置」「Windows 快速启动」章节。
 
-独立的管理 API 在 [server/control-api](server/control-api/README.md)：与本客户端分离，没有公开注册入口。管理员控制台在 [server/management-web](server/management-web/README.md)（本地 `http://127.0.0.1:3001`），用于：
-
-- 多条 OpenAI 兼容 **AI 线路**（增删改查、设默认、发现/启用模型）；
-- **模型目录**同步与分类（`llm|asr|tts|e2e|unknown`）；Token Plan 项须官方支持且本人验证成功后才能进入语音线路；
-- **RTC / LiveKit** 连接（URL、密钥、字幕语言、Agent 状态），不再绑定互动管线；
-- **语音线路**（可命名的级联 ASR+LLM+TTS 或端到端 Realtime，同一时间只启用一条）；
-- **语音凭据**（阿里云 NLS/CosyVoice 与豆包、系统音色试听）；
-- 账户、资料、对象存储、角色话术。
-
-自建 LiveKit + Python Agent 是遗留实验，默认不随基础 compose 启动。仅在显式需要实验室字幕时，在 `server/deploy`（或开发用 `server/control-api`）执行 `docker compose --profile livekit up -d`，再用 `npm run test:livekit-smoke` / `npm run test:livekit-load` 做 1 路和 10 路纯音频检查。
+Python LiveKit Agent、Go Control API、管理员控制台和 nginx 部署树已从产品中移除，不再随仓库提供。
 
 ## 运行
 

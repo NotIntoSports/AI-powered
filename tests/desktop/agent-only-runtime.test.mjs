@@ -41,13 +41,6 @@ test("desktop no longer exposes legacy model pipeline or transcription routes", 
   }
 });
 
-test("control API only exposes the unified Agent voice route runtime", async () => {
-  const router = await readFile(new URL("../../server/control-api/internal/httpapi/router.go", import.meta.url), "utf8");
-  assert.doesNotMatch(router, /r\.Get\("\/settings\/(ai|asr|pipeline)"/);
-  assert.doesNotMatch(router, /agentSettings\.getAgent(AI|Speech|Pipeline)/);
-  assert.match(router, /r\.Get\("\/settings\/voice-route"/);
-});
-
 test("desktop runtime config only handles control API transport and local secret storage", async () => {
   const runtime = await readFile(new URL("../../lib/runtime-config.ts", import.meta.url), "utf8");
   assert.doesNotMatch(runtime, /client\/settings\/(ai|pipeline)|getModelRuntimeConfig|ModelRuntimeConfig/);

@@ -1,3 +1,0 @@
-livekit>=1.0.12,<2
-livekit-agents>=1.2.0,<2
-websockets>=17.0.1,<18

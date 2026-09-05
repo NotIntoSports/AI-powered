@@ -59,25 +59,6 @@ test("voice clone recording stays within aliyun clone duration", () => {
   assert.match(control, /CLONE_SAMPLE_RATE/);
 });
 
-test("control-api exposes voice sample upload and deletion over COS", () => {
-  const service = readFileSync(join(root, "server", "control-api", "internal", "voicesamples", "service.go"), "utf8");
-  const handler = readFileSync(join(root, "server", "control-api", "internal", "httpapi", "voicesamples.go"), "utf8");
-  const router = readFileSync(join(root, "server", "control-api", "internal", "httpapi", "router.go"), "utf8");
-  const main = readFileSync(join(root, "server", "control-api", "cmd", "control-api", "main.go"), "utf8");
-  const openapi = readFileSync(join(root, "server", "control-api", "openapi", "openapi.yaml"), "utf8");
-  assert.match(service, /voice-samples\//);
-  assert.match(service, /30 \* time\.Minute/);
-  assert.match(service, /PresignGet/);
-  assert.match(service, /DeleteObject/);
-  // 密钥不下发客户端：响应只含 id/url/sizeBytes/expiresIn。
-  assert.doesNotMatch(service, /SecretKey\s+`json/);
-  assert.match(handler, /FormFile\("file"\)/);
-  assert.match(router, /\/voice-samples/);
-  assert.match(main, /voicesamples\.NewService/);
-  assert.match(openapi, /uploadClientVoiceSample/);
-  assert.match(openapi, /deleteClientVoiceSample/);
-});
-
 test("cosyvoice speaker detection does not misclassify xiaoyun", () => {
   const runtime = readFileSync(join(root, "lib", "speech-runtime.ts"), "utf8");
   const lib = readFileSync(join(root, "lib", "aliyun-cosyvoice.ts"), "utf8");
