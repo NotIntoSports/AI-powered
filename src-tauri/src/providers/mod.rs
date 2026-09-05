@@ -28,7 +28,9 @@ pub(crate) use openai_realtime::{
     InputTranscriptAssembler, RealtimeDialectName, RealtimeTransport, realtime_dialect,
     realtime_url, session_update_event, wait_session_updated,
 };
-pub use openai_realtime::{OpenAiCompatibleRealtime, RealtimeError, RealtimeModel, RealtimeTurn};
+pub use openai_realtime::{
+    OpenAiCompatibleRealtime, RealtimeError, RealtimeModel, RealtimeTextRequest, RealtimeTurn,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderEndpoint {

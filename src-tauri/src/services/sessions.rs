@@ -8,14 +8,15 @@ use crate::{
     config::{PublicConfig, VoiceRouteMode},
     database::{Database, DatabaseError},
     providers::{
-        CascadeError, ChatModel, EmbeddingProbe, ProviderEndpoint, RealtimeError, RealtimeModel,
-        SpeechToText, TextToSpeech,
+        CascadeError, CascadeStage, ChatMessage, ChatModel, EmbeddingProbe, ProviderEndpoint,
+        RealtimeError, RealtimeModel, RealtimeTextRequest, SpeechToText, TextToSpeech,
     },
     runtime::{
-        AgentMode, CascadeCredentials, CascadeTurn, CascadeTurnDeps, CascadeTurnRequest,
-        HistoryTurn, PreflightIssue, RuntimeError, SessionPhase, SessionRuntime,
-        active_role_profile, active_voice_route, build_snapshot, cascade::retrieve, preflight,
-        run_cascade_turn,
+        AgentCommand, AgentCommandAction, AgentCommandError, AgentCommandOutcome, AgentMode,
+        CascadeCredentials, CascadeTurn, CascadeTurnDeps, CascadeTurnRequest, HistoryTurn,
+        PreflightIssue, RuntimeError, SessionPhase, SessionRuntime, active_role_profile,
+        active_voice_route, assert_expected_revision, build_snapshot, cascade::retrieve,
+        execute_agent_command, preflight, run_cascade_turn,
     },
     sessions::{NewCitation, NewSession, NewSnapshot, NewTurn, SessionRecord, SessionStore},
 };
@@ -186,6 +187,7 @@ pub struct SessionService<S: PlaybackSink = NoopSink> {
     sink: S,
     control: Arc<SessionControl>,
     turn_index: i64,
+    revision: u64,
     unused_materials: bool,
     last_error_code: Option<String>,
 }
@@ -211,6 +213,7 @@ impl<S: PlaybackSink> SessionService<S> {
             sink,
             control: SessionControl::new(),
             turn_index: 0,
+            revision: 0,
             unused_materials: false,
             last_error_code: None,
         }
@@ -250,6 +253,10 @@ impl<S: PlaybackSink> SessionService<S> {
 
     pub fn last_error_code(&self) -> Option<&str> {
         self.last_error_code.as_deref()
+    }
+
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 
     pub fn reset(&mut self) {
@@ -456,6 +463,7 @@ impl<S: PlaybackSink> SessionService<S> {
             &serde_json::json!({ "text": truncate(&turn.assistant_text) }).to_string(),
         )?;
         self.turn_index += 1;
+        self.revision += 1;
         self.unused_materials = !turn.materials_used;
         self.last_error_code = None;
 
@@ -477,6 +485,164 @@ impl<S: PlaybackSink> SessionService<S> {
         self.runtime.transition(SessionPhase::Listening)?;
         persist_phase(&store, &session_id, SessionPhase::Listening)?;
         Ok(Some(turn))
+    }
+
+    pub fn execute_command(
+        &mut self,
+        database: &Database,
+        config: &PublicConfig,
+        probes: &SessionProbes<'_>,
+        credentials: CascadeCredentials<'_>,
+        command: AgentCommand,
+    ) -> Result<AgentCommandOutcome, SessionServiceError> {
+        self.poll_sidecar(database)?;
+        self.runtime.set_mode(self.control.mode());
+        if self.control.take_stop_tts() {
+            self.sink.cancel();
+        }
+        let session_id = self
+            .session_id
+            .clone()
+            .ok_or(SessionServiceError::NotFound)?;
+        if command.action == AgentCommandAction::SetMode {
+            let mode = command.mode.ok_or(SessionServiceError::StateInvalid)?;
+            self.set_mode(database, mode)?;
+            return Ok(AgentCommandOutcome::ok(
+                command.command_id,
+                command.action,
+                [("mode", serde_json::json!(mode.as_str()))]
+                    .into_iter()
+                    .map(|(key, value)| (key.to_owned(), value))
+                    .collect(),
+            ));
+        }
+        if matches!(
+            command.action,
+            AgentCommandAction::Retry | AgentCommandAction::Correct
+        ) && let Err(error) = assert_expected_revision(command.expected_revision, self.revision)
+        {
+            return Ok(AgentCommandOutcome::fail(
+                command.command_id,
+                command.action,
+                error.code(),
+            ));
+        }
+        let store = SessionStore::new(database);
+        let turns = store.list_turns(&session_id)?;
+        if matches!(
+            command.action,
+            AgentCommandAction::Retry | AgentCommandAction::Correct
+        ) && turns.is_empty()
+        {
+            return Ok(AgentCommandOutcome::fail(
+                command.command_id,
+                command.action,
+                AgentCommandError::Invalid.code(),
+            ));
+        }
+        let config = with_default_voice(config);
+        let e2e_route = active_voice_route(&config)
+            .is_some_and(|route| route.mode == crate::config::VoiceRouteMode::E2e);
+        let history = turns
+            .iter()
+            .map(|turn| HistoryTurn {
+                user_text: turn.user_text.clone(),
+                assistant_text: turn.assistant_text.clone(),
+            })
+            .collect::<Vec<_>>();
+        let last_turn_id = turns.last().map(|turn| turn.id.clone());
+        let cached_pcm = std::cell::RefCell::new(Option::<Vec<u8>>::None);
+        let last_error = std::cell::RefCell::new(Option::<SessionServiceError>::None);
+        let include_audio = command.action != AgentCommandAction::Report;
+        let cancel = self.control.cancel_flag();
+        let generate = |prompt: &str| match generate_command_text(
+            CommandGenerate {
+                probes,
+                config: &config,
+                credentials,
+                history: &history,
+                prompt,
+                e2e_route,
+                include_audio,
+            },
+            cancel,
+        ) {
+            Ok((text, pcm)) => {
+                if !pcm.is_empty() {
+                    *cached_pcm.borrow_mut() = Some(pcm);
+                }
+                Ok(text)
+            }
+            Err(error) => {
+                *last_error.borrow_mut() = Some(error);
+                Err(AgentCommandError::Invalid)
+            }
+        };
+        let speak = |text: &str| match speak_command_text(
+            probes,
+            &config,
+            credentials,
+            text,
+            e2e_route,
+            cached_pcm.borrow_mut().take(),
+            cancel,
+        ) {
+            Ok(pcm) => {
+                if self.control.take_stop_tts() || self.control.is_cancelled() {
+                    self.sink.cancel();
+                } else if !pcm.is_empty() {
+                    self.sink.play_pcm(&pcm, 24_000);
+                }
+                Ok(())
+            }
+            Err(error) => {
+                *last_error.borrow_mut() = Some(error);
+                Err(AgentCommandError::Invalid)
+            }
+        };
+        match execute_agent_command(&command, generate, speak) {
+            Ok(result) => {
+                if matches!(
+                    command.action,
+                    AgentCommandAction::Retry | AgentCommandAction::Correct
+                ) {
+                    let replacement = if command.action == AgentCommandAction::Retry {
+                        result
+                            .get("question")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("")
+                    } else {
+                        command.answer.as_str()
+                    };
+                    if let Some(turn_id) = last_turn_id.as_deref() {
+                        store.update_assistant_text(turn_id, replacement)?;
+                        store.append_event(
+                            &session_id,
+                            "reply",
+                            &serde_json::json!({ "text": truncate(replacement) }).to_string(),
+                        )?;
+                    }
+                    self.revision += 1;
+                }
+                self.last_error_code = None;
+                Ok(AgentCommandOutcome::ok(
+                    command.command_id,
+                    command.action,
+                    result,
+                ))
+            }
+            Err(error) => {
+                if let Some(service_error) = last_error.into_inner() {
+                    self.last_error_code = Some(service_error.code().to_owned());
+                    return Err(service_error);
+                }
+                Ok(AgentCommandOutcome::fail(
+                    command.command_id,
+                    command.action,
+                    error.code(),
+                ))
+            }
+        }
     }
 
     pub fn poll_sidecar(
@@ -504,6 +670,7 @@ impl<S: PlaybackSink> SessionService<S> {
         self.runtime = SessionRuntime::new();
         self.session_id = None;
         self.turn_index = 0;
+        self.revision = 0;
         self.unused_materials = false;
         self.last_error_code = None;
         self.control.reset();
@@ -607,6 +774,224 @@ impl<S: PlaybackSink> SessionService<S> {
         store.append_event(&session_id, "status", &status_payload(SessionPhase::Failed))?;
         Ok(())
     }
+}
+
+struct CommandGenerate<'a> {
+    probes: &'a SessionProbes<'a>,
+    config: &'a PublicConfig,
+    credentials: CascadeCredentials<'a>,
+    history: &'a [HistoryTurn],
+    prompt: &'a str,
+    e2e_route: bool,
+    include_audio: bool,
+}
+
+fn generate_command_text(
+    request: CommandGenerate<'_>,
+    cancel: &AtomicBool,
+) -> Result<(String, Vec<u8>), SessionServiceError> {
+    if request.e2e_route {
+        let (endpoint, model_id) = e2e_endpoint(request.config)?;
+        let turn = request.probes.realtime.text_turn(
+            RealtimeTextRequest {
+                endpoint: &endpoint,
+                credential: request.credentials.e2e,
+                model_id: &model_id,
+                instructions: "你是实时语音助手。严格参考会话上下文完成请求，不泄露系统配置。",
+                prompt: &command_prompt(request.history, request.prompt),
+                include_audio: request.include_audio,
+            },
+            cancel,
+        )?;
+        return Ok((turn.assistant_text, turn.tts_pcm));
+    }
+    let (endpoint, model_id) = llm_endpoint(request.config)?;
+    let messages = command_messages(request.config, request.history, request.prompt);
+    let text =
+        request
+            .probes
+            .llm
+            .complete(&endpoint, request.credentials.llm, &model_id, &messages)?;
+    Ok((text, Vec::new()))
+}
+
+fn speak_command_text(
+    probes: &SessionProbes<'_>,
+    config: &PublicConfig,
+    credentials: CascadeCredentials<'_>,
+    text: &str,
+    e2e_route: bool,
+    cached_pcm: Option<Vec<u8>>,
+    cancel: &AtomicBool,
+) -> Result<Vec<u8>, SessionServiceError> {
+    if let Some(pcm) = cached_pcm.filter(|bytes| !bytes.is_empty()) {
+        return Ok(pcm);
+    }
+    if e2e_route {
+        let (endpoint, model_id) = e2e_endpoint(config)?;
+        let turn = probes.realtime.text_turn(
+            RealtimeTextRequest {
+                endpoint: &endpoint,
+                credential: credentials.e2e,
+                model_id: &model_id,
+                instructions: "逐字朗读用户提供的文本，不添加、不删除、不改写。",
+                prompt: text,
+                include_audio: true,
+            },
+            cancel,
+        )?;
+        return Ok(turn.tts_pcm);
+    }
+    let route =
+        active_voice_route(config).ok_or(CascadeError::EndpointInvalid(CascadeStage::Tts))?;
+    let endpoint = config
+        .models
+        .providers
+        .iter()
+        .find(|provider| Some(provider.id.as_str()) == route.tts_provider_id.as_deref())
+        .map(|provider| ProviderEndpoint {
+            provider_id: provider.id.clone(),
+            base_url: provider.base_url.clone(),
+        })
+        .filter(|endpoint| !endpoint.base_url.is_empty())
+        .ok_or(CascadeError::EndpointInvalid(CascadeStage::Tts))?;
+    let model_id = route
+        .tts_model_id
+        .as_deref()
+        .filter(|id| !id.is_empty())
+        .ok_or(CascadeError::EndpointInvalid(CascadeStage::Tts))?;
+    let voice_id = route
+        .voice_id
+        .as_deref()
+        .filter(|id| !id.is_empty())
+        .unwrap_or("alloy");
+    match probes
+        .tts
+        .synthesize(&endpoint, credentials.tts, model_id, voice_id, text)
+    {
+        Ok(pcm) => Ok(pcm),
+        Err(_) => Ok(Vec::new()),
+    }
+}
+
+fn e2e_endpoint(config: &PublicConfig) -> Result<(ProviderEndpoint, String), SessionServiceError> {
+    let route = active_voice_route(config).ok_or(RealtimeError::UrlInvalid)?;
+    let provider_id = route
+        .e2e_provider_id
+        .as_deref()
+        .filter(|id| !id.is_empty())
+        .ok_or(RealtimeError::UrlInvalid)?;
+    let model_id = route
+        .e2e_model_id
+        .as_deref()
+        .filter(|id| !id.is_empty())
+        .ok_or(RealtimeError::UrlInvalid)?
+        .to_owned();
+    let endpoint = config
+        .models
+        .providers
+        .iter()
+        .find(|provider| provider.id == provider_id)
+        .map(|provider| ProviderEndpoint {
+            provider_id: provider.id.clone(),
+            base_url: provider.base_url.clone(),
+        })
+        .filter(|endpoint| !endpoint.base_url.is_empty())
+        .ok_or(RealtimeError::UrlInvalid)?;
+    Ok((endpoint, model_id))
+}
+
+fn llm_endpoint(config: &PublicConfig) -> Result<(ProviderEndpoint, String), SessionServiceError> {
+    let route =
+        active_voice_route(config).ok_or(CascadeError::EndpointInvalid(CascadeStage::Llm))?;
+    let provider_id = route
+        .llm_provider_id
+        .as_deref()
+        .filter(|id| !id.is_empty())
+        .ok_or(CascadeError::EndpointInvalid(CascadeStage::Llm))?;
+    let model_id = route
+        .llm_model_id
+        .as_deref()
+        .filter(|id| !id.is_empty())
+        .ok_or(CascadeError::EndpointInvalid(CascadeStage::Llm))?
+        .to_owned();
+    let endpoint = config
+        .models
+        .providers
+        .iter()
+        .find(|provider| provider.id == provider_id)
+        .map(|provider| ProviderEndpoint {
+            provider_id: provider.id.clone(),
+            base_url: provider.base_url.clone(),
+        })
+        .filter(|endpoint| !endpoint.base_url.is_empty())
+        .ok_or(CascadeError::EndpointInvalid(CascadeStage::Llm))?;
+    Ok((endpoint, model_id))
+}
+
+fn command_messages(
+    config: &PublicConfig,
+    history: &[HistoryTurn],
+    prompt: &str,
+) -> Vec<ChatMessage> {
+    let mut messages = Vec::new();
+    if let Some(role) = active_role_profile(config) {
+        let mut system = role.system_prompt.clone();
+        if !role.style_instructions.is_empty() {
+            if !system.is_empty() {
+                system.push_str("\n\n");
+            }
+            system.push_str(&role.style_instructions);
+        }
+        if !system.is_empty() {
+            messages.push(ChatMessage {
+                role: "system".into(),
+                content: system,
+            });
+        }
+    }
+    for turn in history
+        .iter()
+        .rev()
+        .take(20)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+    {
+        messages.push(ChatMessage {
+            role: "user".into(),
+            content: turn.user_text.clone(),
+        });
+        messages.push(ChatMessage {
+            role: "assistant".into(),
+            content: turn.assistant_text.clone(),
+        });
+    }
+    messages.push(ChatMessage {
+        role: "user".into(),
+        content: prompt.to_owned(),
+    });
+    messages
+}
+
+fn command_prompt(history: &[HistoryTurn], prompt: &str) -> String {
+    let mut context = String::new();
+    for turn in history
+        .iter()
+        .rev()
+        .take(20)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+    {
+        context.push_str("用户：");
+        context.push_str(&turn.user_text);
+        context.push('\n');
+        context.push_str("助手：");
+        context.push_str(&turn.assistant_text);
+        context.push('\n');
+    }
+    format!("会话上下文：{context}\n任务：{prompt}")
 }
 
 fn persist_snapshot(
@@ -778,7 +1163,8 @@ mod tests {
         database::Database,
         providers::{
             CascadeError, ChatMessage, ChatModel, EmbeddingError, EmbeddingProbe, ProviderEndpoint,
-            RealtimeError, RealtimeModel, RealtimeTurn, SpeechToText, TextToSpeech,
+            RealtimeError, RealtimeModel, RealtimeTextRequest, RealtimeTurn, SpeechToText,
+            TextToSpeech,
         },
         runtime::{
             AgentMode, CascadeCredentials, SessionPhase,
@@ -955,6 +1341,7 @@ mod tests {
         error: Mutex<Option<RealtimeError>>,
         cancel_after: bool,
         calls: AtomicU32,
+        text_calls: AtomicU32,
         pcm: Mutex<Vec<u8>>,
         model_id: Mutex<Option<String>>,
     }
@@ -968,6 +1355,7 @@ mod tests {
                 error: Mutex::new(None),
                 cancel_after: false,
                 calls: AtomicU32::new(0),
+                text_calls: AtomicU32::new(0),
                 pcm: Mutex::new(Vec::new()),
                 model_id: Mutex::new(None),
             }
@@ -981,6 +1369,7 @@ mod tests {
                 error: Mutex::new(Some(error)),
                 cancel_after: false,
                 calls: AtomicU32::new(0),
+                text_calls: AtomicU32::new(0),
                 pcm: Mutex::new(Vec::new()),
                 model_id: Mutex::new(None),
             }
@@ -1014,6 +1403,26 @@ mod tests {
             }
             if self.cancel_after {
                 cancel.store(true, Ordering::SeqCst);
+            }
+            Ok(RealtimeTurn {
+                user_text: self.user_text.clone(),
+                assistant_text: self.assistant_text.clone(),
+                tts_pcm: self.tts_pcm.clone(),
+            })
+        }
+
+        fn text_turn(
+            &self,
+            request: RealtimeTextRequest<'_>,
+            cancel: &AtomicBool,
+        ) -> Result<RealtimeTurn, RealtimeError> {
+            self.text_calls.fetch_add(1, Ordering::SeqCst);
+            *self.model_id.lock().expect("model") = Some(request.model_id.to_owned());
+            if cancel.load(Ordering::SeqCst) {
+                return Err(RealtimeError::Cancelled);
+            }
+            if let Some(error) = self.error.lock().expect("error").take() {
+                return Err(error);
             }
             Ok(RealtimeTurn {
                 user_text: self.user_text.clone(),
@@ -1755,5 +2164,240 @@ mod tests {
                 .iter()
                 .any(|citation| citation.snippet.contains("订单服务"))
         );
+    }
+
+    fn cascaded_probes<'a>(
+        asr: &'a ScriptedAsr,
+        llm: &'a ScriptedLlm,
+        tts: &'a ScriptedTts,
+        embed: &'a UnusedEmbed,
+    ) -> SessionProbes<'a> {
+        SessionProbes {
+            asr,
+            llm,
+            tts,
+            embed,
+            realtime: &UnusedRealtime,
+        }
+    }
+
+    fn parse_cmd(payload: serde_json::Value) -> crate::runtime::AgentCommand {
+        crate::runtime::parse_agent_command(&payload).expect("command")
+    }
+
+    #[test]
+    fn say_speaks_via_tts_and_result_omits_pcm() {
+        let (_directory, database) = opened();
+        let mut service = SessionService::with_sink(RecordingSink::default());
+        start_ready_sink(&mut service, &database, &ready_public_config());
+        let asr = ScriptedAsr::ok("ignored");
+        let llm = ScriptedLlm::ok("should-not-run");
+        let tts = ScriptedTts::ok(&[0x11, 0x22]);
+        let embed = UnusedEmbed;
+        let probes = cascaded_probes(&asr, &llm, &tts, &embed);
+
+        let outcome = service
+            .execute_command(
+                &database,
+                &ready_public_config(),
+                &probes,
+                credentials(),
+                parse_cmd(serde_json::json!({
+                    "v": 1,
+                    "id": "cmd-say",
+                    "action": "say",
+                    "text": "请开始"
+                })),
+            )
+            .expect("say");
+
+        assert!(outcome.ok);
+        assert_eq!(outcome.command_id, "cmd-say");
+        assert_eq!(outcome.action.as_str(), "say");
+        assert_eq!(outcome.result["text"], "请开始");
+        assert_eq!(outcome.error, "");
+        assert_eq!(tts.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(llm.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(service.sink().recorded(), [0x11, 0x22]);
+        let json = serde_json::to_string(&outcome.result).unwrap();
+        assert!(!json.contains("pcm"));
+        assert!(!json.to_ascii_lowercase().contains("sk-"));
+    }
+
+    #[test]
+    fn retry_replaces_last_assistant_and_revision_mismatch_fails_closed() {
+        let (_directory, database) = opened();
+        let mut service = SessionService::new();
+        let id = start_ready(&mut service, &database);
+        let asr = ScriptedAsr::ok("ignored");
+        let first = ScriptedLlm::ok("原回复");
+        let tts = ScriptedTts::ok(&[0x01]);
+        let embed = UnusedEmbed;
+        service
+            .finalize_utterance(
+                &database,
+                &ready_public_config(),
+                &cascaded_probes(&asr, &first, &tts, &embed),
+                credentials(),
+                Some("你好"),
+            )
+            .unwrap()
+            .expect("turn");
+        assert_eq!(service.revision(), 1);
+
+        let stale = service
+            .execute_command(
+                &database,
+                &ready_public_config(),
+                &cascaded_probes(&asr, &first, &tts, &embed),
+                credentials(),
+                parse_cmd(serde_json::json!({
+                    "v": 1,
+                    "id": "cmd-stale",
+                    "action": "retry",
+                    "expectedRevision": 0
+                })),
+            )
+            .expect("stale outcome");
+        assert!(!stale.ok);
+        assert_eq!(stale.error, "SESSION_CHANGED");
+        assert_eq!(
+            SessionStore::new(&database).list_turns(&id).unwrap()[0].assistant_text,
+            "原回复"
+        );
+
+        let retry_llm = ScriptedLlm::ok("新回复");
+        let outcome = service
+            .execute_command(
+                &database,
+                &ready_public_config(),
+                &cascaded_probes(&asr, &retry_llm, &tts, &embed),
+                credentials(),
+                parse_cmd(serde_json::json!({
+                    "v": 1,
+                    "id": "cmd-retry",
+                    "action": "retry",
+                    "expectedRevision": 1
+                })),
+            )
+            .expect("retry");
+        assert!(outcome.ok, "{outcome:?}");
+        assert_eq!(outcome.result["question"], "新回复");
+        assert_eq!(service.revision(), 2);
+        assert_eq!(
+            SessionStore::new(&database).list_turns(&id).unwrap()[0].assistant_text,
+            "新回复"
+        );
+    }
+
+    #[test]
+    fn correct_replaces_last_assistant_and_speaks_given_text() {
+        let (_directory, database) = opened();
+        let mut service = SessionService::with_sink(RecordingSink::default());
+        let id = start_ready_sink(&mut service, &database, &ready_public_config());
+        let asr = ScriptedAsr::ok("ignored");
+        let llm = ScriptedLlm::ok("原回复");
+        let tts = ScriptedTts::ok(&[0x33]);
+        let embed = UnusedEmbed;
+        service
+            .finalize_utterance(
+                &database,
+                &ready_public_config(),
+                &cascaded_probes(&asr, &llm, &tts, &embed),
+                credentials(),
+                Some("你好"),
+            )
+            .unwrap();
+
+        let outcome = service
+            .execute_command(
+                &database,
+                &ready_public_config(),
+                &cascaded_probes(&asr, &llm, &tts, &embed),
+                credentials(),
+                parse_cmd(serde_json::json!({
+                    "v": 1,
+                    "id": "cmd-correct",
+                    "action": "correct",
+                    "answer": "改成这句",
+                    "expectedRevision": 1
+                })),
+            )
+            .expect("correct");
+        assert!(outcome.ok);
+        assert_eq!(outcome.result["answer"], "改成这句");
+        assert_eq!(
+            SessionStore::new(&database).list_turns(&id).unwrap()[0].assistant_text,
+            "改成这句"
+        );
+        assert!(service.sink().recorded().ends_with(&[0x33]));
+        assert_eq!(service.revision(), 2);
+    }
+
+    #[test]
+    fn report_returns_summary_without_speaking_or_secrets() {
+        let (_directory, database) = opened();
+        let mut service = SessionService::with_sink(RecordingSink::default());
+        start_ready_sink(&mut service, &database, &ready_public_config());
+        let asr = ScriptedAsr::ok("ignored");
+        let llm = ScriptedLlm::ok(
+            r#"{"summary":"短纪要","strengths":[],"followUps":[],"limitations":[],"evidence":[]}"#,
+        );
+        let tts = ScriptedTts::ok(&[0x44]);
+        let embed = UnusedEmbed;
+        let before = service.sink().recorded().len();
+        let outcome = service
+            .execute_command(
+                &database,
+                &ready_public_config(),
+                &cascaded_probes(&asr, &llm, &tts, &embed),
+                credentials(),
+                parse_cmd(serde_json::json!({
+                    "v": 1,
+                    "id": "cmd-report",
+                    "action": "report"
+                })),
+            )
+            .expect("report");
+        assert!(outcome.ok);
+        assert_eq!(outcome.result["summary"], "短纪要");
+        assert_eq!(tts.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(service.sink().recorded().len(), before);
+        let json = serde_json::to_string(&outcome.result).unwrap();
+        assert!(!json.contains("pcm"));
+        assert!(!json.to_ascii_lowercase().contains("sk-"));
+    }
+
+    #[test]
+    fn e2e_say_uses_realtime_text_turn() {
+        let (_directory, database) = opened();
+        let mut service = SessionService::with_sink(RecordingSink::default());
+        start_ready_sink(&mut service, &database, &ready_e2e_public_config());
+        let asr = ScriptedAsr::ok("should-not-run");
+        let llm = ScriptedLlm::ok("should-not-run");
+        let tts = ScriptedTts::ok(&[0x99]);
+        let embed = UnusedEmbed;
+        let realtime = FakeRealtime::ok("", "请开始", &[0x55, 0x66]);
+        let probes = e2e_probes(&asr, &llm, &tts, &embed, &realtime);
+        let outcome = service
+            .execute_command(
+                &database,
+                &ready_e2e_public_config(),
+                &probes,
+                credentials(),
+                parse_cmd(serde_json::json!({
+                    "v": 1,
+                    "id": "cmd-e2e-say",
+                    "action": "say",
+                    "text": "请开始"
+                })),
+            )
+            .expect("e2e say");
+        assert!(outcome.ok);
+        assert_eq!(realtime.text_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(asr.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(llm.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(tts.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(service.sink().recorded(), [0x55, 0x66]);
     }
 }

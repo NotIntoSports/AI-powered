@@ -194,6 +194,11 @@ description = "Allows finalizing one cascade utterance and persisting the turn."
 commands.allow = ["session_finalize_utterance"]
 
 [[permission]]
+identifier = "allow-session-agent-command"
+description = "Allows executing say, retry, correct, or report on the active session."
+commands.allow = ["session_agent_command"]
+
+[[permission]]
 identifier = "allow-runtime-get-status"
 description = "Allows reading the current cascade runtime phase and mode."
 commands.allow = ["runtime_get_status"]

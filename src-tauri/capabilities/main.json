@@ -44,6 +44,7 @@
     "allow-session-get",
     "allow-session-delete",
     "allow-session-finalize-utterance",
+    "allow-session-agent-command",
     "allow-runtime-get-status"
   ]
 }

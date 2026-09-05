@@ -97,6 +97,15 @@ pub struct RealtimeTurn {
     pub tts_pcm: Vec<u8>,
 }
 
+pub struct RealtimeTextRequest<'a> {
+    pub endpoint: &'a ProviderEndpoint,
+    pub credential: Option<&'a str>,
+    pub model_id: &'a str,
+    pub instructions: &'a str,
+    pub prompt: &'a str,
+    pub include_audio: bool,
+}
+
 pub trait RealtimeModel: Send + Sync {
     fn transcribe_turn(
         &self,
@@ -107,6 +116,15 @@ pub trait RealtimeModel: Send + Sync {
         sample_rate: u32,
         cancel: &AtomicBool,
     ) -> Result<RealtimeTurn, RealtimeError>;
+
+    fn text_turn(
+        &self,
+        request: RealtimeTextRequest<'_>,
+        cancel: &AtomicBool,
+    ) -> Result<RealtimeTurn, RealtimeError> {
+        let _ = (request, cancel);
+        Err(RealtimeError::TextEmpty)
+    }
 }
 
 pub trait RealtimeTransport {
@@ -152,6 +170,45 @@ impl RealtimeModel for OpenAiCompatibleRealtime {
         }
         send_text(&mut socket, &append_audio_event(pcm16le))?;
         send_text(&mut socket, r#"{"type":"input_audio_buffer.commit"}"#)?;
+        collect_turn(&mut socket, cancel)
+    }
+
+    fn text_turn(
+        &self,
+        request: RealtimeTextRequest<'_>,
+        cancel: &AtomicBool,
+    ) -> Result<RealtimeTurn, RealtimeError> {
+        if cancel.load(Ordering::Relaxed) {
+            return Err(RealtimeError::Cancelled);
+        }
+        let url = realtime_url(&request.endpoint.base_url, request.model_id)?;
+        let dialect = realtime_dialect(&request.endpoint.base_url);
+        let mut socket = connect_realtime(&url, request.credential)?;
+        let modalities = if request.include_audio {
+            json!(["text", "audio"])
+        } else {
+            json!(["text"])
+        };
+        let mut session = json!({
+            "modalities": modalities,
+            "instructions": request.instructions,
+            "input_audio_format": dialect.audio_format,
+            "output_audio_format": dialect.audio_format,
+        });
+        let voice = dialect.default_voice.unwrap_or("");
+        if !voice.is_empty() {
+            session["voice"] = json!(voice);
+        }
+        send_text(
+            &mut socket,
+            &json!({ "type": "session.update", "session": session }).to_string(),
+        )?;
+        wait_session_updated(&mut socket, SESSION_UPDATED_TIMEOUT)?;
+        if cancel.load(Ordering::Relaxed) {
+            return Err(RealtimeError::Cancelled);
+        }
+        send_text(&mut socket, &conversation_text_event(request.prompt))?;
+        send_text(&mut socket, &response_create_event(request.include_audio))?;
         collect_turn(&mut socket, cancel)
     }
 }
@@ -328,6 +385,31 @@ fn append_audio_event(pcm: &[u8]) -> String {
     json!({
         "type": "input_audio_buffer.append",
         "audio": STANDARD.encode(pcm),
+    })
+    .to_string()
+}
+
+fn conversation_text_event(text: &str) -> String {
+    json!({
+        "type": "conversation.item.create",
+        "item": {
+            "type": "message",
+            "role": "user",
+            "content": [{ "type": "input_text", "text": text }],
+        },
+    })
+    .to_string()
+}
+
+fn response_create_event(include_audio: bool) -> String {
+    let modalities = if include_audio {
+        json!(["text", "audio"])
+    } else {
+        json!(["text"])
+    };
+    json!({
+        "type": "response.create",
+        "response": { "modalities": modalities },
     })
     .to_string()
 }

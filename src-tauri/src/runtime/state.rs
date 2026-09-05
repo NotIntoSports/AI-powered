@@ -51,8 +51,8 @@ impl AgentMode {
 
     pub fn from_name(name: &str) -> Option<Self> {
         match name {
-            "ai_active" => Some(Self::AiActive),
-            "operator_speaking" => Some(Self::OperatorSpeaking),
+            "ai_active" | "ai-active" => Some(Self::AiActive),
+            "operator_speaking" | "operator-speaking" => Some(Self::OperatorSpeaking),
             "paused" => Some(Self::Paused),
             "muted" => Some(Self::Muted),
             _ => None,
@@ -192,6 +192,23 @@ fn is_legal_transition(from: SessionPhase, to: SessionPhase) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{AgentMode, RuntimeError, RuntimeEvent, SessionPhase, SessionRuntime};
+
+    #[test]
+    fn from_name_maps_hyphenated_contract_modes() {
+        assert_eq!(AgentMode::from_name("ai-active"), Some(AgentMode::AiActive));
+        assert_eq!(
+            AgentMode::from_name("operator-speaking"),
+            Some(AgentMode::OperatorSpeaking)
+        );
+        assert_eq!(AgentMode::from_name("ai_active"), Some(AgentMode::AiActive));
+        assert_eq!(
+            AgentMode::from_name("operator_speaking"),
+            Some(AgentMode::OperatorSpeaking)
+        );
+        assert_eq!(AgentMode::from_name("paused"), Some(AgentMode::Paused));
+        assert_eq!(AgentMode::from_name("muted"), Some(AgentMode::Muted));
+        assert_eq!(AgentMode::from_name("guess-the-speaker"), None);
+    }
 
     #[test]
     fn happy_path_and_stop_transitions_are_legal() {

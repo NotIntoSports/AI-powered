@@ -9,16 +9,20 @@ use crate::{
         VoiceRouteConfig, diagnostic_view, public_view,
     },
     contracts::{
-        AudioLevelEvent, CommandResult, DiagnosticsExportResult, FoundationStatus, RuntimeStatus,
-        SessionCitationView, SessionDetail, SessionExportResult, SessionReplyEvent,
-        SessionStartResult, SessionSummary, SessionTranscriptEvent, SessionTurnView, StartupState,
+        AgentCommandInput, AgentCommandResult, AudioLevelEvent, CommandResult,
+        DiagnosticsExportResult, FoundationStatus, RuntimeStatus, SessionCitationView,
+        SessionDetail, SessionExportResult, SessionReplyEvent, SessionStartResult, SessionSummary,
+        SessionTranscriptEvent, SessionTurnView, StartupState,
     },
     error::PublicError,
     providers::{
         OfficialLiveKitProbe, OpenAiCompatibleCascade, OpenAiCompatibleEmbeddingProbe,
         OpenAiCompatibleProbe, OpenAiCompatibleRealtime,
     },
-    runtime::{AgentMode, CascadeCredentials, active_embedding, active_voice_route, preflight},
+    runtime::{
+        AgentMode, CascadeCredentials, active_embedding, active_voice_route, parse_agent_command,
+        preflight,
+    },
     services::{
         EmbeddingConfigSaveInput, EmbeddingService, EmbeddingServiceError, EmbeddingTestResult,
         LiveKitSettingsError, LiveKitSettingsSaveInput, LiveKitSettingsService, LiveKitTestResult,
@@ -794,6 +798,71 @@ fn session_export_cmd(
     }
 }
 
+fn session_agent_command_cmd(
+    state: &AppState,
+    probes: &SessionProbes<'_>,
+    credentials: CascadeCredentials<'_>,
+    input: AgentCommandInput,
+) -> CommandResult<AgentCommandResult> {
+    let payload = serde_json::json!({
+        "v": 1,
+        "id": input.id,
+        "action": input.action,
+        "text": input.text.unwrap_or_default(),
+        "answer": input.answer.unwrap_or_default(),
+        "expectedRevision": input.expected_revision,
+        "mode": input.mode.unwrap_or_default(),
+    });
+    let command = match parse_agent_command(&payload) {
+        Ok(command) => command,
+        Err(error) => {
+            return CommandResult::Ok {
+                data: AgentCommandResult {
+                    command_id: input.id,
+                    action: input.action,
+                    ok: false,
+                    result: serde_json::json!({}),
+                    error: error.code().to_owned(),
+                },
+            };
+        }
+    };
+    let config = match load_public_config(state) {
+        Ok(config) => config,
+        Err(error) => return CommandResult::Err { error },
+    };
+    let database = match state.database.lock() {
+        Ok(guard) => guard,
+        Err(_) => {
+            return service_error("DATABASE_OPERATION_FAILED", "Database is unavailable");
+        }
+    };
+    let Some(database) = database.as_ref() else {
+        return service_error("DATABASE_OPERATION_FAILED", "Database is unavailable");
+    };
+    let mut sessions = match state.sessions.lock() {
+        Ok(guard) => guard,
+        Err(_) => {
+            return service_error(
+                "SERVICE_BUSY",
+                "Service configuration is temporarily unavailable",
+            );
+        }
+    };
+    match sessions.execute_command(database, &config, probes, credentials, command) {
+        Ok(outcome) => CommandResult::Ok {
+            data: AgentCommandResult {
+                command_id: outcome.command_id,
+                action: outcome.action.as_str().to_owned(),
+                ok: outcome.ok,
+                result: serde_json::Value::Object(outcome.result),
+                error: outcome.error,
+            },
+        },
+        Err(error) => session_service_error(error),
+    }
+}
+
 fn session_finalize_utterance_cmd(
     state: &AppState,
     probes: &SessionProbes<'_>,
@@ -1028,6 +1097,102 @@ pub fn session_finalize_utterance(
     );
     if let CommandResult::Ok { data } = &result {
         emit_transcript_and_reply(&app, &state, &data.user_text, &data.assistant_text);
+    }
+    emit_runtime(&app, &state);
+    result
+}
+
+#[tauri::command]
+pub fn session_agent_command(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    input: AgentCommandInput,
+) -> CommandResult<AgentCommandResult> {
+    let _guard = match service_guard(&state) {
+        Ok(guard) => guard,
+        Err(error) => return error,
+    };
+    let cascade = match OpenAiCompatibleCascade::new() {
+        Ok(client) => client,
+        Err(error) => return service_error(error.code(), "Cascade client is unavailable"),
+    };
+    let embed = match OpenAiCompatibleEmbeddingProbe::new() {
+        Ok(client) => client,
+        Err(error) => return service_error(error.code(), "Embedding client is unavailable"),
+    };
+    let config = match load_public_config(&state) {
+        Ok(config) => config,
+        Err(error) => return CommandResult::Err { error },
+    };
+    let route = active_voice_route(&config);
+    let embedding = active_embedding(&config);
+    let asr_secret = match read_provider_secret(
+        &state,
+        &config,
+        route.and_then(|item| item.asr_provider_id.as_deref()),
+    ) {
+        Ok(secret) => secret,
+        Err(error) => return CommandResult::Err { error },
+    };
+    let llm_secret = match read_provider_secret(
+        &state,
+        &config,
+        route.and_then(|item| item.llm_provider_id.as_deref()),
+    ) {
+        Ok(secret) => secret,
+        Err(error) => return CommandResult::Err { error },
+    };
+    let tts_secret = match read_provider_secret(
+        &state,
+        &config,
+        route.and_then(|item| item.tts_provider_id.as_deref()),
+    ) {
+        Ok(secret) => secret,
+        Err(error) => return CommandResult::Err { error },
+    };
+    let embed_secret = match read_provider_secret(
+        &state,
+        &config,
+        embedding.map(|item| item.provider_id.as_str()),
+    ) {
+        Ok(secret) => secret,
+        Err(error) => return CommandResult::Err { error },
+    };
+    let e2e_secret = match read_provider_secret(
+        &state,
+        &config,
+        route.and_then(|item| item.e2e_provider_id.as_deref()),
+    ) {
+        Ok(secret) => secret,
+        Err(error) => return CommandResult::Err { error },
+    };
+    let realtime = OpenAiCompatibleRealtime::new();
+    let probes = SessionProbes {
+        asr: &cascade,
+        llm: &cascade,
+        tts: &cascade,
+        embed: &embed,
+        realtime: &realtime,
+    };
+    let credentials = CascadeCredentials {
+        asr: asr_secret.as_deref().map(String::as_str),
+        llm: llm_secret.as_deref().map(String::as_str),
+        tts: tts_secret.as_deref().map(String::as_str),
+        embed: embed_secret.as_deref().map(String::as_str),
+        e2e: e2e_secret.as_deref().map(String::as_str),
+    };
+    let result = session_agent_command_cmd(&state, &probes, credentials, input);
+    if let CommandResult::Ok { data } = &result
+        && data.ok
+    {
+        if let Some(text) = data.result.get("text").and_then(|value| value.as_str()) {
+            emit_transcript_and_reply(&app, &state, "", text);
+        } else if let Some(question) = data.result.get("question").and_then(|value| value.as_str())
+        {
+            emit_transcript_and_reply(&app, &state, "", question);
+        } else if let Some(answer) = data.result.get("answer").and_then(|value| value.as_str()) {
+            emit_transcript_and_reply(&app, &state, "", answer);
+        }
     }
     emit_runtime(&app, &state);
     result
@@ -1870,6 +2035,7 @@ mod tests {
             "session_delete",
             "session_export",
             "session_finalize_utterance",
+            "session_agent_command",
         ] {
             assert!(
                 command_body(source, name).contains("service_guard"),
@@ -2362,5 +2528,150 @@ mod tests {
                 "tts must not run after cancel"
             );
         });
+    }
+
+    #[test]
+    fn session_agent_command_say_retry_correct_report_without_pcm() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = session_state(&directory, &ready_session_config());
+        assert_eq!(
+            serde_json::to_value(super::session_start_cmd(&state)).unwrap()["ok"],
+            true
+        );
+        let asr = ScriptedAsr;
+        let llm = ScriptedLlm("助手回复");
+        let tts = ScriptedTts;
+        let embed = UnusedEmbed;
+        let probes = crate::services::SessionProbes {
+            asr: &asr,
+            llm: &llm,
+            tts: &tts,
+            embed: &embed,
+            realtime: &UnusedRealtime,
+        };
+        let credentials = crate::runtime::CascadeCredentials::default();
+        assert_eq!(
+            serde_json::to_value(super::session_finalize_utterance_cmd(
+                &state,
+                &probes,
+                credentials,
+                Some("你好"),
+            ))
+            .unwrap()["ok"],
+            true
+        );
+
+        let say = serde_json::to_value(super::session_agent_command_cmd(
+            &state,
+            &probes,
+            credentials,
+            super::AgentCommandInput {
+                id: "cmd-say".into(),
+                action: "say".into(),
+                text: Some("请开始".into()),
+                answer: None,
+                mode: None,
+                expected_revision: 1,
+            },
+        ))
+        .unwrap();
+        assert_eq!(say["ok"], true, "{say}");
+        assert_eq!(say["data"]["commandId"], "cmd-say");
+        assert_eq!(say["data"]["action"], "say");
+        assert_eq!(say["data"]["ok"], true);
+        assert_eq!(say["data"]["error"], "");
+        assert_eq!(say["data"]["result"]["text"], "请开始");
+        let say_json = say.to_string();
+        assert!(!say_json.contains("pcm"));
+        assert!(!say_json.to_ascii_lowercase().contains("sk-"));
+
+        let stale = serde_json::to_value(super::session_agent_command_cmd(
+            &state,
+            &probes,
+            credentials,
+            super::AgentCommandInput {
+                id: "cmd-stale".into(),
+                action: "retry".into(),
+                text: None,
+                answer: None,
+                mode: None,
+                expected_revision: 0,
+            },
+        ))
+        .unwrap();
+        assert_eq!(stale["ok"], true, "{stale}");
+        assert_eq!(stale["data"]["ok"], false);
+        assert_eq!(stale["data"]["error"], "SESSION_CHANGED");
+
+        let retry_llm = ScriptedLlm("新问题");
+        let retry_probes = crate::services::SessionProbes {
+            asr: &asr,
+            llm: &retry_llm,
+            tts: &tts,
+            embed: &embed,
+            realtime: &UnusedRealtime,
+        };
+        let retry = serde_json::to_value(super::session_agent_command_cmd(
+            &state,
+            &retry_probes,
+            credentials,
+            super::AgentCommandInput {
+                id: "cmd-retry".into(),
+                action: "retry".into(),
+                text: None,
+                answer: None,
+                mode: None,
+                expected_revision: 1,
+            },
+        ))
+        .unwrap();
+        assert_eq!(retry["ok"], true, "{retry}");
+        assert_eq!(retry["data"]["ok"], true);
+        assert_eq!(retry["data"]["result"]["question"], "新问题");
+
+        let correct = serde_json::to_value(super::session_agent_command_cmd(
+            &state,
+            &probes,
+            credentials,
+            super::AgentCommandInput {
+                id: "cmd-correct".into(),
+                action: "correct".into(),
+                text: None,
+                answer: Some("改成这句".into()),
+                mode: None,
+                expected_revision: 2,
+            },
+        ))
+        .unwrap();
+        assert_eq!(correct["ok"], true, "{correct}");
+        assert_eq!(correct["data"]["result"]["answer"], "改成这句");
+
+        let report_llm = ScriptedLlm(
+            r#"{"summary":"纪要","strengths":[],"followUps":[],"limitations":[],"evidence":[]}"#,
+        );
+        let report_probes = crate::services::SessionProbes {
+            asr: &asr,
+            llm: &report_llm,
+            tts: &tts,
+            embed: &embed,
+            realtime: &UnusedRealtime,
+        };
+        let report = serde_json::to_value(super::session_agent_command_cmd(
+            &state,
+            &report_probes,
+            credentials,
+            super::AgentCommandInput {
+                id: "cmd-report".into(),
+                action: "report".into(),
+                text: None,
+                answer: None,
+                mode: None,
+                expected_revision: 3,
+            },
+        ))
+        .unwrap();
+        assert_eq!(report["ok"], true, "{report}");
+        assert_eq!(report["data"]["result"]["summary"], "纪要");
+        assert!(!report.to_string().contains("pcm"));
     }
 }

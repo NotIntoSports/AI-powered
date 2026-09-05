@@ -184,6 +184,7 @@ fn cascade_session_commands_are_registered_and_permitted() {
         "session_get",
         "session_delete",
         "session_finalize_utterance",
+        "session_agent_command",
         "runtime_get_status",
     ];
     let lib = fs::read_to_string(manifest_dir().join("src/lib.rs")).unwrap();

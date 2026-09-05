@@ -190,6 +190,20 @@ impl<'a> SessionStore<'a> {
         })
     }
 
+    pub fn update_assistant_text(
+        &self,
+        turn_id: &str,
+        assistant_text: &str,
+    ) -> Result<(), DatabaseError> {
+        self.database.with_connection(|connection| {
+            connection.execute(
+                "UPDATE session_turns SET assistant_text = ?2 WHERE id = ?1",
+                params![turn_id, assistant_text],
+            )?;
+            Ok(())
+        })
+    }
+
     pub fn insert_turn(&self, turn: NewTurn<'_>) -> Result<(), DatabaseError> {
         let now = chrono::Utc::now().to_rfc3339();
         self.database.with_connection(|connection| {

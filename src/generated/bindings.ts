@@ -92,4 +92,8 @@ export type SessionReplyEvent = { seq: number, text: string, };
 
 export type AudioLevelEvent = { peak: number, seq: number, };
 
+export type AgentCommandInput = { id: string, action: string, text: string | null, answer: string | null, mode: string | null, expectedRevision: number, };
+
+export type AgentCommandResult = { commandId: string, action: string, ok: boolean, result: Record<string, unknown>, error: string, };
+
 export type CommandResult<T> = { ok: true; data: T } | { ok: false; error: PublicError };
