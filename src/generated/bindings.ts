@@ -10,4 +10,30 @@ export type DiagnosticsExportResult = { exported: boolean, };
 
 export type StartupState = { "kind": "ready" } | { "kind": "migrated" } | { "kind": "recoverable", error: PublicError, } | { "kind": "invalid", error: PublicError, };
 
+export type SecretSlot = { reference: string, configured: boolean, };
+
+export type ApplicationConfig = { locale: string | null, };
+
+export type ProviderConfig = { id: string, name: string | null, baseUrl: string, credential: SecretSlot | null, };
+
+export type ModelConfig = { providers: Array<ProviderConfig>, activeProviderId: string | null, };
+
+export type VoiceRouteMode = "cascaded" | "e2e";
+
+export type VoiceRouteConfig = { id: string, name: string, mode: VoiceRouteMode, asrProviderId: string | null, asrModelId: string | null, llmProviderId: string | null, llmModelId: string | null, ttsProviderId: string | null, ttsModelId: string | null, voiceId: string | null, e2eProviderId: string | null, e2eModelId: string | null, active: boolean, ready: boolean, status: string | null, configVersion: number, };
+
+export type SpeechConfig = { voiceRoutes: Array<VoiceRouteConfig>, activeVoiceRouteId: string | null, };
+
+export type TransportConfig = { livekitUrl: string | null, };
+
+export type KnowledgeConfig = { embeddingProviderId: string | null, };
+
+export type StorageConfig = { exportDirectory: string | null, };
+
+export type RoleProfile = { id: string, instructions: string, };
+
+export type DiagnosticsConfig = { logRetentionDays: number, };
+
+export type PublicConfig = { configVersion: number, application: ApplicationConfig, models: ModelConfig, speech: SpeechConfig, transport: TransportConfig, knowledge: KnowledgeConfig, storage: StorageConfig, roleProfiles: Array<RoleProfile>, diagnostics: DiagnosticsConfig, };
+
 export type CommandResult<T> = { ok: true; data: T } | { ok: false; error: PublicError };

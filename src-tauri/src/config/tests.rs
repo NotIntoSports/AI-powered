@@ -2,7 +2,7 @@ use std::{collections::HashMap, ffi::OsString, path::PathBuf};
 
 use super::{
     AppConfigV1, ConfigDirs, ConfigError, ConfigPatch, ConfigSource, ConfigStore, DiagnosticsPatch,
-    locate_config,
+    VoiceRouteMode, locate_config, public_view,
 };
 
 fn dirs() -> ConfigDirs {
@@ -84,6 +84,21 @@ fn parse_error(json: &str) -> ConfigError {
     AppConfigV1::from_json(json).unwrap_err()
 }
 
+/// Case-insensitive scan for secret material keywords, mirroring the contract
+/// regex `/apiKey|password|secret(Value|Contents)|token/i` without a regex dep.
+fn contains_secret_material(json: &str) -> bool {
+    let lower = json.to_ascii_lowercase();
+    [
+        "apikey",
+        "password",
+        "secretvalue",
+        "secretcontents",
+        "token",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+}
+
 #[test]
 fn minimal_configuration_uses_safe_defaults() {
     let config = AppConfigV1::from_json(r#"{"configVersion":1}"#).unwrap();
@@ -141,6 +156,87 @@ fn rejects_unsafe_urls_inline_secrets_and_invalid_retention() {
     assert_eq!(
         parse_error(r#"{"configVersion":1,"diagnostics":{"logRetentionDays":0}}"#).code(),
         "CONFIG_FIELD_INVALID"
+    );
+}
+
+#[test]
+fn voice_route_defaults_are_backward_compatible() {
+    let config =
+        AppConfigV1::from_json(r#"{"configVersion":1,"speech":{"voiceRoutes":[{"id":"r"}]}}"#)
+            .unwrap();
+    let route = &config.speech.voice_routes[0];
+    assert_eq!(route.mode, VoiceRouteMode::Cascaded);
+    assert!(route.name.is_empty());
+    assert!(!route.active);
+    assert!(!route.ready);
+    assert_eq!(route.config_version, 0);
+    assert!(route.asr_provider_id.is_none());
+    assert!(route.e2e_provider_id.is_none());
+}
+
+#[test]
+fn voice_route_rejects_unknown_mode_and_missing_provider_reference() {
+    assert_eq!(
+        parse_error(r#"{"configVersion":1,"speech":{"voiceRoutes":[{"id":"r","mode":"turbo"}]}}"#)
+            .code(),
+        "CONFIG_INVALID"
+    );
+    assert_eq!(
+        parse_error(r#"{"configVersion":1,"speech":{"voiceRoutes":[{"id":"r","mode":"cascaded","asrProviderId":"missing"}]}}"#).code(),
+        "CONFIG_REFERENCE_MISSING"
+    );
+}
+
+#[test]
+fn public_view_exposes_secret_references_but_never_secret_material() {
+    let config = AppConfigV1::from_json(
+        r#"{
+            "configVersion": 1,
+            "models": {
+                "providers": [{
+                    "id": "p1",
+                    "name": "Provider One",
+                    "baseUrl": "https://one.example",
+                    "credential": { "reference": "providers/p1/api-key", "configured": true }
+                }],
+                "activeProviderId": "p1"
+            },
+            "speech": {
+                "voiceRoutes": [{
+                    "id": "r1",
+                    "name": "Route One",
+                    "mode": "cascaded",
+                    "asrProviderId": "p1",
+                    "asrModelId": "asr-1",
+                    "llmProviderId": "p1",
+                    "llmModelId": "llm-1",
+                    "ttsProviderId": "p1",
+                    "ttsModelId": "tts-1",
+                    "voiceId": "voice-1",
+                    "active": true,
+                    "ready": true,
+                    "status": "ready",
+                    "configVersion": 3
+                }],
+                "activeVoiceRouteId": "r1"
+            }
+        }"#,
+    )
+    .unwrap();
+
+    let public = public_view(&config);
+    let json = serde_json::to_string(&public).unwrap();
+
+    // The credential survives only as a SecretSlot reference + configured flag.
+    assert!(json.contains("providers/p1/api-key"));
+    assert!(json.contains("\"configured\":true"));
+    // Voice-route projection carries the full cascaded wiring.
+    assert!(json.contains("\"asrModelId\":\"asr-1\""));
+    assert!(json.contains("\"mode\":\"cascaded\""));
+    // No secret material keyword may appear anywhere in the public projection.
+    assert!(
+        !contains_secret_material(&json),
+        "public config leaked secret material: {json}"
     );
 }
 

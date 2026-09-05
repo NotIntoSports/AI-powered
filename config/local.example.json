@@ -4,6 +4,7 @@
   "models": {
     "providers": [{
       "id": "example-provider",
+      "name": "示例供应商",
       "baseUrl": "https://api.example.com/v1",
       "credential": {
         "reference": "providers/example-provider/api-key",
@@ -12,7 +13,25 @@
     }],
     "activeProviderId": "example-provider"
   },
-  "speech": { "voiceRoutes": [], "activeVoiceRouteId": null },
+  "speech": {
+    "voiceRoutes": [{
+      "id": "example-route",
+      "name": "示例级联线路",
+      "mode": "cascaded",
+      "asrProviderId": "example-provider",
+      "asrModelId": "example-asr-model",
+      "llmProviderId": "example-provider",
+      "llmModelId": "example-llm-model",
+      "ttsProviderId": "example-provider",
+      "ttsModelId": "example-tts-model",
+      "voiceId": "example-voice",
+      "active": true,
+      "ready": false,
+      "status": "model_not_ready",
+      "configVersion": 1
+    }],
+    "activeVoiceRouteId": "example-route"
+  },
   "transport": { "livekitUrl": null },
   "knowledge": { "embeddingProviderId": "example-provider" },
   "storage": { "exportDirectory": null },

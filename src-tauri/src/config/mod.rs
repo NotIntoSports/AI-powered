@@ -9,6 +9,7 @@ use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
+use ts_rs::TS;
 
 pub use locator::{ConfigDirs, ConfigLocation, ConfigSource, locate_config};
 pub use store::{ConfigLoadOutcome, ConfigStore};
@@ -35,32 +36,38 @@ impl ConfigError {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
 pub struct SecretSlot {
     pub reference: String,
     #[serde(default)]
     pub configured: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
 pub struct ApplicationConfig {
     #[serde(default)]
     pub locale: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
 pub struct ProviderConfig {
     pub id: String,
+    #[serde(default)]
+    pub name: Option<String>,
     pub base_url: String,
     #[serde(default)]
     pub credential: Option<SecretSlot>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
 pub struct ModelConfig {
     #[serde(default)]
     pub providers: Vec<ProviderConfig>,
@@ -68,16 +75,59 @@ pub struct ModelConfig {
     pub active_provider_id: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Voice pipeline mode. Cascaded runs ASR -> retrieval -> LLM -> TTS; E2e runs a
+/// single Realtime round-trip. Exactly one route is active at a time (design §12.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, TS)]
+pub enum VoiceRouteMode {
+    #[default]
+    #[serde(rename = "cascaded")]
+    #[ts(rename = "cascaded")]
+    Cascaded,
+    #[serde(rename = "e2e")]
+    #[ts(rename = "e2e")]
+    E2e,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
 pub struct VoiceRouteConfig {
     pub id: String,
     #[serde(default)]
-    pub provider_id: Option<String>,
+    pub name: String,
+    #[serde(default)]
+    pub mode: VoiceRouteMode,
+    #[serde(default)]
+    pub asr_provider_id: Option<String>,
+    #[serde(default)]
+    pub asr_model_id: Option<String>,
+    #[serde(default)]
+    pub llm_provider_id: Option<String>,
+    #[serde(default)]
+    pub llm_model_id: Option<String>,
+    #[serde(default)]
+    pub tts_provider_id: Option<String>,
+    #[serde(default)]
+    pub tts_model_id: Option<String>,
+    #[serde(default)]
+    pub voice_id: Option<String>,
+    #[serde(default)]
+    pub e2e_provider_id: Option<String>,
+    #[serde(default)]
+    pub e2e_model_id: Option<String>,
+    #[serde(default)]
+    pub active: bool,
+    #[serde(default)]
+    pub ready: bool,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub config_version: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
 pub struct SpeechConfig {
     #[serde(default)]
     pub voice_routes: Vec<VoiceRouteConfig>,
@@ -85,36 +135,41 @@ pub struct SpeechConfig {
     pub active_voice_route_id: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
 pub struct TransportConfig {
     #[serde(default)]
     pub livekit_url: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
 pub struct KnowledgeConfig {
     #[serde(default)]
     pub embedding_provider_id: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
 pub struct StorageConfig {
     #[serde(default)]
     pub export_directory: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
 pub struct RoleProfile {
     pub id: String,
     pub instructions: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
 pub struct DiagnosticsConfig {
     #[serde(default = "default_log_retention_days")]
     pub log_retention_days: u16,
@@ -154,7 +209,44 @@ pub struct AppConfigV1 {
     pub diagnostics: DiagnosticsConfig,
 }
 
-pub type PublicAppConfig = AppConfigV1;
+/// Redacted, IPC-safe projection of the local configuration (design §7.3/§8.2).
+///
+/// Providers only ever carry a [`SecretSlot`] (`reference` + `configured`); the
+/// secret *value* lives exclusively in the Windows Credential Manager and is
+/// never present here, in JSON, SQLite, logs, or the frontend. This is the DTO
+/// returned by the read-only `config_get_public` command.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct PublicConfig {
+    pub config_version: u32,
+    pub application: ApplicationConfig,
+    pub models: ModelConfig,
+    pub speech: SpeechConfig,
+    pub transport: TransportConfig,
+    pub knowledge: KnowledgeConfig,
+    pub storage: StorageConfig,
+    pub role_profiles: Vec<RoleProfile>,
+    pub diagnostics: DiagnosticsConfig,
+}
+
+/// Project the internal [`AppConfigV1`] onto its redacted public contract.
+///
+/// Read-only: clones the non-secret configuration sections. No secret value is
+/// ever read or copied — credentials stay as [`SecretSlot`] references.
+pub fn public_view(config: &AppConfigV1) -> PublicConfig {
+    PublicConfig {
+        config_version: config.config_version,
+        application: config.application.clone(),
+        models: config.models.clone(),
+        speech: config.speech.clone(),
+        transport: config.transport.clone(),
+        knowledge: config.knowledge.clone(),
+        storage: config.storage.clone(),
+        role_profiles: config.role_profiles.clone(),
+        diagnostics: config.diagnostics.clone(),
+    }
+}
 
 impl Default for AppConfigV1 {
     fn default() -> Self {
@@ -239,17 +331,24 @@ impl AppConfigV1 {
             ));
         }
         for route in &self.speech.voice_routes {
-            if let Some(provider_id) = &route.provider_id
-                && !self
-                    .models
-                    .providers
-                    .iter()
-                    .any(|provider| &provider.id == provider_id)
-            {
-                return Err(ConfigError::new(
-                    "CONFIG_REFERENCE_MISSING",
-                    "Voice route provider does not exist",
-                ));
+            for provider_id in [
+                route.asr_provider_id.as_ref(),
+                route.llm_provider_id.as_ref(),
+                route.tts_provider_id.as_ref(),
+                route.e2e_provider_id.as_ref(),
+            ] {
+                if let Some(provider_id) = provider_id
+                    && !self
+                        .models
+                        .providers
+                        .iter()
+                        .any(|provider| &provider.id == provider_id)
+                {
+                    return Err(ConfigError::new(
+                        "CONFIG_REFERENCE_MISSING",
+                        "Voice route provider does not exist",
+                    ));
+                }
             }
         }
         if let Some(provider_id) = &self.knowledge.embedding_provider_id
