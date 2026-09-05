@@ -31,6 +31,13 @@ export interface WorkspaceSessionProps {
   listen?: SessionListen;
 }
 
+async function defaultFinalizeUtterance(text: string) {
+  const result = await api.finalizeSessionUtterance(text);
+  if (!result.ok) {
+    throw new Error(errorText(result.error));
+  }
+}
+
 async function defaultListen<T>(event: string, handler: (payload: T) => void) {
   if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) {
     return () => {};
@@ -44,7 +51,7 @@ async function defaultListen<T>(event: string, handler: (payload: T) => void) {
 }
 
 export function WorkspaceSession({
-  finalizeUtterance,
+  finalizeUtterance = defaultFinalizeUtterance,
   listen = defaultListen,
 }: WorkspaceSessionProps) {
   const [phase, setPhase] = useState("idle");
@@ -198,6 +205,10 @@ export function WorkspaceSession({
       setSessionId(result.data.session.id);
       sessionIdRef.current = result.data.session.id;
       setPhase(result.data.session.status);
+      setTranscript("");
+      setReply("");
+      setUnusedMaterials(false);
+      setUtterance("");
       setMessage("");
       await refresh(result.data.session.id);
     } catch {
@@ -224,14 +235,14 @@ export function WorkspaceSession({
 
   async function submitFinalize(event: FormEvent) {
     event.preventDefault();
-    if (!finalizeUtterance) return;
     setBusy(true);
     try {
       await finalizeUtterance(utterance.trim());
       setMessage("");
       await refresh();
-    } catch {
-      setMessage("IPC_UNAVAILABLE：本地操作失败");
+    } catch (error) {
+      const text = error instanceof Error ? error.message : "";
+      setMessage(text.includes("：") ? text : "IPC_UNAVAILABLE：本地操作失败");
     } finally {
       setBusy(false);
     }
@@ -269,17 +280,15 @@ export function WorkspaceSession({
       {transcript && <p>转写 {transcript}</p>}
       {reply && <p>回复 {reply}</p>}
       {unusedMaterials && <p>本轮未使用资料</p>}
-      {finalizeUtterance && (
-        <form className="service-form" onSubmit={submitFinalize}>
-          <label>
-            测试语句
-            <input value={utterance} onChange={(event) => setUtterance(event.target.value)} />
-          </label>
-          <button disabled={busy} type="submit">
-            提交语句
-          </button>
-        </form>
-      )}
+      <form className="service-form" onSubmit={submitFinalize}>
+        <label>
+          测试语句
+          <input value={utterance} onChange={(event) => setUtterance(event.target.value)} />
+        </label>
+        <button disabled={busy} type="submit">
+          提交语句
+        </button>
+      </form>
     </section>
   );
 }

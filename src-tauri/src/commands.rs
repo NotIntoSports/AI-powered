@@ -14,16 +14,19 @@ use crate::{
         SessionStartResult, SessionSummary, SessionTranscriptEvent, SessionTurnView, StartupState,
     },
     error::PublicError,
-    providers::{OfficialLiveKitProbe, OpenAiCompatibleEmbeddingProbe, OpenAiCompatibleProbe},
-    runtime::{AgentMode, preflight},
+    providers::{
+        OfficialLiveKitProbe, OpenAiCompatibleCascade, OpenAiCompatibleEmbeddingProbe,
+        OpenAiCompatibleProbe,
+    },
+    runtime::{AgentMode, CascadeCredentials, active_embedding, active_voice_route, preflight},
     services::{
         EmbeddingConfigSaveInput, EmbeddingService, EmbeddingServiceError, EmbeddingTestResult,
         LiveKitSettingsError, LiveKitSettingsSaveInput, LiveKitSettingsService, LiveKitTestResult,
         MaterialSearchHit, MaterialService, MaterialServiceError, MaterialSummary,
         ModelDiscoveryResult, ProviderSaveInput, ProviderService, ProviderServiceError,
         ProviderTestResult, RoleProfileCopyInput, RoleProfileSaveInput, RoleProfileService,
-        RoleProfileServiceError, SessionServiceError, SessionStartOutcome, VoiceRouteSaveInput,
-        VoiceRouteService, VoiceRouteServiceError, VoiceRouteTestResult,
+        RoleProfileServiceError, SessionProbes, SessionServiceError, SessionStartOutcome,
+        VoiceRouteSaveInput, VoiceRouteService, VoiceRouteServiceError, VoiceRouteTestResult,
     },
     sessions::{SessionExportError, SessionExportFormat, SessionStore, export_session},
 };
@@ -401,8 +404,13 @@ fn runtime_status_from_state(state: &AppState) -> RuntimeStatus {
     }
 }
 
-fn bump_runtime_status(state: &AppState) -> RuntimeStatus {
+fn bump_event_seq(state: &AppState) -> u64 {
     state.event_seq.fetch_add(1, Ordering::SeqCst);
+    state.event_seq.load(Ordering::SeqCst)
+}
+
+fn bump_runtime_status(state: &AppState) -> RuntimeStatus {
+    bump_event_seq(state);
     runtime_status_from_state(state)
 }
 
@@ -461,22 +469,54 @@ fn audio_level_event(seq: u64, peak: f64) -> serde_json::Value {
     serde_json::to_value(AudioLevelEvent { peak, seq }).expect("audio level")
 }
 
-#[allow(dead_code)]
-fn emit_transcript_and_reply(app: &AppHandle, seq: u64, user_text: &str, assistant_text: &str) {
+fn emit_transcript_and_reply(
+    app: &AppHandle,
+    state: &AppState,
+    user_text: &str,
+    assistant_text: &str,
+) {
     let _ = app.emit(
         EVENT_SESSION_TRANSCRIPT,
         SessionTranscriptEvent {
-            seq,
+            seq: bump_event_seq(state),
             text: clip_snippet(user_text),
         },
     );
     let _ = app.emit(
         EVENT_SESSION_REPLY,
         SessionReplyEvent {
-            seq,
+            seq: bump_event_seq(state),
             text: clip_snippet(assistant_text),
         },
     );
+}
+
+fn read_provider_secret(
+    state: &AppState,
+    config: &PublicConfig,
+    provider_id: Option<&str>,
+) -> Result<Option<zeroize::Zeroizing<String>>, PublicError> {
+    let Some(provider_id) = provider_id.filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    let Some(provider) = config
+        .models
+        .providers
+        .iter()
+        .find(|provider| provider.id == provider_id)
+    else {
+        return Ok(None);
+    };
+    let Some(slot) = provider.credential.as_ref().filter(|slot| slot.configured) else {
+        return Ok(None);
+    };
+    state.secrets.read(&slot.reference).map_err(|_| {
+        PublicError::new(
+            "SECRET_BACKEND_UNAVAILABLE",
+            "Secret backend is unavailable",
+            false,
+        )
+    })
 }
 
 fn session_detail(
@@ -723,6 +763,52 @@ fn session_export_cmd(
     }
 }
 
+fn session_finalize_utterance_cmd(
+    state: &AppState,
+    probes: &SessionProbes<'_>,
+    credentials: CascadeCredentials<'_>,
+    text: Option<&str>,
+) -> CommandResult<SessionTurnView> {
+    let config = match load_public_config(state) {
+        Ok(config) => config,
+        Err(error) => return CommandResult::Err { error },
+    };
+    let database = match state.database.lock() {
+        Ok(guard) => guard,
+        Err(_) => {
+            return service_error("DATABASE_OPERATION_FAILED", "Database is unavailable");
+        }
+    };
+    let Some(database) = database.as_ref() else {
+        return service_error("DATABASE_OPERATION_FAILED", "Database is unavailable");
+    };
+    let mut sessions = match state.sessions.lock() {
+        Ok(guard) => guard,
+        Err(_) => {
+            return service_error(
+                "SERVICE_BUSY",
+                "Service configuration is temporarily unavailable",
+            );
+        }
+    };
+    match sessions.finalize_utterance(database, &config, probes, credentials, text) {
+        Ok(Some(_)) => {
+            let Some(session_id) = sessions.session_id() else {
+                return session_service_error(SessionServiceError::NotFound);
+            };
+            match session_detail(&SessionStore::new(database), session_id) {
+                Ok(detail) => match detail.turns.into_iter().last() {
+                    Some(turn) => CommandResult::Ok { data: turn },
+                    None => session_service_error(SessionServiceError::StateInvalid),
+                },
+                Err(error) => session_service_error(error),
+            }
+        }
+        Ok(None) => session_service_error(SessionServiceError::StateInvalid),
+        Err(error) => session_service_error(error),
+    }
+}
+
 fn runtime_get_status_cmd(state: &AppState) -> CommandResult<RuntimeStatus> {
     CommandResult::Ok {
         data: runtime_status_from_state(state),
@@ -813,6 +899,88 @@ pub fn session_delete(
         Err(error) => return error,
     };
     session_delete_cmd(&state, session_id)
+}
+
+#[tauri::command]
+pub fn session_finalize_utterance(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    text: String,
+) -> CommandResult<SessionTurnView> {
+    let _guard = match service_guard(&state) {
+        Ok(guard) => guard,
+        Err(error) => return error,
+    };
+    let cascade = match OpenAiCompatibleCascade::new() {
+        Ok(client) => client,
+        Err(error) => return service_error(error.code(), "Cascade client is unavailable"),
+    };
+    let embed = match OpenAiCompatibleEmbeddingProbe::new() {
+        Ok(client) => client,
+        Err(error) => return service_error(error.code(), "Embedding client is unavailable"),
+    };
+    let config = match load_public_config(&state) {
+        Ok(config) => config,
+        Err(error) => return CommandResult::Err { error },
+    };
+    let route = active_voice_route(&config);
+    let embedding = active_embedding(&config);
+    let asr_secret = match read_provider_secret(
+        &state,
+        &config,
+        route.and_then(|item| item.asr_provider_id.as_deref()),
+    ) {
+        Ok(secret) => secret,
+        Err(error) => return CommandResult::Err { error },
+    };
+    let llm_secret = match read_provider_secret(
+        &state,
+        &config,
+        route.and_then(|item| item.llm_provider_id.as_deref()),
+    ) {
+        Ok(secret) => secret,
+        Err(error) => return CommandResult::Err { error },
+    };
+    let tts_secret = match read_provider_secret(
+        &state,
+        &config,
+        route.and_then(|item| item.tts_provider_id.as_deref()),
+    ) {
+        Ok(secret) => secret,
+        Err(error) => return CommandResult::Err { error },
+    };
+    let embed_secret = match read_provider_secret(
+        &state,
+        &config,
+        embedding.map(|item| item.provider_id.as_str()),
+    ) {
+        Ok(secret) => secret,
+        Err(error) => return CommandResult::Err { error },
+    };
+    let probes = SessionProbes {
+        asr: &cascade,
+        llm: &cascade,
+        tts: &cascade,
+        embed: &embed,
+    };
+    let credentials = CascadeCredentials {
+        asr: asr_secret.as_deref().map(String::as_str),
+        llm: llm_secret.as_deref().map(String::as_str),
+        tts: tts_secret.as_deref().map(String::as_str),
+        embed: embed_secret.as_deref().map(String::as_str),
+    };
+    let trimmed = text.trim();
+    let result = session_finalize_utterance_cmd(
+        &state,
+        &probes,
+        credentials,
+        (!trimmed.is_empty()).then_some(trimmed),
+    );
+    if let CommandResult::Ok { data } = &result {
+        emit_transcript_and_reply(&app, &state, &data.user_text, &data.assistant_text);
+        emit_runtime(&app, &state);
+    }
+    result
 }
 
 #[tauri::command]
@@ -1638,6 +1806,7 @@ mod tests {
             "session_stop",
             "session_delete",
             "session_export",
+            "session_finalize_utterance",
         ] {
             assert!(
                 command_body(source, name).contains("service_guard"),
@@ -1830,5 +1999,126 @@ mod tests {
                 .count(),
             160
         );
+    }
+
+    #[test]
+    fn finalize_event_seqs_bump_separately() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = session_state(&directory, &ready_session_config());
+        let first = super::bump_event_seq(&state);
+        let second = super::bump_event_seq(&state);
+        assert_eq!(second, first + 1);
+        assert_ne!(first, second);
+    }
+
+    struct ScriptedAsr;
+    struct ScriptedLlm(&'static str);
+    struct ScriptedTts;
+    struct UnusedEmbed;
+
+    impl crate::providers::SpeechToText for ScriptedAsr {
+        fn transcribe(
+            &self,
+            _: &crate::providers::ProviderEndpoint,
+            _: Option<&str>,
+            _: &str,
+            _: &[u8],
+            _: u32,
+        ) -> Result<String, crate::providers::CascadeError> {
+            Ok("ignored".into())
+        }
+    }
+
+    impl crate::providers::ChatModel for ScriptedLlm {
+        fn complete(
+            &self,
+            _: &crate::providers::ProviderEndpoint,
+            _: Option<&str>,
+            _: &str,
+            _: &[crate::providers::ChatMessage],
+        ) -> Result<String, crate::providers::CascadeError> {
+            Ok(self.0.into())
+        }
+    }
+
+    impl crate::providers::TextToSpeech for ScriptedTts {
+        fn synthesize(
+            &self,
+            _: &crate::providers::ProviderEndpoint,
+            _: Option<&str>,
+            _: &str,
+            _: &str,
+            _: &str,
+        ) -> Result<Vec<u8>, crate::providers::CascadeError> {
+            Ok(vec![0x01, 0x02])
+        }
+    }
+
+    impl crate::providers::EmbeddingProbe for UnusedEmbed {
+        fn embed(
+            &self,
+            _: &crate::providers::ProviderEndpoint,
+            _: Option<&str>,
+            _: &str,
+            _: u32,
+            _: &str,
+        ) -> Result<Vec<f32>, crate::providers::EmbeddingError> {
+            Err(crate::providers::EmbeddingError::RequestFailed)
+        }
+    }
+
+    #[test]
+    fn session_finalize_utterance_persists_turn_without_pcm() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = session_state(&directory, &ready_session_config());
+        assert_eq!(
+            serde_json::to_value(super::session_start_cmd(&state)).unwrap()["ok"],
+            true
+        );
+        let asr = ScriptedAsr;
+        let llm = ScriptedLlm("这是一个后端岗位");
+        let tts = ScriptedTts;
+        let embed = UnusedEmbed;
+        let probes = crate::services::SessionProbes {
+            asr: &asr,
+            llm: &llm,
+            tts: &tts,
+            embed: &embed,
+        };
+        let finalized = serde_json::to_value(super::session_finalize_utterance_cmd(
+            &state,
+            &probes,
+            crate::runtime::CascadeCredentials::default(),
+            Some("请介绍岗位"),
+        ))
+        .unwrap();
+        assert_eq!(finalized["ok"], true, "{finalized}");
+        assert_eq!(finalized["data"]["userText"], "请介绍岗位");
+        assert_eq!(finalized["data"]["assistantText"], "这是一个后端岗位");
+        assert_eq!(finalized["data"]["materialsUsed"], false);
+        let json = finalized.to_string();
+        assert!(!json.contains("pcm"));
+        assert!(!json.contains("extractedText"));
+
+        let id = serde_json::to_value(super::session_list_cmd(&state)).unwrap()["data"][0]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let detail = serde_json::to_value(super::session_get_cmd(&state, id)).unwrap();
+        assert_eq!(detail["data"]["turns"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            detail["data"]["turns"][0]["assistantText"],
+            "这是一个后端岗位"
+        );
+
+        let missing = serde_json::to_value(super::session_finalize_utterance_cmd(
+            &session_state(&tempfile::tempdir().unwrap(), &ready_session_config()),
+            &probes,
+            crate::runtime::CascadeCredentials::default(),
+            Some("hi"),
+        ))
+        .unwrap();
+        assert_eq!(missing["ok"], false);
+        assert_eq!(missing["error"]["code"], "SESSION_NOT_FOUND");
     }
 }

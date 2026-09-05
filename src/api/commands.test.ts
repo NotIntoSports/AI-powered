@@ -15,6 +15,7 @@ import {
   deleteSpeechRoute,
   discoverModelProvider,
   enableLiveKitSettings,
+  finalizeSessionUtterance,
   getConfigPublic,
   importMaterial,
   listMaterials,
@@ -125,6 +126,14 @@ describe("Phase 3 service adapters", () => {
     expect(invokeMock).toHaveBeenNthCalledWith(9, "livekit_settings_save", { input: livekit });
     expect(invokeMock).toHaveBeenNthCalledWith(10, "livekit_settings_test");
     expect(invokeMock).toHaveBeenNthCalledWith(11, "livekit_settings_enable", { enabled: true });
+  });
+});
+
+describe("session adapters", () => {
+  it("uses exact session finalize command name and payload", async () => {
+    invokeMock.mockResolvedValue({ ok: true, data: {} });
+    await finalizeSessionUtterance("请介绍岗位");
+    expect(invokeMock).toHaveBeenCalledWith("session_finalize_utterance", { text: "请介绍岗位" });
   });
 });
 

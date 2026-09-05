@@ -18,6 +18,7 @@ vi.mock("../../api/commands", () => ({
   setSessionMode: vi.fn(),
   getRuntimeStatus: vi.fn(),
   getSession: vi.fn(),
+  finalizeSessionUtterance: vi.fn(),
 }));
 
 function summary(overrides: Partial<SessionSummary> = {}): SessionSummary {
@@ -83,6 +84,10 @@ describe("WorkspaceSession", () => {
     vi.mocked(commands.getSession).mockResolvedValue({
       ok: true,
       data: { session: summary(), turns: [] },
+    });
+    vi.mocked(commands.finalizeSessionUtterance).mockResolvedValue({
+      ok: true,
+      data: turn(),
     });
   });
 
@@ -181,28 +186,29 @@ describe("WorkspaceSession", () => {
     confirmSpy.mockRestore();
   });
 
-  it("finalizeUtterance refreshes transcript and reply from session_get", async () => {
-    const finalizeUtterance = vi.fn().mockImplementation(async () => {
+  it("default finalize hook calls session_finalize_utterance then renders reply", async () => {
+    vi.mocked(commands.finalizeSessionUtterance).mockImplementation(async () => {
       vi.mocked(commands.getSession).mockResolvedValue({ ok: true, data: detail() });
       vi.mocked(commands.getRuntimeStatus).mockResolvedValue({
         ok: true,
         data: status({ phase: "listening", unusedMaterials: false, seq: 4 }),
       });
+      return { ok: true, data: turn() };
     });
 
-    render(<WorkspaceSession finalizeUtterance={finalizeUtterance} />);
+    render(<WorkspaceSession />);
     fireEvent.click(await screen.findByRole("button", { name: "开始" }));
     await waitFor(() => expect(document.body.textContent).toContain("listening"));
     fireEvent.change(screen.getByLabelText("测试语句"), { target: { value: "请介绍岗位" } });
     fireEvent.click(screen.getByRole("button", { name: "提交语句" }));
-    await waitFor(() => expect(finalizeUtterance).toHaveBeenCalledWith("请介绍岗位"));
+    await waitFor(() => expect(commands.finalizeSessionUtterance).toHaveBeenCalledWith("请介绍岗位"));
     expect(document.body.textContent).toContain("请介绍岗位");
     expect(document.body.textContent).toContain("这是一个后端岗位");
     expect(document.body.textContent).not.toContain("本轮未使用资料");
   });
 
-  it("shows 本轮未使用资料 when materials_used is false", async () => {
-    const finalizeUtterance = vi.fn().mockImplementation(async () => {
+  it("shows 本轮未使用资料 after finalize when materials_used is false", async () => {
+    vi.mocked(commands.finalizeSessionUtterance).mockImplementation(async () => {
       vi.mocked(commands.getSession).mockResolvedValue({
         ok: true,
         data: detail({ turns: [turn({ materialsUsed: false })] }),
@@ -211,14 +217,60 @@ describe("WorkspaceSession", () => {
         ok: true,
         data: status({ phase: "listening", unusedMaterials: true, seq: 5 }),
       });
+      return { ok: true, data: turn({ materialsUsed: false }) };
     });
 
-    render(<WorkspaceSession finalizeUtterance={finalizeUtterance} />);
+    render(<WorkspaceSession />);
     fireEvent.click(await screen.findByRole("button", { name: "开始" }));
     await waitFor(() => expect(document.body.textContent).toContain("listening"));
     fireEvent.change(screen.getByLabelText("测试语句"), { target: { value: "你好" } });
     fireEvent.click(screen.getByRole("button", { name: "提交语句" }));
     expect((await screen.findByText("本轮未使用资料")).textContent).toBe("本轮未使用资料");
+    expect(commands.finalizeSessionUtterance).toHaveBeenCalledWith("你好");
+  });
+
+  it("clears previous turn text when a new session starts", async () => {
+    vi.mocked(commands.getRuntimeStatus)
+      .mockResolvedValueOnce({ ok: true, data: status() })
+      .mockResolvedValue({ ok: true, data: status({ phase: "listening", seq: 2 }) });
+    vi.mocked(commands.finalizeSessionUtterance).mockImplementation(async () => {
+      vi.mocked(commands.getSession).mockResolvedValue({ ok: true, data: detail() });
+      vi.mocked(commands.getRuntimeStatus).mockResolvedValue({
+        ok: true,
+        data: status({ phase: "listening", unusedMaterials: false, seq: 4 }),
+      });
+      return { ok: true, data: turn() };
+    });
+
+    render(<WorkspaceSession />);
+    fireEvent.click(await screen.findByRole("button", { name: "开始" }));
+    await waitFor(() => expect(document.body.textContent).toContain("listening"));
+    fireEvent.change(screen.getByLabelText("测试语句"), { target: { value: "请介绍岗位" } });
+    fireEvent.click(screen.getByRole("button", { name: "提交语句" }));
+    await waitFor(() => expect(document.body.textContent).toContain("这是一个后端岗位"));
+
+    vi.mocked(commands.getRuntimeStatus).mockResolvedValue({
+      ok: true,
+      data: status({ phase: "completed", seq: 5 }),
+    });
+    fireEvent.click(screen.getByRole("button", { name: "停止" }));
+    await waitFor(() => expect(document.body.textContent).toContain("completed"));
+
+    vi.mocked(commands.getSession).mockResolvedValue({
+      ok: true,
+      data: { session: summary({ id: "sess-2" }), turns: [] },
+    });
+    vi.mocked(commands.startSession).mockResolvedValue({
+      ok: true,
+      data: { kind: "started", session: summary({ id: "sess-2" }) },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "开始" }));
+    await waitFor(() => {
+      expect(commands.startSession).toHaveBeenCalledTimes(2);
+      expect(document.body.textContent).not.toContain("转写");
+      expect(document.body.textContent).not.toContain("这是一个后端岗位");
+      expect((screen.getByLabelText("测试语句") as HTMLInputElement).value).toBe("");
+    });
   });
 
   it("applies live events and drops stale seq per topic", async () => {

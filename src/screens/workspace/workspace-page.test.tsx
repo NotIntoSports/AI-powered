@@ -10,6 +10,7 @@ vi.mock("../../api/commands", () => ({
   setSessionMode: vi.fn(),
   getRuntimeStatus: vi.fn(),
   getSession: vi.fn(),
+  finalizeSessionUtterance: vi.fn(),
 }));
 
 describe("WorkspacePage", () => {

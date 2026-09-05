@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
-import type { CommandResult, DiagnosticsExportResult, EmbeddingConfig, EmbeddingConfigSaveInput, EmbeddingTestResult, FoundationStatus, LiveKitConfig, LiveKitSettingsSaveInput, LiveKitTestResult, MaterialSearchHit, MaterialSummary, ModelDiscoveryResult, ProviderConfig, ProviderSaveInput, ProviderTestResult, PublicConfig, RoleProfileConfig, RoleProfileCopyInput, RoleProfileSaveInput, RuntimeStatus, SessionDetail, SessionExportResult, SessionStartResult, SessionSummary, StartupState, VoiceRouteConfig, VoiceRouteSaveInput, VoiceRouteTestResult } from "../generated/bindings";
+import type { CommandResult, DiagnosticsExportResult, EmbeddingConfig, EmbeddingConfigSaveInput, EmbeddingTestResult, FoundationStatus, LiveKitConfig, LiveKitSettingsSaveInput, LiveKitTestResult, MaterialSearchHit, MaterialSummary, ModelDiscoveryResult, ProviderConfig, ProviderSaveInput, ProviderTestResult, PublicConfig, RoleProfileConfig, RoleProfileCopyInput, RoleProfileSaveInput, RuntimeStatus, SessionDetail, SessionExportResult, SessionStartResult, SessionSummary, SessionTurnView, StartupState, VoiceRouteConfig, VoiceRouteSaveInput, VoiceRouteTestResult } from "../generated/bindings";
 
 export function getFoundationStatus() {
   return invoke<CommandResult<FoundationStatus>>("foundation_get_status");
@@ -152,6 +152,10 @@ export function getSession(sessionId: string) {
 
 export function deleteSession(sessionId: string) {
   return invoke<CommandResult<FoundationStatus>>("session_delete", { sessionId });
+}
+
+export function finalizeSessionUtterance(text: string) {
+  return invoke<CommandResult<SessionTurnView>>("session_finalize_utterance", { text });
 }
 
 export function getRuntimeStatus() {

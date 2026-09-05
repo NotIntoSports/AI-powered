@@ -79,6 +79,7 @@ pub fn run() {
             commands::session_list,
             commands::session_get,
             commands::session_delete,
+            commands::session_finalize_utterance,
             commands::runtime_get_status,
             commands::config_restore_last_good,
             commands::config_restore_defaults,

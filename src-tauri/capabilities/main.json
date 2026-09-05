@@ -43,6 +43,7 @@
     "allow-session-list",
     "allow-session-get",
     "allow-session-delete",
+    "allow-session-finalize-utterance",
     "allow-runtime-get-status"
   ]
 }

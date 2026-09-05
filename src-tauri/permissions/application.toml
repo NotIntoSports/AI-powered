@@ -189,6 +189,11 @@ description = "Allows deleting one cascade session and its persisted turns."
 commands.allow = ["session_delete"]
 
 [[permission]]
+identifier = "allow-session-finalize-utterance"
+description = "Allows finalizing one cascade utterance and persisting the turn."
+commands.allow = ["session_finalize_utterance"]
+
+[[permission]]
 identifier = "allow-runtime-get-status"
 description = "Allows reading the current cascade runtime phase and mode."
 commands.allow = ["runtime_get_status"]
