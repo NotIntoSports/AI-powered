@@ -96,6 +96,7 @@ export function ServicesPage() {
             <p>密钥：{item.credential?.configured ? "已安全保存" : "未配置"}</p>
             {config?.models.activeProviderId === item.id && <strong>当前默认</strong>}
             <div className="service-actions">
+              <button aria-label={"编辑 " + (item.name || item.id)} disabled={busy} onClick={() => setProvider({ id: item.id, name: item.name ?? "", baseUrl: item.baseUrl, apiKey: "" })}>编辑</button>
               <button disabled={busy} onClick={() => void run(() => api.testModelProvider(item.id), "连接测试通过")}>测试</button>
               <button disabled={busy} onClick={() => void discover(item.id)}>发现模型</button>
               <button disabled={busy} onClick={() => void run(() => api.activateModelProvider(item.id), "默认供应商已更新")}>设为默认</button>
@@ -125,6 +126,14 @@ export function ServicesPage() {
             <h3>{item.name}</h3><p>{item.mode === "cascaded" ? "级联" : "端到端"} · {item.ready ? "测试通过" : "尚未就绪"}</p>
             {item.active && <strong>当前启用</strong>}
             <div className="service-actions">
+              <button aria-label={"编辑 " + item.name} disabled={busy} onClick={() => setRoute({
+                id: item.id, name: item.name, mode: item.mode,
+                asrProviderId: item.asrProviderId ?? "", asrModelId: item.asrModelId ?? "",
+                llmProviderId: item.llmProviderId ?? "", llmModelId: item.llmModelId ?? "",
+                ttsProviderId: item.ttsProviderId ?? "", ttsModelId: item.ttsModelId ?? "",
+                voiceId: item.voiceId ?? "", e2eProviderId: item.e2eProviderId ?? "",
+                e2eModelId: item.e2eModelId ?? "",
+              })}>编辑</button>
               <button disabled={busy} onClick={() => void run(() => api.testSpeechRoute(item.id), "线路测试通过")}>测试</button>
               <button disabled={busy || !item.ready} onClick={() => void run(() => api.activateSpeechRoute(item.id), "语音线路已启用")}>启用</button>
               <button disabled={busy} onClick={() => void run(() => api.deleteSpeechRoute(item.id), "语音线路已删除")}>删除</button>

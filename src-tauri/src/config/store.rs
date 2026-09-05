@@ -60,10 +60,7 @@ impl ConfigStore {
             config.diagnostics.log_retention_days = days;
         }
         config.validate()?;
-        let json = serde_json::to_vec_pretty(&config)
-            .map_err(|error| ConfigError::new("CONFIG_WRITE_FAILED", error.to_string()))?;
-        atomic_write(&self.path, &json)?;
-        atomic_write(&self.last_good_path(), &json)?;
+        self.write_validated(&config)?;
         Ok(config)
     }
 
@@ -103,8 +100,11 @@ impl ConfigStore {
         config.validate()?;
         let json = serde_json::to_vec_pretty(config)
             .map_err(|error| ConfigError::new("CONFIG_WRITE_FAILED", error.to_string()))?;
-        atomic_write(&self.path, &json)?;
-        atomic_write(&self.last_good_path(), &json)
+        // The primary file is the commit point. Write the recovery copy first so
+        // a backup failure can never leave callers observing a committed primary
+        // while they roll back a related Credential Manager mutation.
+        atomic_write(&self.last_good_path(), &json)?;
+        atomic_write(&self.path, &json)
     }
 }
 

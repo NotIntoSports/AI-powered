@@ -272,3 +272,23 @@ fn store_saves_atomically_and_keeps_a_last_good_copy() {
     assert_eq!(error.code(), "CONFIG_FIELD_INVALID");
     assert_eq!(std::fs::read_to_string(path).unwrap(), before);
 }
+
+#[test]
+fn failed_last_good_write_does_not_commit_primary_config() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("config.json");
+    std::fs::write(&path, r#"{"configVersion":1}"#).unwrap();
+    let store = ConfigStore::new(path.clone());
+    std::fs::create_dir(store.last_good_path()).unwrap();
+
+    assert!(
+        store
+            .save_patch(ConfigPatch {
+                diagnostics: Some(DiagnosticsPatch {
+                    log_retention_days: Some(30)
+                }),
+            })
+            .is_err()
+    );
+    assert_eq!(store.load().unwrap().diagnostics.log_retention_days, 14);
+}

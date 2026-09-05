@@ -71,4 +71,18 @@ describe("ServicesPage", () => {
     expect(container.innerHTML).not.toMatch(/\/api\//);
     fetchSpy.mockRestore();
   });
+
+  it("loads an existing provider into the editor without exposing its key", async () => {
+    vi.mocked(commands.getConfigPublic).mockResolvedValue({
+      ok: true,
+      data: {
+        ...emptyConfig,
+        models: { providers: [{ id: "openai", name: "OpenAI", baseUrl: "https://example.test/v1", credential: { reference: "providers/openai/api-key", configured: true } }], activeProviderId: null },
+      },
+    });
+    render(<ServicesPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "编辑 OpenAI" }));
+    expect((screen.getByLabelText("供应商 ID") as HTMLInputElement).value).toBe("openai");
+    expect((screen.getByLabelText(/API Key/) as HTMLInputElement).value).toBe("");
+  });
 });

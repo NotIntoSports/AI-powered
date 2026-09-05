@@ -122,7 +122,7 @@ fn provider_probe<T: ts_rs::TS>() -> Result<OpenAiCompatibleProbe, CommandResult
         .map_err(|error| service_error(error.code(), "Provider client is unavailable"))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn model_provider_save(
     state: State<'_, AppState>,
     input: ProviderSaveInput,
@@ -136,7 +136,7 @@ pub fn model_provider_save(
         .map_or_else(provider_service_error, |data| CommandResult::Ok { data })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn model_provider_test(
     state: State<'_, AppState>,
     provider_id: String,
@@ -150,7 +150,7 @@ pub fn model_provider_test(
         .map_or_else(provider_service_error, |data| CommandResult::Ok { data })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn model_provider_discover(
     state: State<'_, AppState>,
     provider_id: String,
@@ -164,7 +164,7 @@ pub fn model_provider_discover(
         .map_or_else(provider_service_error, |data| CommandResult::Ok { data })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn model_provider_activate(
     state: State<'_, AppState>,
     provider_id: String,
@@ -178,7 +178,7 @@ pub fn model_provider_activate(
         .map_or_else(provider_service_error, |data| CommandResult::Ok { data })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn model_provider_delete(
     state: State<'_, AppState>,
     provider_id: String,
@@ -194,7 +194,7 @@ pub fn model_provider_delete(
         })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn speech_route_save(
     state: State<'_, AppState>,
     input: VoiceRouteSaveInput,
@@ -208,7 +208,7 @@ pub fn speech_route_save(
         .map_or_else(route_service_error, |data| CommandResult::Ok { data })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn speech_route_test(
     state: State<'_, AppState>,
     route_id: String,
@@ -222,7 +222,7 @@ pub fn speech_route_test(
         .map_or_else(route_service_error, |data| CommandResult::Ok { data })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn speech_route_activate(
     state: State<'_, AppState>,
     route_id: String,
@@ -236,7 +236,7 @@ pub fn speech_route_activate(
         .map_or_else(route_service_error, |data| CommandResult::Ok { data })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn speech_route_delete(
     state: State<'_, AppState>,
     route_id: String,
