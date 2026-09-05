@@ -32,9 +32,48 @@
     }],
     "activeVoiceRouteId": null
   },
-  "transport": { "livekitUrl": null },
-  "knowledge": { "embeddingProviderId": "example-provider" },
+  "transport": {
+    "livekit": {
+      "enabled": false,
+      "url": null,
+      "apiKey": {
+        "reference": "transport/livekit/api-key",
+        "configured": false
+      },
+      "apiSecret": {
+        "reference": "transport/livekit/api-secret",
+        "configured": false
+      },
+      "ready": false,
+      "status": null,
+      "configVersion": 1
+    }
+  },
+  "knowledge": {
+    "embeddingConfigs": [{
+      "id": "example-embedding",
+      "providerId": "example-provider",
+      "modelId": "example-embedding-model",
+      "dimensions": 1536,
+      "distance": "cosine",
+      "normalized": true,
+      "active": false,
+      "ready": false,
+      "status": "not_tested",
+      "configVersion": 1
+    }],
+    "activeEmbeddingConfigId": null
+  },
   "storage": { "exportDirectory": null },
-  "roleProfiles": [],
+  "roleProfiles": [{
+    "id": "example-interviewer",
+    "name": "示例面试官",
+    "systemPrompt": "一次只提出一个清晰问题。",
+    "openingMessage": "你好，我们开始吧。",
+    "styleInstructions": "保持专业、简洁。",
+    "active": false,
+    "configVersion": 1
+  }],
+  "activeRoleProfileId": null,
   "diagnostics": { "logRetentionDays": 14 }
 }

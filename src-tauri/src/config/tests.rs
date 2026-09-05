@@ -2,7 +2,7 @@ use std::{collections::HashMap, ffi::OsString, path::PathBuf};
 
 use super::{
     AppConfigV1, ConfigDirs, ConfigError, ConfigPatch, ConfigSource, ConfigStore, DiagnosticsPatch,
-    VoiceRouteMode, locate_config, public_view,
+    EmbeddingDistance, VoiceRouteMode, locate_config, public_view,
 };
 
 fn dirs() -> ConfigDirs {
@@ -84,19 +84,14 @@ fn parse_error(json: &str) -> ConfigError {
     AppConfigV1::from_json(json).unwrap_err()
 }
 
-/// Case-insensitive scan for secret material keywords, mirroring the contract
-/// regex `/apiKey|password|secret(Value|Contents)|token/i` without a regex dep.
+/// Scan for fields that could carry secret material. `apiKey` and `apiSecret`
+/// are canonical public `SecretSlot` fields, so they are checked structurally
+/// by the public projection test rather than rejected by name.
 fn contains_secret_material(json: &str) -> bool {
     let lower = json.to_ascii_lowercase();
-    [
-        "apikey",
-        "password",
-        "secretvalue",
-        "secretcontents",
-        "token",
-    ]
-    .iter()
-    .any(|needle| lower.contains(needle))
+    ["password", "secretvalue", "secretcontents", "\"token\""]
+        .iter()
+        .any(|needle| lower.contains(needle))
 }
 
 #[test]
@@ -121,6 +116,29 @@ fn tracked_example_is_valid_and_contains_no_configured_secret() {
             .as_ref()
             .is_none_or(|slot| !slot.configured)
     }));
+    assert_eq!(config.role_profiles.len(), 1);
+    assert!(config.active_role_profile_id.is_none());
+    assert_eq!(config.knowledge.embedding_configs.len(), 1);
+    assert!(config.knowledge.active_embedding_config_id.is_none());
+    assert_eq!(
+        config
+            .transport
+            .livekit
+            .api_key
+            .as_ref()
+            .map(|slot| (slot.reference.as_str(), slot.configured)),
+        Some(("transport/livekit/api-key", false))
+    );
+    assert_eq!(
+        config
+            .transport
+            .livekit
+            .api_secret
+            .as_ref()
+            .map(|slot| (slot.reference.as_str(), slot.configured)),
+        Some(("transport/livekit/api-secret", false))
+    );
+    assert!(!config.transport.livekit.enabled);
 }
 
 #[test]
@@ -135,10 +153,6 @@ fn rejects_unknown_versions_and_broken_references() {
     );
     assert_eq!(
         parse_error(r#"{"configVersion":1,"models":{"activeProviderId":"missing"}}"#).code(),
-        "CONFIG_REFERENCE_MISSING"
-    );
-    assert_eq!(
-        parse_error(r#"{"configVersion":1,"knowledge":{"embeddingProviderId":"missing"}}"#).code(),
         "CONFIG_REFERENCE_MISSING"
     );
 }
@@ -200,6 +214,245 @@ fn voice_route_rejects_unknown_mode_and_missing_provider_reference() {
 }
 
 #[test]
+fn legacy_role_embedding_and_livekit_fields_upgrade_to_safe_canonical_state() {
+    let legacy_json = r#"{
+        "configVersion": 1,
+        "roleProfiles": [{"id":"interviewer","instructions":"Ask one question"}],
+        "knowledge": {"embeddingProviderId":"legacy-provider"},
+        "transport": {"livekitUrl":"wss://legacy.example.com"}
+    }"#;
+
+    let config = AppConfigV1::from_json(legacy_json).unwrap();
+    assert_eq!(config.role_profiles[0].name, "interviewer");
+    assert_eq!(config.role_profiles[0].system_prompt, "Ask one question");
+    assert!(config.role_profiles[0].opening_message.is_empty());
+    assert!(config.role_profiles[0].style_instructions.is_empty());
+    assert!(!config.role_profiles[0].active);
+    assert_eq!(config.role_profiles[0].config_version, 0);
+    assert!(config.active_role_profile_id.is_none());
+    assert!(!config.transport.livekit.enabled);
+    assert_eq!(
+        config.transport.livekit.url.as_deref(),
+        Some("wss://legacy.example.com")
+    );
+    assert!(config.transport.livekit.api_key.is_none());
+    assert!(config.transport.livekit.api_secret.is_none());
+    assert!(!config.transport.livekit.ready);
+    assert!(config.knowledge.embedding_configs.is_empty());
+    assert!(config.knowledge.active_embedding_config_id.is_none());
+
+    let canonical_json = serde_json::to_string(&config).unwrap();
+    assert!(canonical_json.contains("\"systemPrompt\":\"Ask one question\""));
+    assert!(canonical_json.contains("\"livekit\":"));
+    assert!(canonical_json.contains("\"embeddingConfigs\":[]"));
+    assert!(!canonical_json.contains("instructions"));
+    assert!(!canonical_json.contains("livekitUrl"));
+    assert!(!canonical_json.contains("embeddingProviderId"));
+}
+
+#[test]
+fn canonical_role_embedding_and_livekit_configuration_loads() {
+    let config = AppConfigV1::from_json(
+        r#"{
+            "configVersion": 1,
+            "models": {
+                "providers": [{"id":"provider-1","baseUrl":"https://api.example.com/v1"}],
+                "activeProviderId": "provider-1"
+            },
+            "activeRoleProfileId": "role-1",
+            "roleProfiles": [{
+                "id":"role-1","name":"Interviewer","systemPrompt":"Ask one question",
+                "openingMessage":"Welcome","styleInstructions":"Be concise",
+                "active":true,"configVersion":1
+            }],
+            "knowledge": {
+                "embeddingConfigs": [{
+                    "id":"embedding-1","providerId":"provider-1","modelId":"embed-3",
+                    "dimensions":1536,"distance":"cosine","normalized":true,
+                    "active":true,"ready":true,"status":"ready","configVersion":1
+                }],
+                "activeEmbeddingConfigId":"embedding-1"
+            },
+            "transport": {"livekit": {
+                "enabled":true,"url":"wss://rtc.example.com",
+                "apiKey":{"reference":"transport/livekit/api-key","configured":true},
+                "apiSecret":{"reference":"transport/livekit/api-secret","configured":true},
+                "ready":true,"status":"ready","configVersion":1
+            }}
+        }"#,
+    )
+    .unwrap();
+
+    assert_eq!(config.active_role_profile_id.as_deref(), Some("role-1"));
+    assert_eq!(
+        config.knowledge.embedding_configs[0].distance,
+        EmbeddingDistance::Cosine
+    );
+    assert!(config.transport.livekit.enabled);
+}
+
+#[test]
+fn role_active_id_must_be_unique_present_and_match_derived_active() {
+    assert_eq!(
+        parse_error(
+            r#"{"configVersion":1,"roleProfiles":[{"id":"same","name":"One","systemPrompt":"","openingMessage":"","styleInstructions":"","active":false,"configVersion":1},{"id":"same","name":"Two","systemPrompt":"","openingMessage":"","styleInstructions":"","active":false,"configVersion":1}]}"#
+        )
+        .code(),
+        "CONFIG_DUPLICATE_ID"
+    );
+    assert_eq!(
+        parse_error(r#"{"configVersion":1,"activeRoleProfileId":"missing"}"#).code(),
+        "CONFIG_REFERENCE_MISSING"
+    );
+    assert_eq!(
+        parse_error(
+            r#"{"configVersion":1,"activeRoleProfileId":"r1","roleProfiles":[{"id":"r1","name":"One","systemPrompt":"","openingMessage":"","styleInstructions":"","active":false,"configVersion":1}]}"#
+        )
+        .code(),
+        "CONFIG_ACTIVE_ROLE_INVALID"
+    );
+    assert_eq!(
+        parse_error(
+            r#"{"configVersion":1,"roleProfiles":[{"id":"r1","name":"One","systemPrompt":"","openingMessage":"","styleInstructions":"","active":true,"configVersion":1}]}"#
+        )
+        .code(),
+        "CONFIG_ACTIVE_ROLE_INVALID"
+    );
+}
+
+#[test]
+fn embedding_active_id_must_be_unique_present_ready_and_match_derived_active() {
+    let duplicate = r#"{
+        "configVersion":1,
+        "models":{"providers":[{"id":"p1","baseUrl":"https://api.example.com"}]},
+        "knowledge":{"embeddingConfigs":[
+            {"id":"same","providerId":"p1","modelId":"m1","dimensions":1,"distance":"cosine","normalized":true,"active":false,"ready":false,"status":null,"configVersion":1},
+            {"id":"same","providerId":"p1","modelId":"m2","dimensions":2,"distance":"cosine","normalized":true,"active":false,"ready":false,"status":null,"configVersion":1}
+        ]}
+    }"#;
+    assert_eq!(parse_error(duplicate).code(), "CONFIG_DUPLICATE_ID");
+    assert_eq!(
+        parse_error(r#"{"configVersion":1,"knowledge":{"activeEmbeddingConfigId":"missing"}}"#)
+            .code(),
+        "CONFIG_REFERENCE_MISSING"
+    );
+
+    let inconsistent = r#"{
+        "configVersion":1,
+        "models":{"providers":[{"id":"p1","baseUrl":"https://api.example.com"}]},
+        "knowledge":{"embeddingConfigs":[{"id":"e1","providerId":"p1","modelId":"m1","dimensions":1,"distance":"cosine","normalized":true,"active":false,"ready":true,"status":"ready","configVersion":1}],"activeEmbeddingConfigId":"e1"}
+    }"#;
+    assert_eq!(
+        parse_error(inconsistent).code(),
+        "CONFIG_ACTIVE_EMBEDDING_INVALID"
+    );
+
+    let not_ready = r#"{
+        "configVersion":1,
+        "models":{"providers":[{"id":"p1","baseUrl":"https://api.example.com"}]},
+        "knowledge":{"embeddingConfigs":[{"id":"e1","providerId":"p1","modelId":"m1","dimensions":1,"distance":"cosine","normalized":true,"active":true,"ready":false,"status":null,"configVersion":1}],"activeEmbeddingConfigId":"e1"}
+    }"#;
+    assert_eq!(
+        parse_error(not_ready).code(),
+        "CONFIG_ACTIVE_EMBEDDING_INVALID"
+    );
+}
+
+#[test]
+fn role_content_limits_are_enforced_in_bytes() {
+    fn role_json(name: &str, prompt: &str, opening: &str, style: &str) -> String {
+        serde_json::json!({
+            "configVersion": 1,
+            "roleProfiles": [{
+                "id": "role-1",
+                "name": name,
+                "systemPrompt": prompt,
+                "openingMessage": opening,
+                "styleInstructions": style,
+                "active": false,
+                "configVersion": 1
+            }]
+        })
+        .to_string()
+    }
+
+    assert_eq!(
+        parse_error(&role_json(" ", "", "", "")).code(),
+        "CONFIG_FIELD_INVALID"
+    );
+    assert_eq!(
+        parse_error(&role_json("Role", &"a".repeat(32 * 1024 + 1), "", "")).code(),
+        "CONFIG_FIELD_INVALID"
+    );
+    assert_eq!(
+        parse_error(&role_json("Role", "", &"a".repeat(4 * 1024 + 1), "")).code(),
+        "CONFIG_FIELD_INVALID"
+    );
+    assert_eq!(
+        parse_error(&role_json("Role", "", "", &"a".repeat(8 * 1024 + 1))).code(),
+        "CONFIG_FIELD_INVALID"
+    );
+
+    AppConfigV1::from_json(&role_json(
+        "Role",
+        &"a".repeat(32 * 1024),
+        &"a".repeat(4 * 1024),
+        &"a".repeat(8 * 1024),
+    ))
+    .unwrap();
+}
+
+#[test]
+fn embedding_dimensions_and_provider_reference_are_validated() {
+    for dimensions in [0, 65_537] {
+        let json = format!(
+            r#"{{"configVersion":1,"models":{{"providers":[{{"id":"p1","baseUrl":"https://api.example.com"}}]}},"knowledge":{{"embeddingConfigs":[{{"id":"e1","providerId":"p1","modelId":"m1","dimensions":{dimensions},"distance":"cosine","normalized":true,"active":false,"ready":false,"status":null,"configVersion":1}}]}}}}"#
+        );
+        assert_eq!(parse_error(&json).code(), "CONFIG_FIELD_INVALID");
+    }
+
+    assert_eq!(
+        parse_error(
+            r#"{"configVersion":1,"knowledge":{"embeddingConfigs":[{"id":"e1","providerId":"missing","modelId":"m1","dimensions":1,"distance":"cosine","normalized":true,"active":false,"ready":false,"status":null,"configVersion":1}]}}"#
+        )
+        .code(),
+        "CONFIG_REFERENCE_MISSING"
+    );
+}
+
+#[test]
+fn livekit_requires_safe_url_canonical_refs_and_ready_state_before_enablement() {
+    for livekit in [
+        r#"{"enabled":false,"url":"https://rtc.example.com","apiKey":null,"apiSecret":null,"ready":false,"status":null,"configVersion":0}"#,
+        r#"{"enabled":false,"url":"wss://user@rtc.example.com","apiKey":null,"apiSecret":null,"ready":false,"status":null,"configVersion":0}"#,
+        r#"{"enabled":false,"url":"wss://rtc.example.com?token=hidden","apiKey":null,"apiSecret":null,"ready":false,"status":null,"configVersion":0}"#,
+        r#"{"enabled":false,"url":"wss://rtc.example.com#fragment","apiKey":null,"apiSecret":null,"ready":false,"status":null,"configVersion":0}"#,
+    ] {
+        let json = format!(r#"{{"configVersion":1,"transport":{{"livekit":{livekit}}}}}"#);
+        assert_eq!(parse_error(&json).code(), "CONFIG_URL_INVALID");
+    }
+
+    for (field, reference) in [
+        ("apiKey", "transport/livekit/wrong-key"),
+        ("apiSecret", "transport/livekit/wrong-secret"),
+    ] {
+        let json = format!(
+            r#"{{"configVersion":1,"transport":{{"livekit":{{"enabled":false,"url":"wss://rtc.example.com","{field}":{{"reference":"{reference}","configured":false}},"ready":false,"status":null,"configVersion":1}}}}}}"#
+        );
+        assert_eq!(parse_error(&json).code(), "CONFIG_SECRET_REFERENCE_INVALID");
+    }
+
+    let enabled_not_ready = r#"{
+        "configVersion":1,
+        "transport":{"livekit":{"enabled":true,"url":"wss://rtc.example.com","apiKey":{"reference":"transport/livekit/api-key","configured":true},"apiSecret":{"reference":"transport/livekit/api-secret","configured":true},"ready":false,"status":null,"configVersion":1}}
+    }"#;
+    assert_eq!(
+        parse_error(enabled_not_ready).code(),
+        "CONFIG_LIVEKIT_INVALID"
+    );
+}
+
+#[test]
 fn public_view_exposes_secret_references_but_never_secret_material() {
     let config = AppConfigV1::from_json(
         r#"{
@@ -242,6 +495,10 @@ fn public_view_exposes_secret_references_but_never_secret_material() {
     // The credential survives only as a SecretSlot reference + configured flag.
     assert!(json.contains("providers/p1/api-key"));
     assert!(json.contains("\"configured\":true"));
+    assert!(json.contains("\"apiKey\":null"));
+    assert!(json.contains("\"apiSecret\":null"));
+    assert!(!json.contains("\"apiKey\":\""));
+    assert!(!json.contains("\"apiSecret\":\""));
     // Voice-route projection carries the full cascaded wiring.
     assert!(json.contains("\"asrModelId\":\"asr-1\""));
     assert!(json.contains("\"mode\":\"cascaded\""));

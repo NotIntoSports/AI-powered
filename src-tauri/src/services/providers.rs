@@ -251,7 +251,11 @@ impl<'a> ProviderService<'a> {
                         .voice_routes
                         .iter()
                         .any(|route| route_uses_provider(route, provider_id))
-                        || config.knowledge.embedding_provider_id.as_deref() == Some(provider_id)
+                        || config
+                            .knowledge
+                            .embedding_configs
+                            .iter()
+                            .any(|embedding| embedding.provider_id == provider_id)
                     {
                         return Err(ConfigError::new("PROVIDER_IN_USE", "Provider is in use"));
                     }

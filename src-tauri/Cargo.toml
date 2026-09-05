@@ -20,6 +20,7 @@ tauri-build = { version = "=2.6.3", features = [] }
 
 [dependencies]
 chrono = { version = "=0.4.45", default-features = false, features = ["clock", "serde", "std"] }
+livekit-api = { version = "=0.6.4", default-features = false, features = ["access-token"] }
 rusqlite = { version = "=0.40.2", features = ["bundled"] }
 reqwest = { version = "=0.13.4", default-features = false, features = ["blocking", "json", "rustls"] }
 serde = { version = "=1.0.229", features = ["derive"] }

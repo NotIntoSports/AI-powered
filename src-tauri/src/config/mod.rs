@@ -140,7 +140,7 @@ pub struct SpeechConfig {
 #[ts(rename_all = "camelCase")]
 pub struct TransportConfig {
     #[serde(default)]
-    pub livekit_url: Option<String>,
+    pub livekit: LiveKitConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, TS)]
@@ -148,7 +148,9 @@ pub struct TransportConfig {
 #[ts(rename_all = "camelCase")]
 pub struct KnowledgeConfig {
     #[serde(default)]
-    pub embedding_provider_id: Option<String>,
+    pub embedding_configs: Vec<EmbeddingConfig>,
+    #[serde(default)]
+    pub active_embedding_config_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, TS)]
@@ -159,12 +161,65 @@ pub struct StorageConfig {
     pub export_directory: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, TS)]
+pub enum EmbeddingDistance {
+    #[default]
+    #[serde(rename = "cosine")]
+    #[ts(rename = "cosine")]
+    Cosine,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[ts(rename_all = "camelCase")]
-pub struct RoleProfile {
+pub struct RoleProfileConfig {
     pub id: String,
-    pub instructions: String,
+    pub name: String,
+    pub system_prompt: String,
+    pub opening_message: String,
+    pub style_instructions: String,
+    pub active: bool,
+    pub config_version: u32,
+}
+
+/// Backward-compatible Rust name for callers compiled against the original
+/// configuration module. JSON input compatibility is handled separately.
+pub type RoleProfile = RoleProfileConfig;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
+pub struct EmbeddingConfig {
+    pub id: String,
+    pub provider_id: String,
+    pub model_id: String,
+    pub dimensions: u32,
+    pub distance: EmbeddingDistance,
+    pub normalized: bool,
+    pub active: bool,
+    pub ready: bool,
+    pub status: Option<String>,
+    pub config_version: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
+pub struct LiveKitConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub api_key: Option<SecretSlot>,
+    #[serde(default)]
+    pub api_secret: Option<SecretSlot>,
+    #[serde(default)]
+    pub ready: bool,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub config_version: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -187,7 +242,7 @@ impl Default for DiagnosticsConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AppConfigV1 {
     pub config_version: u32,
@@ -204,9 +259,132 @@ pub struct AppConfigV1 {
     #[serde(default)]
     pub storage: StorageConfig,
     #[serde(default)]
-    pub role_profiles: Vec<RoleProfile>,
+    pub role_profiles: Vec<RoleProfileConfig>,
+    #[serde(default)]
+    pub active_role_profile_id: Option<String>,
     #[serde(default)]
     pub diagnostics: DiagnosticsConfig,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AppConfigV1Input {
+    config_version: u32,
+    #[serde(default)]
+    application: ApplicationConfig,
+    #[serde(default)]
+    models: ModelConfig,
+    #[serde(default)]
+    speech: SpeechConfig,
+    #[serde(default)]
+    transport: TransportConfigInput,
+    #[serde(default)]
+    knowledge: KnowledgeConfigInput,
+    #[serde(default)]
+    storage: StorageConfig,
+    #[serde(default)]
+    role_profiles: Vec<RoleProfileInput>,
+    #[serde(default)]
+    active_role_profile_id: Option<String>,
+    #[serde(default)]
+    diagnostics: DiagnosticsConfig,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum RoleProfileInput {
+    Canonical(RoleProfileConfig),
+    Legacy(LegacyRoleProfile),
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct LegacyRoleProfile {
+    id: String,
+    instructions: String,
+}
+
+impl From<RoleProfileInput> for RoleProfileConfig {
+    fn from(input: RoleProfileInput) -> Self {
+        match input {
+            RoleProfileInput::Canonical(profile) => profile,
+            RoleProfileInput::Legacy(profile) => Self {
+                name: profile.id.clone(),
+                id: profile.id,
+                system_prompt: profile.instructions,
+                opening_message: String::new(),
+                style_instructions: String::new(),
+                active: false,
+                config_version: 0,
+            },
+        }
+    }
+}
+
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct TransportConfigInput {
+    #[serde(default)]
+    livekit: Option<LiveKitConfig>,
+    #[serde(default)]
+    livekit_url: Option<String>,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct KnowledgeConfigInput {
+    #[serde(default)]
+    embedding_configs: Option<Vec<EmbeddingConfig>>,
+    #[serde(default)]
+    active_embedding_config_id: Option<String>,
+    #[serde(default)]
+    embedding_provider_id: Option<String>,
+}
+
+impl<'de> Deserialize<'de> for AppConfigV1 {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let input = AppConfigV1Input::deserialize(deserializer)?;
+        if input.transport.livekit.is_some() && input.transport.livekit_url.is_some() {
+            return Err(serde::de::Error::custom(
+                "livekit and legacy livekitUrl cannot both be present",
+            ));
+        }
+        if input.knowledge.embedding_configs.is_some()
+            && input.knowledge.embedding_provider_id.is_some()
+        {
+            return Err(serde::de::Error::custom(
+                "embeddingConfigs and legacy embeddingProviderId cannot both be present",
+            ));
+        }
+
+        let livekit = input.transport.livekit.unwrap_or_else(|| LiveKitConfig {
+            url: input.transport.livekit_url,
+            ..LiveKitConfig::default()
+        });
+
+        Ok(Self {
+            config_version: input.config_version,
+            application: input.application,
+            models: input.models,
+            speech: input.speech,
+            transport: TransportConfig { livekit },
+            knowledge: KnowledgeConfig {
+                embedding_configs: input.knowledge.embedding_configs.unwrap_or_default(),
+                active_embedding_config_id: input.knowledge.active_embedding_config_id,
+            },
+            storage: input.storage,
+            role_profiles: input
+                .role_profiles
+                .into_iter()
+                .map(RoleProfileConfig::from)
+                .collect(),
+            active_role_profile_id: input.active_role_profile_id,
+            diagnostics: input.diagnostics,
+        })
+    }
 }
 
 /// Redacted, IPC-safe projection of the local configuration (design §7.3/§8.2).
@@ -226,7 +404,8 @@ pub struct PublicConfig {
     pub transport: TransportConfig,
     pub knowledge: KnowledgeConfig,
     pub storage: StorageConfig,
-    pub role_profiles: Vec<RoleProfile>,
+    pub role_profiles: Vec<RoleProfileConfig>,
+    pub active_role_profile_id: Option<String>,
     pub diagnostics: DiagnosticsConfig,
 }
 
@@ -244,6 +423,7 @@ pub fn public_view(config: &AppConfigV1) -> PublicConfig {
         knowledge: config.knowledge.clone(),
         storage: config.storage.clone(),
         role_profiles: config.role_profiles.clone(),
+        active_role_profile_id: config.active_role_profile_id.clone(),
         diagnostics: config.diagnostics.clone(),
     }
 }
@@ -259,6 +439,7 @@ impl Default for AppConfigV1 {
             knowledge: KnowledgeConfig::default(),
             storage: StorageConfig::default(),
             role_profiles: Vec::new(),
+            active_role_profile_id: None,
             diagnostics: DiagnosticsConfig::default(),
         }
     }
@@ -300,6 +481,12 @@ impl AppConfigV1 {
         ensure_unique(self.models.providers.iter().map(|item| item.id.as_str()))?;
         ensure_unique(self.speech.voice_routes.iter().map(|item| item.id.as_str()))?;
         ensure_unique(self.role_profiles.iter().map(|item| item.id.as_str()))?;
+        ensure_unique(
+            self.knowledge
+                .embedding_configs
+                .iter()
+                .map(|item| item.id.as_str()),
+        )?;
         for provider in &self.models.providers {
             validate_url(&provider.base_url, &["http", "https"])?;
             if let Some(credential) = &provider.credential
@@ -311,8 +498,92 @@ impl AppConfigV1 {
                 ));
             }
         }
-        if let Some(url) = &self.transport.livekit_url {
+        for profile in &self.role_profiles {
+            validate_stable_id(&profile.id)?;
+            if profile.name.trim().is_empty()
+                || profile.system_prompt.len() > 32 * 1024
+                || profile.opening_message.len() > 4 * 1024
+                || profile.style_instructions.len() > 8 * 1024
+            {
+                return Err(ConfigError::new(
+                    "CONFIG_FIELD_INVALID",
+                    "Role profile fields exceed their allowed limits",
+                ));
+            }
+        }
+        let active_profiles = self
+            .role_profiles
+            .iter()
+            .filter(|profile| profile.active)
+            .collect::<Vec<_>>();
+        match self.active_role_profile_id.as_deref() {
+            Some(active_id)
+                if active_profiles.len() == 1
+                    && active_profiles[0].id == active_id
+                    && active_profiles[0].config_version > 0 => {}
+            None if active_profiles.is_empty() => {}
+            Some(active_id)
+                if !self
+                    .role_profiles
+                    .iter()
+                    .any(|profile| profile.id == active_id) =>
+            {
+                return Err(ConfigError::new(
+                    "CONFIG_REFERENCE_MISSING",
+                    "Active role profile does not exist",
+                ));
+            }
+            _ => {
+                return Err(ConfigError::new(
+                    "CONFIG_ACTIVE_ROLE_INVALID",
+                    "Active role profile flags are inconsistent",
+                ));
+            }
+        }
+        if let Some(url) = &self.transport.livekit.url {
             validate_url(url, &["ws", "wss"])?;
+        }
+        for (slot, canonical_reference) in [
+            (
+                self.transport.livekit.api_key.as_ref(),
+                "transport/livekit/api-key",
+            ),
+            (
+                self.transport.livekit.api_secret.as_ref(),
+                "transport/livekit/api-secret",
+            ),
+        ] {
+            if let Some(slot) = slot
+                && slot.reference != canonical_reference
+            {
+                return Err(ConfigError::new(
+                    "CONFIG_SECRET_REFERENCE_INVALID",
+                    "LiveKit credential reference is not canonical",
+                ));
+            }
+        }
+        if self.transport.livekit.enabled
+            && (self.transport.livekit.url.is_none()
+                || !self
+                    .transport
+                    .livekit
+                    .api_key
+                    .as_ref()
+                    .is_some_and(|slot| slot.configured)
+                || !self
+                    .transport
+                    .livekit
+                    .api_secret
+                    .as_ref()
+                    .is_some_and(|slot| slot.configured)
+                || !self.transport.livekit.ready
+                || self.transport.livekit.status.as_deref() != Some("ready")
+                || self.transport.livekit.config_version == 0)
+        {
+            return Err(ConfigError::new(
+                "CONFIG_LIVEKIT_INVALID",
+                "Enabled LiveKit transport is not ready",
+            ));
         }
         if let Some(active) = &self.models.active_provider_id
             && !self
@@ -380,17 +651,59 @@ impl AppConfigV1 {
                 }
             }
         }
-        if let Some(provider_id) = &self.knowledge.embedding_provider_id
-            && !self
+        for embedding in &self.knowledge.embedding_configs {
+            validate_stable_id(&embedding.id)?;
+            if embedding.model_id.trim().is_empty() || !(1..=65_536).contains(&embedding.dimensions)
+            {
+                return Err(ConfigError::new(
+                    "CONFIG_FIELD_INVALID",
+                    "Embedding fields are invalid",
+                ));
+            }
+            if !self
                 .models
                 .providers
                 .iter()
-                .any(|provider| &provider.id == provider_id)
-        {
-            return Err(ConfigError::new(
-                "CONFIG_REFERENCE_MISSING",
-                "Embedding provider does not exist",
-            ));
+                .any(|provider| provider.id == embedding.provider_id)
+            {
+                return Err(ConfigError::new(
+                    "CONFIG_REFERENCE_MISSING",
+                    "Embedding provider does not exist",
+                ));
+            }
+        }
+        let active_embeddings = self
+            .knowledge
+            .embedding_configs
+            .iter()
+            .filter(|embedding| embedding.active)
+            .collect::<Vec<_>>();
+        match self.knowledge.active_embedding_config_id.as_deref() {
+            Some(active_id)
+                if active_embeddings.len() == 1
+                    && active_embeddings[0].id == active_id
+                    && active_embeddings[0].ready
+                    && active_embeddings[0].status.as_deref() == Some("ready")
+                    && active_embeddings[0].config_version > 0 => {}
+            None if active_embeddings.is_empty() => {}
+            Some(active_id)
+                if !self
+                    .knowledge
+                    .embedding_configs
+                    .iter()
+                    .any(|embedding| embedding.id == active_id) =>
+            {
+                return Err(ConfigError::new(
+                    "CONFIG_REFERENCE_MISSING",
+                    "Active embedding configuration does not exist",
+                ));
+            }
+            _ => {
+                return Err(ConfigError::new(
+                    "CONFIG_ACTIVE_EMBEDDING_INVALID",
+                    "Active embedding configuration flags are inconsistent",
+                ));
+            }
         }
         if !(1..=365).contains(&self.diagnostics.log_retention_days) {
             return Err(ConfigError::new(
@@ -421,6 +734,21 @@ fn ensure_unique<'a>(ids: impl Iterator<Item = &'a str>) -> Result<(), ConfigErr
     Ok(())
 }
 
+fn validate_stable_id(id: &str) -> Result<(), ConfigError> {
+    if id.len() > 64
+        || id.is_empty()
+        || !id.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'-' | b'_')
+        })
+    {
+        return Err(ConfigError::new(
+            "CONFIG_FIELD_INVALID",
+            "ID must use lowercase ASCII letters, digits, hyphens, or underscores",
+        ));
+    }
+    Ok(())
+}
+
 fn validate_url(raw: &str, schemes: &[&str]) -> Result<(), ConfigError> {
     let url = tauri::Url::parse(raw)
         .map_err(|_| ConfigError::new("CONFIG_URL_INVALID", "URL is invalid"))?;
@@ -444,11 +772,15 @@ fn reject_inline_secrets(value: &Value) -> Result<(), ConfigError> {
         Value::Object(map) => {
             for (key, child) in map {
                 let normalized = key.to_ascii_lowercase().replace(['_', '-'], "");
+                let canonical_secret_slot = matches!(normalized.as_str(), "apikey" | "apisecret")
+                    && (child.is_null() || is_secret_slot_value(child));
                 let forbidden = normalized.contains("password")
-                    || normalized.contains("apikey")
+                    || (normalized.contains("apikey") && !canonical_secret_slot)
                     || normalized == "token"
                     || normalized.ends_with("token")
-                    || (normalized.contains("secret") && normalized != "secretref");
+                    || (normalized.contains("secret")
+                        && normalized != "secretref"
+                        && !canonical_secret_slot);
                 if forbidden {
                     return Err(ConfigError::new(
                         "CONFIG_SECRET_INLINE_FORBIDDEN",
@@ -466,6 +798,15 @@ fn reject_inline_secrets(value: &Value) -> Result<(), ConfigError> {
         _ => {}
     }
     Ok(())
+}
+
+fn is_secret_slot_value(value: &Value) -> bool {
+    let Some(slot) = value.as_object() else {
+        return false;
+    };
+    slot.len() == 2
+        && slot.get("reference").is_some_and(Value::is_string)
+        && slot.get("configured").is_some_and(Value::is_boolean)
 }
 
 #[derive(Debug, Clone, Default)]
