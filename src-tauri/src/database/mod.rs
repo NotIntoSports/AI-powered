@@ -1,6 +1,6 @@
 use std::{path::Path, sync::Mutex, time::Duration};
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use thiserror::Error;
 
 const MIGRATIONS: &[(i64, &str)] = &[
@@ -101,6 +101,33 @@ impl Database {
 
     pub fn integrity_check(&self) -> Result<String, DatabaseError> {
         self.pragma_string("integrity_check")
+    }
+
+    pub fn with_connection<T>(
+        &self,
+        work: impl FnOnce(&Connection) -> rusqlite::Result<T>,
+    ) -> Result<T, DatabaseError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| DatabaseError::Operation)?;
+        work(&connection).map_err(|_| DatabaseError::Operation)
+    }
+
+    pub fn with_transaction<T>(
+        &self,
+        work: impl FnOnce(&Transaction<'_>) -> rusqlite::Result<T>,
+    ) -> Result<T, DatabaseError> {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| DatabaseError::Operation)?;
+        let transaction = connection
+            .transaction()
+            .map_err(|_| DatabaseError::Operation)?;
+        let value = work(&transaction).map_err(|_| DatabaseError::Operation)?;
+        transaction.commit().map_err(|_| DatabaseError::Operation)?;
+        Ok(value)
     }
 
     #[cfg(test)]

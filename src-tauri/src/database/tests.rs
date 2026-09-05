@@ -107,10 +107,12 @@ fn foundation_database_migrates_to_materials_schema() {
     database.migrate().unwrap();
 
     assert_eq!(database.schema_version().unwrap(), 2);
-    assert!(database
-        .application_table_names()
-        .unwrap()
-        .contains(&"materials".to_owned()));
+    assert!(
+        database
+            .application_table_names()
+            .unwrap()
+            .contains(&"materials".to_owned())
+    );
 }
 
 #[test]
