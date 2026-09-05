@@ -8,6 +8,169 @@ use crate::{
 
 use super::{ProviderSaveInput, ProviderService};
 
+use super::{RoleProfileCopyInput, RoleProfileSaveInput, RoleProfileService};
+
+fn role_input(id: &str) -> RoleProfileSaveInput {
+    RoleProfileSaveInput {
+        id: id.into(),
+        name: " Interviewer ".into(),
+        system_prompt: " Ask one question ".into(),
+        opening_message: " Hello ".into(),
+        style_instructions: " Concise ".into(),
+    }
+}
+
+#[test]
+fn role_save_creates_trimmed_profile_and_edit_resets_active_with_new_version() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = ConfigStore::new(directory.path().join("config.json"));
+    let service = RoleProfileService::new(&config);
+
+    let saved = service.save(role_input("interviewer")).unwrap();
+    assert_eq!(saved.id, "interviewer");
+    assert_eq!(saved.name, "Interviewer");
+    assert_eq!(saved.system_prompt, "Ask one question");
+    assert_eq!(saved.opening_message, "Hello");
+    assert_eq!(saved.style_instructions, "Concise");
+    assert_eq!(saved.config_version, 1);
+    assert!(!saved.active);
+
+    assert!(service.activate("interviewer").unwrap().active);
+    let edited = service
+        .save(RoleProfileSaveInput {
+            system_prompt: "Ask two questions".into(),
+            ..role_input("interviewer")
+        })
+        .unwrap();
+    assert_eq!(edited.config_version, 2);
+    assert!(!edited.active);
+    assert!(config.load().unwrap().active_role_profile_id.is_none());
+}
+
+#[test]
+fn role_copy_clones_content_as_distinct_inactive_version_one_profile() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = ConfigStore::new(directory.path().join("config.json"));
+    let service = RoleProfileService::new(&config);
+    let source = service.save(role_input("interviewer")).unwrap();
+    service.activate("interviewer").unwrap();
+
+    let copied = service
+        .copy(RoleProfileCopyInput {
+            source_id: "interviewer".into(),
+            id: "panelist".into(),
+        })
+        .unwrap();
+
+    assert_eq!(copied.id, "panelist");
+    assert_eq!(copied.name, source.name);
+    assert_eq!(copied.system_prompt, source.system_prompt);
+    assert_eq!(copied.opening_message, source.opening_message);
+    assert_eq!(copied.style_instructions, source.style_instructions);
+    assert_eq!(copied.config_version, 1);
+    assert!(!copied.active);
+    assert_eq!(
+        config.load().unwrap().active_role_profile_id.as_deref(),
+        Some("interviewer")
+    );
+}
+
+#[test]
+fn role_copy_rejects_duplicate_destination_id() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = ConfigStore::new(directory.path().join("config.json"));
+    let service = RoleProfileService::new(&config);
+    service.save(role_input("interviewer")).unwrap();
+
+    assert_eq!(
+        service
+            .copy(RoleProfileCopyInput {
+                source_id: "interviewer".into(),
+                id: "interviewer".into(),
+            })
+            .unwrap_err()
+            .code(),
+        "ROLE_PROFILE_COPY_ID_IN_USE"
+    );
+}
+
+#[test]
+fn role_save_enforces_id_name_and_all_content_length_limits() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = ConfigStore::new(directory.path().join("config.json"));
+    let service = RoleProfileService::new(&config);
+
+    let mut at_limits = role_input(&"a".repeat(64));
+    at_limits.system_prompt = "p".repeat(32 * 1024);
+    at_limits.opening_message = "o".repeat(4 * 1024);
+    at_limits.style_instructions = "s".repeat(8 * 1024);
+    assert!(service.save(at_limits).is_ok());
+
+    for id in ["", "Uppercase", &"a".repeat(65)] {
+        assert_eq!(
+            service.save(role_input(id)).unwrap_err().code(),
+            "ROLE_PROFILE_ID_INVALID"
+        );
+    }
+    let mut empty_name = role_input("empty-name");
+    empty_name.name = " \t ".into();
+    assert_eq!(
+        service.save(empty_name).unwrap_err().code(),
+        "ROLE_PROFILE_FIELDS_INVALID"
+    );
+    for (id, field) in [
+        ("prompt-too-long", "prompt"),
+        ("opening-too-long", "opening"),
+        ("style-too-long", "style"),
+    ] {
+        let mut input = role_input(id);
+        match field {
+            "prompt" => input.system_prompt = "p".repeat(32 * 1024 + 1),
+            "opening" => input.opening_message = "o".repeat(4 * 1024 + 1),
+            "style" => input.style_instructions = "s".repeat(8 * 1024 + 1),
+            _ => unreachable!(),
+        }
+        assert_eq!(
+            service.save(input).unwrap_err().code(),
+            "ROLE_PROFILE_FIELDS_INVALID"
+        );
+    }
+}
+
+#[test]
+fn role_activation_is_singleton_and_delete_clears_active_id_and_reports_missing_roles() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = ConfigStore::new(directory.path().join("config.json"));
+    let service = RoleProfileService::new(&config);
+    service.save(role_input("interviewer")).unwrap();
+    service.save(role_input("panelist")).unwrap();
+
+    service.activate("interviewer").unwrap();
+    assert!(service.activate("panelist").unwrap().active);
+    let loaded = config.load().unwrap();
+    assert_eq!(loaded.active_role_profile_id.as_deref(), Some("panelist"));
+    assert_eq!(
+        loaded
+            .role_profiles
+            .iter()
+            .filter(|profile| profile.active)
+            .map(|profile| profile.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["panelist"]
+    );
+
+    service.delete("panelist").unwrap();
+    assert!(config.load().unwrap().active_role_profile_id.is_none());
+    assert_eq!(
+        service.activate("missing").unwrap_err().code(),
+        "ROLE_PROFILE_NOT_FOUND"
+    );
+    assert_eq!(
+        service.delete("missing").unwrap_err().code(),
+        "ROLE_PROFILE_NOT_FOUND"
+    );
+}
+
 struct FakeProbe;
 
 impl ProviderProbe for FakeProbe {
