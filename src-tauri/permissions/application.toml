@@ -47,3 +47,48 @@ commands.allow = ["config_restore_defaults"]
 identifier = "allow-open-app-directory"
 description = "Allows opening only the resolved application config or data directory."
 commands.allow = ["open_app_directory"]
+
+[[permission]]
+identifier = "allow-model-provider-save"
+description = "Allows saving non-secret provider configuration and storing an optional API key in Windows Credential Manager."
+commands.allow = ["model_provider_save"]
+
+[[permission]]
+identifier = "allow-model-provider-test"
+description = "Allows testing one configured model provider."
+commands.allow = ["model_provider_test"]
+
+[[permission]]
+identifier = "allow-model-provider-discover"
+description = "Allows discovering models from one configured provider."
+commands.allow = ["model_provider_discover"]
+
+[[permission]]
+identifier = "allow-model-provider-activate"
+description = "Allows selecting one configured model provider."
+commands.allow = ["model_provider_activate"]
+
+[[permission]]
+identifier = "allow-model-provider-delete"
+description = "Allows deleting one unreferenced provider and its credential."
+commands.allow = ["model_provider_delete"]
+
+[[permission]]
+identifier = "allow-speech-route-save"
+description = "Allows saving one validated voice route."
+commands.allow = ["speech_route_save"]
+
+[[permission]]
+identifier = "allow-speech-route-test"
+description = "Allows testing one configured voice route."
+commands.allow = ["speech_route_test"]
+
+[[permission]]
+identifier = "allow-speech-route-activate"
+description = "Allows activating one tested voice route."
+commands.allow = ["speech_route_activate"]
+
+[[permission]]
+identifier = "allow-speech-route-delete"
+description = "Allows deleting one voice route."
+commands.allow = ["speech_route_delete"]

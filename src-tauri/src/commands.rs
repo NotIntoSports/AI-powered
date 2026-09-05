@@ -2,12 +2,18 @@ use tauri::State;
 
 use crate::{
     app_state::AppState,
-    config::{PublicConfig, public_view},
+    config::{ProviderConfig, PublicConfig, VoiceRouteConfig, public_view},
     contracts::{
         CommandResult, DiagnosticsExportResult, FoundationStatus, SecretStatus, StartupState,
     },
     error::PublicError,
+    providers::OpenAiCompatibleProbe,
     secrets::SecretError,
+    services::{
+        ModelDiscoveryResult, ProviderSaveInput, ProviderService, ProviderServiceError,
+        ProviderTestResult, VoiceRouteSaveInput, VoiceRouteService, VoiceRouteServiceError,
+        VoiceRouteTestResult,
+    },
 };
 
 #[tauri::command]
@@ -95,6 +101,155 @@ fn public_config(state: &AppState) -> CommandResult<PublicConfig> {
 #[tauri::command]
 pub fn config_get_public(state: State<'_, AppState>) -> CommandResult<PublicConfig> {
     public_config(&state)
+}
+
+fn service_error<T: ts_rs::TS>(code: &str, message: &str) -> CommandResult<T> {
+    CommandResult::Err {
+        error: PublicError::new(code, message, false),
+    }
+}
+
+fn provider_service_error<T: ts_rs::TS>(error: ProviderServiceError) -> CommandResult<T> {
+    service_error(error.code(), "Provider operation failed")
+}
+
+fn route_service_error<T: ts_rs::TS>(error: VoiceRouteServiceError) -> CommandResult<T> {
+    service_error(error.code(), "Voice route operation failed")
+}
+
+fn provider_probe<T: ts_rs::TS>() -> Result<OpenAiCompatibleProbe, CommandResult<T>> {
+    OpenAiCompatibleProbe::new()
+        .map_err(|error| service_error(error.code(), "Provider client is unavailable"))
+}
+
+#[tauri::command]
+pub fn model_provider_save(
+    state: State<'_, AppState>,
+    input: ProviderSaveInput,
+) -> CommandResult<ProviderConfig> {
+    let probe = match provider_probe() {
+        Ok(probe) => probe,
+        Err(error) => return error,
+    };
+    ProviderService::new(&state.config, &state.secrets, &probe)
+        .save(input)
+        .map_or_else(provider_service_error, |data| CommandResult::Ok { data })
+}
+
+#[tauri::command]
+pub fn model_provider_test(
+    state: State<'_, AppState>,
+    provider_id: String,
+) -> CommandResult<ProviderTestResult> {
+    let probe = match provider_probe() {
+        Ok(probe) => probe,
+        Err(error) => return error,
+    };
+    ProviderService::new(&state.config, &state.secrets, &probe)
+        .test(&provider_id)
+        .map_or_else(provider_service_error, |data| CommandResult::Ok { data })
+}
+
+#[tauri::command]
+pub fn model_provider_discover(
+    state: State<'_, AppState>,
+    provider_id: String,
+) -> CommandResult<ModelDiscoveryResult> {
+    let probe = match provider_probe() {
+        Ok(probe) => probe,
+        Err(error) => return error,
+    };
+    ProviderService::new(&state.config, &state.secrets, &probe)
+        .discover(&provider_id)
+        .map_or_else(provider_service_error, |data| CommandResult::Ok { data })
+}
+
+#[tauri::command]
+pub fn model_provider_activate(
+    state: State<'_, AppState>,
+    provider_id: String,
+) -> CommandResult<ProviderConfig> {
+    let probe = match provider_probe() {
+        Ok(probe) => probe,
+        Err(error) => return error,
+    };
+    ProviderService::new(&state.config, &state.secrets, &probe)
+        .activate(&provider_id)
+        .map_or_else(provider_service_error, |data| CommandResult::Ok { data })
+}
+
+#[tauri::command]
+pub fn model_provider_delete(
+    state: State<'_, AppState>,
+    provider_id: String,
+) -> CommandResult<FoundationStatus> {
+    let probe = match provider_probe() {
+        Ok(probe) => probe,
+        Err(error) => return error,
+    };
+    ProviderService::new(&state.config, &state.secrets, &probe)
+        .delete(&provider_id)
+        .map_or_else(provider_service_error, |_| CommandResult::Ok {
+            data: FoundationStatus { ready: true },
+        })
+}
+
+#[tauri::command]
+pub fn speech_route_save(
+    state: State<'_, AppState>,
+    input: VoiceRouteSaveInput,
+) -> CommandResult<VoiceRouteConfig> {
+    let probe = match provider_probe() {
+        Ok(probe) => probe,
+        Err(error) => return error,
+    };
+    VoiceRouteService::new(&state.config, &state.secrets, &probe)
+        .save(input)
+        .map_or_else(route_service_error, |data| CommandResult::Ok { data })
+}
+
+#[tauri::command]
+pub fn speech_route_test(
+    state: State<'_, AppState>,
+    route_id: String,
+) -> CommandResult<VoiceRouteTestResult> {
+    let probe = match provider_probe() {
+        Ok(probe) => probe,
+        Err(error) => return error,
+    };
+    VoiceRouteService::new(&state.config, &state.secrets, &probe)
+        .test(&route_id)
+        .map_or_else(route_service_error, |data| CommandResult::Ok { data })
+}
+
+#[tauri::command]
+pub fn speech_route_activate(
+    state: State<'_, AppState>,
+    route_id: String,
+) -> CommandResult<VoiceRouteConfig> {
+    let probe = match provider_probe() {
+        Ok(probe) => probe,
+        Err(error) => return error,
+    };
+    VoiceRouteService::new(&state.config, &state.secrets, &probe)
+        .activate(&route_id)
+        .map_or_else(route_service_error, |data| CommandResult::Ok { data })
+}
+
+#[tauri::command]
+pub fn speech_route_delete(
+    state: State<'_, AppState>,
+    route_id: String,
+) -> CommandResult<FoundationStatus> {
+    let probe = match provider_probe() {
+        Ok(probe) => probe,
+        Err(error) => return error,
+    };
+    VoiceRouteService::new(&state.config, &state.secrets, &probe)
+        .delete(&route_id)
+        .map_or_else(route_service_error, |_| CommandResult::Ok {
+            data: FoundationStatus { ready: true },
+        })
 }
 
 #[tauri::command]

@@ -36,4 +36,16 @@ export type DiagnosticsConfig = { logRetentionDays: number, };
 
 export type PublicConfig = { configVersion: number, application: ApplicationConfig, models: ModelConfig, speech: SpeechConfig, transport: TransportConfig, knowledge: KnowledgeConfig, storage: StorageConfig, roleProfiles: Array<RoleProfile>, diagnostics: DiagnosticsConfig, };
 
+export type ProviderSaveInput = { id: string, name: string | null, baseUrl: string, apiKey: string | null, };
+
+export type ProviderTestResult = { providerId: string, reachable: boolean, modelCount: number, };
+
+export type DiscoveredModelDto = { id: string, };
+
+export type ModelDiscoveryResult = { providerId: string, models: Array<DiscoveredModelDto>, };
+
+export type VoiceRouteSaveInput = { id: string, name: string, mode: VoiceRouteMode, asrProviderId: string | null, asrModelId: string | null, llmProviderId: string | null, llmModelId: string | null, ttsProviderId: string | null, ttsModelId: string | null, voiceId: string | null, e2eProviderId: string | null, e2eModelId: string | null, };
+
+export type VoiceRouteTestResult = { routeId: string, ready: boolean, checkedProviderIds: Array<string>, };
+
 export type CommandResult<T> = { ok: true; data: T } | { ok: false; error: PublicError };

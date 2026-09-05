@@ -14,6 +14,15 @@
     "allow-config-get-public",
     "allow-config-restore-last-good",
     "allow-config-restore-defaults",
-    "allow-open-app-directory"
+    "allow-open-app-directory",
+    "allow-model-provider-save",
+    "allow-model-provider-test",
+    "allow-model-provider-discover",
+    "allow-model-provider-activate",
+    "allow-model-provider-delete",
+    "allow-speech-route-save",
+    "allow-speech-route-test",
+    "allow-speech-route-activate",
+    "allow-speech-route-delete"
   ]
 }

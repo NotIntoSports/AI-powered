@@ -2,7 +2,18 @@ import { describe, expect, it, vi } from "vitest";
 
 import { invoke } from "@tauri-apps/api/core";
 
-import { getConfigPublic } from "./commands";
+import {
+  activateModelProvider,
+  activateSpeechRoute,
+  deleteModelProvider,
+  deleteSpeechRoute,
+  discoverModelProvider,
+  getConfigPublic,
+  saveModelProvider,
+  saveSpeechRoute,
+  testModelProvider,
+  testSpeechRoute,
+} from "./commands";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
@@ -39,5 +50,35 @@ describe("getConfigPublic adapter", () => {
     for (const needle of ["apikey", "password", "secretvalue", "secretcontents", "token"]) {
       expect(serialized).not.toContain(needle);
     }
+  });
+});
+
+describe("Phase 3 service adapters", () => {
+  it("uses exact provider command names and payloads", async () => {
+    invokeMock.mockResolvedValue({ ok: true, data: {} });
+    const input = { id: "openai", name: "OpenAI", baseUrl: "https://example.test/v1", apiKey: "value" };
+    await saveModelProvider(input);
+    await testModelProvider("openai");
+    await discoverModelProvider("openai");
+    await activateModelProvider("openai");
+    await deleteModelProvider("openai");
+    expect(invokeMock).toHaveBeenNthCalledWith(1, "model_provider_save", { input });
+    expect(invokeMock).toHaveBeenNthCalledWith(2, "model_provider_test", { providerId: "openai" });
+    expect(invokeMock).toHaveBeenNthCalledWith(3, "model_provider_discover", { providerId: "openai" });
+    expect(invokeMock).toHaveBeenNthCalledWith(4, "model_provider_activate", { providerId: "openai" });
+    expect(invokeMock).toHaveBeenNthCalledWith(5, "model_provider_delete", { providerId: "openai" });
+  });
+
+  it("uses exact voice route command names", async () => {
+    invokeMock.mockResolvedValue({ ok: true, data: {} });
+    const input = { id: "route", name: "Route", mode: "e2e" as const, asrProviderId: null, asrModelId: null, llmProviderId: null, llmModelId: null, ttsProviderId: null, ttsModelId: null, voiceId: null, e2eProviderId: "openai", e2eModelId: "realtime" };
+    await saveSpeechRoute(input);
+    await testSpeechRoute("route");
+    await activateSpeechRoute("route");
+    await deleteSpeechRoute("route");
+    expect(invokeMock).toHaveBeenNthCalledWith(1, "speech_route_save", { input });
+    expect(invokeMock).toHaveBeenNthCalledWith(2, "speech_route_test", { routeId: "route" });
+    expect(invokeMock).toHaveBeenNthCalledWith(3, "speech_route_activate", { routeId: "route" });
+    expect(invokeMock).toHaveBeenNthCalledWith(4, "speech_route_delete", { routeId: "route" });
   });
 });

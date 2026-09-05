@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
-import type { CommandResult, DiagnosticsExportResult, FoundationStatus, PublicConfig, SecretStatus, StartupState } from "../generated/bindings";
+import type { CommandResult, DiagnosticsExportResult, FoundationStatus, ModelDiscoveryResult, ProviderConfig, ProviderSaveInput, ProviderTestResult, PublicConfig, SecretStatus, StartupState, VoiceRouteConfig, VoiceRouteSaveInput, VoiceRouteTestResult } from "../generated/bindings";
 
 export function getFoundationStatus() {
   return invoke<CommandResult<FoundationStatus>>("foundation_get_status");
@@ -28,6 +28,42 @@ export function getStartupState() {
 
 export function getConfigPublic() {
   return invoke<CommandResult<PublicConfig>>("config_get_public");
+}
+
+export function saveModelProvider(input: ProviderSaveInput) {
+  return invoke<CommandResult<ProviderConfig>>("model_provider_save", { input });
+}
+
+export function testModelProvider(providerId: string) {
+  return invoke<CommandResult<ProviderTestResult>>("model_provider_test", { providerId });
+}
+
+export function discoverModelProvider(providerId: string) {
+  return invoke<CommandResult<ModelDiscoveryResult>>("model_provider_discover", { providerId });
+}
+
+export function activateModelProvider(providerId: string) {
+  return invoke<CommandResult<ProviderConfig>>("model_provider_activate", { providerId });
+}
+
+export function deleteModelProvider(providerId: string) {
+  return invoke<CommandResult<FoundationStatus>>("model_provider_delete", { providerId });
+}
+
+export function saveSpeechRoute(input: VoiceRouteSaveInput) {
+  return invoke<CommandResult<VoiceRouteConfig>>("speech_route_save", { input });
+}
+
+export function testSpeechRoute(routeId: string) {
+  return invoke<CommandResult<VoiceRouteTestResult>>("speech_route_test", { routeId });
+}
+
+export function activateSpeechRoute(routeId: string) {
+  return invoke<CommandResult<VoiceRouteConfig>>("speech_route_activate", { routeId });
+}
+
+export function deleteSpeechRoute(routeId: string) {
+  return invoke<CommandResult<FoundationStatus>>("speech_route_delete", { routeId });
 }
 
 export function restoreLastGoodConfig() {

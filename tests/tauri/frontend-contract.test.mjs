@@ -35,7 +35,14 @@ test("generated bindings have a deterministic warning header", async () => {
   assert.match(bindings, /export type FoundationStatus/);
   assert.match(bindings, /export type PublicError/);
   assert.match(bindings, /export type SecretStatus/);
-  assert.doesNotMatch(bindings, /secret(Value|Contents)|apiKey|password/i);
+  assert.doesNotMatch(bindings, /secret(Value|Contents)|password/i);
+  const apiKeyMentions = bindings.match(/apiKey/g) ?? [];
+  assert.equal(apiKeyMentions.length, 1, "apiKey may appear only in the provider command input DTO");
+  assert.match(bindings, /ProviderSaveInput = \{[^}]*apiKey: string \| null/);
+  for (const outputType of ["ProviderConfig", "PublicConfig", "ProviderTestResult", "ModelDiscoveryResult"]) {
+    const declaration = bindings.match(new RegExp(`export type ${outputType} = \\{[^;]+;`))?.[0] ?? "";
+    assert.doesNotMatch(declaration, /apiKey|secret(Value|Contents)|password/i, `${outputType} must remain redacted`);
+  }
 });
 
 test("only the command adapter imports the low-level Tauri invoke API", async () => {
