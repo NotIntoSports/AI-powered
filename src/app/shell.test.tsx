@@ -21,6 +21,7 @@ vi.mock("../api/commands", () => ({
       diagnostics: { logRetentionDays: 14 },
     },
   }),
+  listMaterials: vi.fn().mockResolvedValue({ ok: true, data: [] }),
 }));
 
 describe("Shell", () => {

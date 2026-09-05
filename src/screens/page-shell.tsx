@@ -2,9 +2,10 @@ import { routeCapabilities, routeDesignRef, routeLabel, type RouteId } from "../
 
 export interface PageShellProps {
   id: RouteId;
+  hideStatus?: boolean;
 }
 
-export function PageShell({ id }: PageShellProps) {
+export function PageShell({ id, hideStatus }: PageShellProps) {
   const label = routeLabel(id);
   const designRef = routeDesignRef(id);
   const capabilities = routeCapabilities(id);
@@ -19,7 +20,7 @@ export function PageShell({ id }: PageShellProps) {
           <li key={cap}>{cap}</li>
         ))}
       </ul>
-      <p className="page-status">本页面尚未接入业务逻辑；当前为 Tauri 壳层。</p>
+      {!hideStatus && <p className="page-status">本页面尚未接入业务逻辑；当前为 Tauri 壳层。</p>}
     </section>
   );
 }

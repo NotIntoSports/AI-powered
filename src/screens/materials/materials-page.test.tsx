@@ -1,10 +1,24 @@
 import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import * as commands from "../../api/commands";
 import { MaterialsPage } from "./materials-page";
 
+vi.mock("../../api/commands", () => ({
+  listMaterials: vi.fn(),
+  importMaterial: vi.fn(),
+  searchMaterials: vi.fn(),
+  deleteMaterial: vi.fn(),
+}));
+
 describe("MaterialsPage", () => {
-  afterEach(cleanup);
+  beforeEach(() => {
+    vi.mocked(commands.listMaterials).mockResolvedValue({ ok: true, data: [] });
+  });
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+  });
 
   it("renders the materials heading", () => {
     render(<MaterialsPage />);
@@ -28,4 +42,11 @@ describe("MaterialsPage", () => {
     const { container } = render(<MaterialsPage />);
     expect(container.innerHTML).not.toMatch(/\/api\//);
   });
+
+  it("includes the materials library and drops the leftover placeholder", async () => {
+    render(<MaterialsPage />);
+    expect(await screen.findByRole("heading", { name: "资料库" })).toBeTruthy();
+    expect(screen.queryByText(/尚未接入业务逻辑/)).toBeNull();
+  });
 });
+
