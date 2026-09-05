@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
-import type { CommandResult, DiagnosticsExportResult, FoundationStatus, ModelDiscoveryResult, ProviderConfig, ProviderSaveInput, ProviderTestResult, PublicConfig, StartupState, VoiceRouteConfig, VoiceRouteSaveInput, VoiceRouteTestResult } from "../generated/bindings";
+import type { CommandResult, DiagnosticsExportResult, EmbeddingConfig, EmbeddingConfigSaveInput, EmbeddingTestResult, FoundationStatus, LiveKitConfig, LiveKitSettingsSaveInput, LiveKitTestResult, ModelDiscoveryResult, ProviderConfig, ProviderSaveInput, ProviderTestResult, PublicConfig, RoleProfileConfig, RoleProfileCopyInput, RoleProfileSaveInput, StartupState, VoiceRouteConfig, VoiceRouteSaveInput, VoiceRouteTestResult } from "../generated/bindings";
 
 export function getFoundationStatus() {
   return invoke<CommandResult<FoundationStatus>>("foundation_get_status");
@@ -52,6 +52,50 @@ export function activateSpeechRoute(routeId: string) {
 
 export function deleteSpeechRoute(routeId: string) {
   return invoke<CommandResult<FoundationStatus>>("speech_route_delete", { routeId });
+}
+
+export function saveRoleProfile(input: RoleProfileSaveInput) {
+  return invoke<CommandResult<RoleProfileConfig>>("role_profile_save", { input });
+}
+
+export function copyRoleProfile(input: RoleProfileCopyInput) {
+  return invoke<CommandResult<RoleProfileConfig>>("role_profile_copy", { input });
+}
+
+export function activateRoleProfile(roleId: string) {
+  return invoke<CommandResult<RoleProfileConfig>>("role_profile_activate", { roleId });
+}
+
+export function deleteRoleProfile(roleId: string) {
+  return invoke<CommandResult<FoundationStatus>>("role_profile_delete", { roleId });
+}
+
+export function saveEmbeddingConfig(input: EmbeddingConfigSaveInput) {
+  return invoke<CommandResult<EmbeddingConfig>>("embedding_config_save", { input });
+}
+
+export function testEmbeddingConfig(embeddingId: string) {
+  return invoke<CommandResult<EmbeddingTestResult>>("embedding_config_test", { embeddingId });
+}
+
+export function activateEmbeddingConfig(embeddingId: string) {
+  return invoke<CommandResult<EmbeddingConfig>>("embedding_config_activate", { embeddingId });
+}
+
+export function deleteEmbeddingConfig(embeddingId: string) {
+  return invoke<CommandResult<FoundationStatus>>("embedding_config_delete", { embeddingId });
+}
+
+export function saveLiveKitSettings(input: LiveKitSettingsSaveInput) {
+  return invoke<CommandResult<LiveKitConfig>>("livekit_settings_save", { input });
+}
+
+export function testLiveKitSettings() {
+  return invoke<CommandResult<LiveKitTestResult>>("livekit_settings_test");
+}
+
+export function enableLiveKitSettings(enabled: boolean) {
+  return invoke<CommandResult<LiveKitConfig>>("livekit_settings_enable", { enabled });
 }
 
 export function restoreLastGoodConfig() {

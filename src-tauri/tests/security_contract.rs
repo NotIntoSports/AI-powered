@@ -110,3 +110,65 @@ fn csp_navigation_child_windows_and_single_instance_are_fail_closed() {
     assert!(source.contains("NewWindowResponse::Deny"));
     assert!(source.contains("cfg!(debug_assertions)"));
 }
+
+#[test]
+fn each_application_command_has_one_explicit_permission() {
+    let lib = fs::read_to_string(manifest_dir().join("src/lib.rs")).unwrap();
+    let handler = lib
+        .split("tauri::generate_handler![")
+        .nth(1)
+        .and_then(|rest| rest.split(']').next())
+        .expect("generate_handler list");
+    let mut commands = handler
+        .lines()
+        .filter_map(|line| {
+            line.trim()
+                .trim_end_matches(',')
+                .strip_prefix("commands::")
+                .map(str::to_owned)
+        })
+        .collect::<Vec<_>>();
+    commands.sort();
+    assert!(
+        commands.windows(2).all(|pair| pair[0] != pair[1]),
+        "commands must be registered once"
+    );
+
+    let permissions =
+        fs::read_to_string(manifest_dir().join("permissions/application.toml")).unwrap();
+    let mut allowed = Vec::new();
+    for line in permissions.lines() {
+        if let Some(rest) = line.trim().strip_prefix("commands.allow = [") {
+            let name = rest
+                .trim_start_matches('"')
+                .trim_end_matches("\"]")
+                .to_owned();
+            allowed.push(name);
+        }
+    }
+    allowed.sort();
+    assert_eq!(
+        commands, allowed,
+        "each command must have exactly one permission stanza"
+    );
+
+    let capability: Value = serde_json::from_str(
+        &fs::read_to_string(manifest_dir().join("capabilities/main.json")).unwrap(),
+    )
+    .unwrap();
+    let granted = capability["permissions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .filter(|permission| *permission != "core:default")
+        .collect::<Vec<_>>();
+    assert_eq!(granted.len(), allowed.len());
+    for command in &commands {
+        let identifier = format!("allow-{}", command.replace('_', "-"));
+        assert!(
+            granted.contains(&identifier.as_str()),
+            "capability missing {identifier}"
+        );
+    }
+}

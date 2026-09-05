@@ -24,17 +24,23 @@ export type VoiceRouteConfig = { id: string, name: string, mode: VoiceRouteMode,
 
 export type SpeechConfig = { voiceRoutes: Array<VoiceRouteConfig>, activeVoiceRouteId: string | null, };
 
-export type TransportConfig = { livekitUrl: string | null, };
+export type LiveKitConfig = { enabled: boolean, url: string | null, apiKey: SecretSlot | null, apiSecret: SecretSlot | null, ready: boolean, status: string | null, configVersion: number, };
 
-export type KnowledgeConfig = { embeddingProviderId: string | null, };
+export type TransportConfig = { livekit: LiveKitConfig, };
+
+export type EmbeddingDistance = "cosine";
+
+export type EmbeddingConfig = { id: string, providerId: string, modelId: string, dimensions: number, distance: EmbeddingDistance, normalized: boolean, active: boolean, ready: boolean, status: string | null, configVersion: number, };
+
+export type KnowledgeConfig = { embeddingConfigs: Array<EmbeddingConfig>, activeEmbeddingConfigId: string | null, };
 
 export type StorageConfig = { exportDirectory: string | null, };
 
-export type RoleProfile = { id: string, instructions: string, };
+export type RoleProfileConfig = { id: string, name: string, systemPrompt: string, openingMessage: string, styleInstructions: string, active: boolean, configVersion: number, };
 
 export type DiagnosticsConfig = { logRetentionDays: number, };
 
-export type PublicConfig = { configVersion: number, application: ApplicationConfig, models: ModelConfig, speech: SpeechConfig, transport: TransportConfig, knowledge: KnowledgeConfig, storage: StorageConfig, roleProfiles: Array<RoleProfile>, diagnostics: DiagnosticsConfig, };
+export type PublicConfig = { configVersion: number, application: ApplicationConfig, models: ModelConfig, speech: SpeechConfig, transport: TransportConfig, knowledge: KnowledgeConfig, storage: StorageConfig, roleProfiles: Array<RoleProfileConfig>, activeRoleProfileId: string | null, diagnostics: DiagnosticsConfig, };
 
 export type ProviderSaveInput = { id: string, name: string | null, baseUrl: string, apiKey: string | null, };
 
@@ -47,5 +53,17 @@ export type ModelDiscoveryResult = { providerId: string, models: Array<Discovere
 export type VoiceRouteSaveInput = { id: string, name: string, mode: VoiceRouteMode, asrProviderId: string | null, asrModelId: string | null, llmProviderId: string | null, llmModelId: string | null, ttsProviderId: string | null, ttsModelId: string | null, voiceId: string | null, e2eProviderId: string | null, e2eModelId: string | null, };
 
 export type VoiceRouteTestResult = { routeId: string, ready: boolean, checkedProviderIds: Array<string>, };
+
+export type RoleProfileSaveInput = { id: string, name: string, systemPrompt: string, openingMessage: string, styleInstructions: string, };
+
+export type RoleProfileCopyInput = { sourceId: string, id: string, };
+
+export type EmbeddingConfigSaveInput = { id: string, providerId: string, modelId: string, dimensions: number, normalized: boolean, };
+
+export type EmbeddingTestResult = { id: string, ready: boolean, dimensions: number, };
+
+export type LiveKitSettingsSaveInput = { url: string | null, apiKey: string | null, apiSecret: string | null, };
+
+export type LiveKitTestResult = { ready: boolean, };
 
 export type CommandResult<T> = { ok: true; data: T } | { ok: false; error: PublicError };

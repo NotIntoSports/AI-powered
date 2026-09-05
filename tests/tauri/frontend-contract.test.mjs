@@ -36,12 +36,14 @@ test("generated bindings have a deterministic warning header", async () => {
   assert.match(bindings, /export type PublicError/);
   assert.match(bindings, /export type SecretStatus/);
   assert.doesNotMatch(bindings, /secret(Value|Contents)|password/i);
-  const apiKeyMentions = bindings.match(/apiKey/g) ?? [];
-  assert.equal(apiKeyMentions.length, 1, "apiKey may appear only in the provider command input DTO");
   assert.match(bindings, /ProviderSaveInput = \{[^}]*apiKey: string \| null/);
-  for (const outputType of ["ProviderConfig", "PublicConfig", "ProviderTestResult", "ModelDiscoveryResult"]) {
+  assert.match(bindings, /LiveKitSettingsSaveInput = \{[^}]*apiKey: string \| null/);
+  assert.match(bindings, /LiveKitSettingsSaveInput = \{[^}]*apiSecret: string \| null/);
+  assert.match(bindings, /export type LiveKitConfig = \{[^;]*apiKey: SecretSlot \| null/);
+  assert.match(bindings, /export type LiveKitConfig = \{[^;]*apiSecret: SecretSlot \| null/);
+  for (const outputType of ["ProviderConfig", "PublicConfig", "ProviderTestResult", "ModelDiscoveryResult", "LiveKitTestResult", "EmbeddingTestResult", "RoleProfileConfig"]) {
     const declaration = bindings.match(new RegExp(`export type ${outputType} = \\{[^;]+;`))?.[0] ?? "";
-    assert.doesNotMatch(declaration, /apiKey|secret(Value|Contents)|password/i, `${outputType} must remain redacted`);
+    assert.doesNotMatch(declaration, /apiKey: string|apiSecret: string|secret(Value|Contents)|password/i, `${outputType} must remain redacted`);
   }
 });
 

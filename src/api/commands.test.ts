@@ -3,14 +3,25 @@ import { describe, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 
 import {
+  activateEmbeddingConfig,
   activateModelProvider,
+  activateRoleProfile,
   activateSpeechRoute,
+  copyRoleProfile,
+  deleteEmbeddingConfig,
   deleteModelProvider,
+  deleteRoleProfile,
   deleteSpeechRoute,
   discoverModelProvider,
+  enableLiveKitSettings,
   getConfigPublic,
+  saveEmbeddingConfig,
+  saveLiveKitSettings,
   saveModelProvider,
+  saveRoleProfile,
   saveSpeechRoute,
+  testEmbeddingConfig,
+  testLiveKitSettings,
   testModelProvider,
   testSpeechRoute,
 } from "./commands";
@@ -47,7 +58,8 @@ describe("getConfigPublic adapter", () => {
 
     expect(result).toEqual({ ok: true, data });
     expect(serialized).toContain("providers/p1/api-key");
-    for (const needle of ["apikey", "password", "secretvalue", "secretcontents", "token"]) {
+    expect(serialized).toContain("\"configured\":true");
+    for (const needle of ["must-never-cross", "password", "secretvalue", "secretcontents"]) {
       expect(serialized).not.toContain(needle);
     }
   });
@@ -80,5 +92,34 @@ describe("Phase 3 service adapters", () => {
     expect(invokeMock).toHaveBeenNthCalledWith(2, "speech_route_test", { routeId: "route" });
     expect(invokeMock).toHaveBeenNthCalledWith(3, "speech_route_activate", { routeId: "route" });
     expect(invokeMock).toHaveBeenNthCalledWith(4, "speech_route_delete", { routeId: "route" });
+  });
+
+  it("uses exact role embedding and LiveKit command names", async () => {
+    invokeMock.mockResolvedValue({ ok: true, data: {} });
+    const role = { id: "interviewer", name: "Interviewer", systemPrompt: "Ask", openingMessage: "Hi", styleInstructions: "Short" };
+    await saveRoleProfile(role);
+    await copyRoleProfile({ sourceId: "interviewer", id: "copy" });
+    await activateRoleProfile("interviewer");
+    await deleteRoleProfile("copy");
+    const embedding = { id: "primary", providerId: "openai", modelId: "embed", dimensions: 8, normalized: true };
+    await saveEmbeddingConfig(embedding);
+    await testEmbeddingConfig("primary");
+    await activateEmbeddingConfig("primary");
+    await deleteEmbeddingConfig("primary");
+    const livekit = { url: "wss://livekit.example.test", apiKey: "transient-key", apiSecret: "transient-secret" };
+    await saveLiveKitSettings(livekit);
+    await testLiveKitSettings();
+    await enableLiveKitSettings(true);
+    expect(invokeMock).toHaveBeenNthCalledWith(1, "role_profile_save", { input: role });
+    expect(invokeMock).toHaveBeenNthCalledWith(2, "role_profile_copy", { input: { sourceId: "interviewer", id: "copy" } });
+    expect(invokeMock).toHaveBeenNthCalledWith(3, "role_profile_activate", { roleId: "interviewer" });
+    expect(invokeMock).toHaveBeenNthCalledWith(4, "role_profile_delete", { roleId: "copy" });
+    expect(invokeMock).toHaveBeenNthCalledWith(5, "embedding_config_save", { input: embedding });
+    expect(invokeMock).toHaveBeenNthCalledWith(6, "embedding_config_test", { embeddingId: "primary" });
+    expect(invokeMock).toHaveBeenNthCalledWith(7, "embedding_config_activate", { embeddingId: "primary" });
+    expect(invokeMock).toHaveBeenNthCalledWith(8, "embedding_config_delete", { embeddingId: "primary" });
+    expect(invokeMock).toHaveBeenNthCalledWith(9, "livekit_settings_save", { input: livekit });
+    expect(invokeMock).toHaveBeenNthCalledWith(10, "livekit_settings_test");
+    expect(invokeMock).toHaveBeenNthCalledWith(11, "livekit_settings_enable", { enabled: true });
   });
 });

@@ -77,3 +77,58 @@ commands.allow = ["speech_route_activate"]
 identifier = "allow-speech-route-delete"
 description = "Allows deleting one voice route."
 commands.allow = ["speech_route_delete"]
+
+[[permission]]
+identifier = "allow-role-profile-save"
+description = "Allows saving one local role profile."
+commands.allow = ["role_profile_save"]
+
+[[permission]]
+identifier = "allow-role-profile-copy"
+description = "Allows copying one local role profile to a new ID."
+commands.allow = ["role_profile_copy"]
+
+[[permission]]
+identifier = "allow-role-profile-activate"
+description = "Allows activating one reviewed role profile."
+commands.allow = ["role_profile_activate"]
+
+[[permission]]
+identifier = "allow-role-profile-delete"
+description = "Allows deleting one local role profile."
+commands.allow = ["role_profile_delete"]
+
+[[permission]]
+identifier = "allow-embedding-config-save"
+description = "Allows saving one local embedding configuration."
+commands.allow = ["embedding_config_save"]
+
+[[permission]]
+identifier = "allow-embedding-config-test"
+description = "Allows testing one embedding configuration against its provider."
+commands.allow = ["embedding_config_test"]
+
+[[permission]]
+identifier = "allow-embedding-config-activate"
+description = "Allows activating one tested embedding configuration."
+commands.allow = ["embedding_config_activate"]
+
+[[permission]]
+identifier = "allow-embedding-config-delete"
+description = "Allows deleting one embedding configuration."
+commands.allow = ["embedding_config_delete"]
+
+[[permission]]
+identifier = "allow-livekit-settings-save"
+description = "Allows saving optional LiveKit URL and storing credentials in Windows Credential Manager."
+commands.allow = ["livekit_settings_save"]
+
+[[permission]]
+identifier = "allow-livekit-settings-test"
+description = "Allows testing the saved LiveKit transport configuration."
+commands.allow = ["livekit_settings_test"]
+
+[[permission]]
+identifier = "allow-livekit-settings-enable"
+description = "Allows enabling or disabling a tested LiveKit transport."
+commands.allow = ["livekit_settings_enable"]

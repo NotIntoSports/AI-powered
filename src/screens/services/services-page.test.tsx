@@ -22,10 +22,21 @@ const emptyConfig = {
   application: { locale: null },
   models: { providers: [], activeProviderId: null },
   speech: { voiceRoutes: [], activeVoiceRouteId: null },
-  transport: { livekitUrl: null },
-  knowledge: { embeddingProviderId: null },
+  transport: {
+    livekit: {
+      enabled: false,
+      url: null,
+      apiKey: null,
+      apiSecret: null,
+      ready: false,
+      status: null,
+      configVersion: 0,
+    },
+  },
+  knowledge: { embeddingConfigs: [], activeEmbeddingConfigId: null },
   storage: { exportDirectory: null },
   roleProfiles: [],
+  activeRoleProfileId: null,
   diagnostics: { logRetentionDays: 14 },
 };
 

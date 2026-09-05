@@ -428,6 +428,56 @@ pub fn public_view(config: &AppConfigV1) -> PublicConfig {
     }
 }
 
+/// Diagnostic-safe projection: same redacted public tree, but role prompt bodies
+/// are omitted so they cannot enter exported reports.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticRoleProfile {
+    pub id: String,
+    pub name: String,
+    pub active: bool,
+    pub config_version: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticPublicConfig {
+    pub config_version: u32,
+    pub application: ApplicationConfig,
+    pub models: ModelConfig,
+    pub speech: SpeechConfig,
+    pub transport: TransportConfig,
+    pub knowledge: KnowledgeConfig,
+    pub storage: StorageConfig,
+    pub role_profiles: Vec<DiagnosticRoleProfile>,
+    pub active_role_profile_id: Option<String>,
+    pub diagnostics: DiagnosticsConfig,
+}
+
+pub fn diagnostic_view(config: &AppConfigV1) -> DiagnosticPublicConfig {
+    DiagnosticPublicConfig {
+        config_version: config.config_version,
+        application: config.application.clone(),
+        models: config.models.clone(),
+        speech: config.speech.clone(),
+        transport: config.transport.clone(),
+        knowledge: config.knowledge.clone(),
+        storage: config.storage.clone(),
+        role_profiles: config
+            .role_profiles
+            .iter()
+            .map(|profile| DiagnosticRoleProfile {
+                id: profile.id.clone(),
+                name: profile.name.clone(),
+                active: profile.active,
+                config_version: profile.config_version,
+            })
+            .collect(),
+        active_role_profile_id: config.active_role_profile_id.clone(),
+        diagnostics: config.diagnostics.clone(),
+    }
+}
+
 impl Default for AppConfigV1 {
     fn default() -> Self {
         Self {
