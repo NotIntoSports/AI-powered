@@ -90,6 +90,10 @@ impl SessionRuntime {
         self.stop_tts
     }
 
+    pub fn take_stop_tts(&mut self) -> bool {
+        std::mem::replace(&mut self.stop_tts, false)
+    }
+
     pub fn can_answer(&self) -> bool {
         self.mode == AgentMode::AiActive
     }
@@ -121,9 +125,7 @@ impl SessionRuntime {
     }
 
     pub fn set_mode(&mut self, mode: AgentMode) {
-        if mode != AgentMode::AiActive {
-            self.stop_tts = true;
-        }
+        self.stop_tts = mode != AgentMode::AiActive;
         self.mode = mode;
     }
 }
@@ -164,7 +166,9 @@ mod tests {
             SessionPhase::Listening,
         ];
         for next in happy {
-            runtime.transition(next).expect(next_label(next));
+            runtime
+                .transition(next)
+                .unwrap_or_else(|_| panic!("{}", next_label(next)));
             assert_eq!(runtime.phase(), next);
         }
 
@@ -296,10 +300,26 @@ mod tests {
 
         runtime.set_mode(AgentMode::Paused);
         assert!(!runtime.can_answer());
+        assert!(runtime.stop_tts());
         runtime.set_mode(AgentMode::Muted);
         assert!(!runtime.can_answer());
+        assert!(runtime.stop_tts());
         runtime.set_mode(AgentMode::AiActive);
         assert!(runtime.can_answer());
+        assert!(!runtime.stop_tts());
+    }
+
+    #[test]
+    fn resume_ai_clears_stop_tts_after_takeover() {
+        let mut runtime = SessionRuntime::new();
+        runtime.takeover();
+        assert!(runtime.stop_tts());
+        assert!(!runtime.can_answer());
+
+        runtime.set_mode(AgentMode::AiActive);
+        assert!(!runtime.stop_tts());
+        assert!(runtime.can_answer());
+        assert_eq!(runtime.mode(), AgentMode::AiActive);
     }
 
     fn next_label(phase: SessionPhase) -> &'static str {
