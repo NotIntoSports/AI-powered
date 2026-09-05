@@ -5,12 +5,16 @@ use ts_rs::TS;
 
 use crate::{
     database::{Database, DatabaseError},
-    materials::{CHUNKER_VERSION, MaterialStore, NewMaterial, chunk_text, store::sha256_hex},
+    materials::{
+        CHUNKER_VERSION, MaterialStore, NewMaterial, ParseError, chunk_text, extract_text,
+        parse::{MEDIA_DOCX, MEDIA_MARKDOWN, MEDIA_PDF, MEDIA_PLAIN},
+        parser_version,
+        store::sha256_hex,
+    },
 };
 
 pub use crate::materials::MaterialSearchHit;
 
-pub const PARSER_VERSION: &str = "utf8-plain-v1";
 const MAX_MATERIAL_BYTES: u64 = 8 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -33,6 +37,8 @@ pub enum MaterialServiceError {
     TypeUnsupported,
     TooLarge,
     NotUtf8,
+    NoTextLayer,
+    ParseFailed,
     NotFound,
     PathInvalid,
     Operation,
@@ -44,6 +50,8 @@ impl MaterialServiceError {
             Self::TypeUnsupported => "MATERIAL_TYPE_UNSUPPORTED",
             Self::TooLarge => "MATERIAL_TOO_LARGE",
             Self::NotUtf8 => "MATERIAL_NOT_UTF8",
+            Self::NoTextLayer => "MATERIAL_NO_TEXT_LAYER",
+            Self::ParseFailed => "MATERIAL_PARSE_FAILED",
             Self::NotFound => "MATERIAL_NOT_FOUND",
             Self::PathInvalid => "MATERIAL_PATH_INVALID",
             Self::Operation => "MATERIAL_OPERATION_FAILED",
@@ -54,6 +62,16 @@ impl MaterialServiceError {
 impl From<DatabaseError> for MaterialServiceError {
     fn from(_: DatabaseError) -> Self {
         Self::Operation
+    }
+}
+
+impl From<ParseError> for MaterialServiceError {
+    fn from(error: ParseError) -> Self {
+        match error {
+            ParseError::NotUtf8 => Self::NotUtf8,
+            ParseError::NoTextLayer => Self::NoTextLayer,
+            ParseError::ParseFailed => Self::ParseFailed,
+        }
     }
 }
 
@@ -81,8 +99,10 @@ impl<'a> MaterialService<'a> {
             .unwrap_or("")
             .to_ascii_lowercase();
         let media_type = match extension.as_str() {
-            "txt" => "text/plain",
-            "md" => "text/markdown",
+            "txt" => MEDIA_PLAIN,
+            "md" => MEDIA_MARKDOWN,
+            "pdf" => MEDIA_PDF,
+            "docx" => MEDIA_DOCX,
             _ => return Err(MaterialServiceError::TypeUnsupported),
         };
         let metadata = std::fs::metadata(source).map_err(|_| MaterialServiceError::Operation)?;
@@ -98,7 +118,7 @@ impl<'a> MaterialService<'a> {
         if let Some(existing) = store.find_by_hash(&content_sha256)? {
             return Ok(summary(existing));
         }
-        let text = String::from_utf8(bytes).map_err(|_| MaterialServiceError::NotUtf8)?;
+        let text = extract_text(media_type, &bytes)?;
         let file_name = source
             .file_name()
             .and_then(|value| value.to_str())
@@ -114,16 +134,15 @@ impl<'a> MaterialService<'a> {
         if let Some(parent) = destination.parent() {
             std::fs::create_dir_all(parent).map_err(|_| MaterialServiceError::Operation)?;
         }
-        std::fs::write(&destination, text.as_bytes())
-            .map_err(|_| MaterialServiceError::Operation)?;
+        std::fs::write(&destination, &bytes).map_err(|_| MaterialServiceError::Operation)?;
         let insert = store.insert_text_ready(NewMaterial {
             id: &id,
             file_name,
             stored_path: &stored_path,
             content_sha256: &content_sha256,
             media_type,
-            byte_size: text.len() as i64,
-            parser_version: PARSER_VERSION,
+            byte_size: bytes.len() as i64,
+            parser_version: parser_version(media_type),
             chunker_version: CHUNKER_VERSION,
             extracted_text: &text,
             chunks: &chunks,
@@ -211,6 +230,10 @@ mod tests {
         assert_eq!(first.file_name, "resume.md");
         assert_eq!(first.media_type, "text/markdown");
         assert_eq!(first.status, "text_ready");
+        assert_eq!(
+            parser_version_of(&database, &first.id),
+            crate::materials::parse::PARSER_UTF8
+        );
         assert!(first.chunk_count >= 1);
         assert!(
             directory
@@ -241,10 +264,10 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let database = opened(&directory);
         let service = MaterialService::new(&database, directory.path());
-        let pdf = directory.path().join("scan.pdf");
-        std::fs::write(&pdf, b"%PDF").unwrap();
+        let xlsx = directory.path().join("sheet.xlsx");
+        std::fs::write(&xlsx, b"PK").unwrap();
         assert_eq!(
-            service.import_file(&pdf).unwrap_err().code(),
+            service.import_file(&xlsx).unwrap_err().code(),
             "MATERIAL_TYPE_UNSUPPORTED"
         );
 
@@ -260,6 +283,150 @@ mod tests {
         assert_eq!(
             service.import_file(&binary).unwrap_err().code(),
             "MATERIAL_NOT_UTF8"
+        );
+    }
+
+    fn fixture_path(name: &str) -> std::path::PathBuf {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/materials")
+            .join(name)
+    }
+
+    fn parser_version_of(database: &Database, id: &str) -> String {
+        database
+            .with_connection(|connection| {
+                connection.query_row(
+                    "SELECT parser_version FROM materials WHERE id = ?1",
+                    rusqlite::params![id],
+                    |row| row.get(0),
+                )
+            })
+            .unwrap()
+    }
+
+    fn extracted_text_of(database: &Database, id: &str) -> String {
+        database
+            .with_connection(|connection| {
+                connection.query_row(
+                    "SELECT extracted_text FROM material_documents WHERE material_id = ?1",
+                    rusqlite::params![id],
+                    |row| row.get(0),
+                )
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn import_indexes_chinese_pdf_and_stores_original_bytes() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = opened(&directory);
+        let service = MaterialService::new(&database, directory.path());
+        let source = fixture_path("chinese-tounicode.pdf");
+        let original = std::fs::read(&source).unwrap();
+
+        let imported = service.import_file(&source).unwrap();
+        assert_eq!(imported.file_name, "chinese-tounicode.pdf");
+        assert_eq!(imported.media_type, "application/pdf");
+        assert_eq!(imported.status, "text_ready");
+        assert_eq!(imported.byte_size as usize, original.len());
+        assert_eq!(
+            imported.content_sha256,
+            crate::materials::store::sha256_hex(&original)
+        );
+        assert_eq!(
+            parser_version_of(&database, &imported.id),
+            "pdf-extract-0.12.0"
+        );
+        assert!(extracted_text_of(&database, &imported.id).contains("工作经历"));
+        assert_eq!(
+            std::fs::read(
+                directory
+                    .path()
+                    .join("materials")
+                    .join(format!("{}.pdf", imported.id))
+            )
+            .unwrap(),
+            original
+        );
+        assert_eq!(
+            MaterialStore::new(&database)
+                .searchable_chunk_count("工作经历")
+                .unwrap(),
+            1
+        );
+    }
+
+    #[test]
+    fn import_indexes_chinese_docx_and_stores_original_bytes() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = opened(&directory);
+        let service = MaterialService::new(&database, directory.path());
+        let source = fixture_path("chinese-synthetic.docx");
+        let original = std::fs::read(&source).unwrap();
+
+        let imported = service.import_file(&source).unwrap();
+        assert_eq!(imported.file_name, "chinese-synthetic.docx");
+        assert_eq!(
+            imported.media_type,
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        );
+        assert_eq!(imported.byte_size as usize, original.len());
+        assert_eq!(parser_version_of(&database, &imported.id), "docx-rs-0.4.22");
+        let text = extracted_text_of(&database, &imported.id);
+        assert!(text.contains("工作经历"), "{text:?}");
+        assert!(text.contains("示例科技"), "{text:?}");
+        assert_eq!(
+            std::fs::read(
+                directory
+                    .path()
+                    .join("materials")
+                    .join(format!("{}.docx", imported.id))
+            )
+            .unwrap(),
+            original
+        );
+    }
+
+    #[test]
+    fn import_maps_pdf_and_docx_failures() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = opened(&directory);
+        let service = MaterialService::new(&database, directory.path());
+
+        assert_eq!(
+            service
+                .import_file(fixture_path("scanned-image-only.pdf"))
+                .unwrap_err()
+                .code(),
+            "MATERIAL_NO_TEXT_LAYER"
+        );
+        assert_eq!(
+            service
+                .import_file(fixture_path("encrypted-stub.pdf"))
+                .unwrap_err()
+                .code(),
+            "MATERIAL_PARSE_FAILED"
+        );
+        assert_eq!(
+            service
+                .import_file(fixture_path("corrupt-truncated.pdf"))
+                .unwrap_err()
+                .code(),
+            "MATERIAL_PARSE_FAILED"
+        );
+        assert_eq!(
+            service
+                .import_file(fixture_path("corrupt-not-zip.docx"))
+                .unwrap_err()
+                .code(),
+            "MATERIAL_PARSE_FAILED"
+        );
+        assert_eq!(
+            service
+                .import_file(fixture_path("legacy-ole.doc"))
+                .unwrap_err()
+                .code(),
+            "MATERIAL_TYPE_UNSUPPORTED"
         );
     }
 

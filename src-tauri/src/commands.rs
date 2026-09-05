@@ -229,6 +229,8 @@ fn material_service_error<T: ts_rs::TS>(error: MaterialServiceError) -> CommandR
         "MATERIAL_TYPE_UNSUPPORTED" => "Unsupported material type",
         "MATERIAL_TOO_LARGE" => "Material is too large",
         "MATERIAL_NOT_UTF8" => "Material is not valid UTF-8",
+        "MATERIAL_NO_TEXT_LAYER" => "Material has no extractable text",
+        "MATERIAL_PARSE_FAILED" => "Material could not be parsed",
         "MATERIAL_NOT_FOUND" => "Material not found",
         "MATERIAL_PATH_INVALID" => "Material path is invalid",
         _ => "Material operation failed",
