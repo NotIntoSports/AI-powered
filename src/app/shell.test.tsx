@@ -1,7 +1,27 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Shell } from "./shell";
+
+vi.mock("../api/commands", () => ({
+  getConfigPublic: vi.fn().mockResolvedValue({
+    ok: true,
+    data: {
+      configVersion: 1,
+      application: { locale: null },
+      models: { providers: [], activeProviderId: null },
+      speech: { voiceRoutes: [], activeVoiceRouteId: null },
+      transport: {
+        livekit: { enabled: false, url: null, apiKey: null, apiSecret: null, ready: false, status: null, configVersion: 0 },
+      },
+      knowledge: { embeddingConfigs: [], activeEmbeddingConfigId: null },
+      storage: { exportDirectory: null },
+      roleProfiles: [],
+      activeRoleProfileId: null,
+      diagnostics: { logRetentionDays: 14 },
+    },
+  }),
+}));
 
 describe("Shell", () => {
   beforeEach(() => {

@@ -15,6 +15,13 @@ vi.mock("../../api/commands", () => ({
   testSpeechRoute: vi.fn(),
   activateSpeechRoute: vi.fn(),
   deleteSpeechRoute: vi.fn(),
+  saveEmbeddingConfig: vi.fn(),
+  testEmbeddingConfig: vi.fn(),
+  activateEmbeddingConfig: vi.fn(),
+  deleteEmbeddingConfig: vi.fn(),
+  saveLiveKitSettings: vi.fn(),
+  testLiveKitSettings: vi.fn(),
+  enableLiveKitSettings: vi.fn(),
 }));
 
 const emptyConfig = {
@@ -54,6 +61,8 @@ describe("ServicesPage", () => {
     expect(screen.getByRole("heading", { level: 1 }).textContent).toContain("服务");
     expect(await screen.findByRole("heading", { name: "模型供应商" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "语音线路" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Embedding" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "LiveKit" })).toBeTruthy();
   });
 
   it("submits a provider key and clears the password field", async () => {
@@ -66,7 +75,7 @@ describe("ServicesPage", () => {
     fireEvent.change(screen.getByLabelText("供应商 ID"), { target: { value: "openai" } });
     fireEvent.change(screen.getByLabelText("显示名称"), { target: { value: "OpenAI" } });
     fireEvent.change(screen.getByLabelText("接口基址"), { target: { value: "https://example.test/v1" } });
-    const key = screen.getByLabelText(/API Key/) as HTMLInputElement;
+    const key = screen.getAllByLabelText(/API Key/)[0] as HTMLInputElement;
     fireEvent.change(key, { target: { value: "secret-marker" } });
     fireEvent.click(screen.getByRole("button", { name: "保存供应商" }));
     await waitFor(() => expect(commands.saveModelProvider).toHaveBeenCalled());
@@ -94,7 +103,7 @@ describe("ServicesPage", () => {
     render(<ServicesPage />);
     fireEvent.click(await screen.findByRole("button", { name: "编辑 OpenAI" }));
     expect((screen.getByLabelText("供应商 ID") as HTMLInputElement).value).toBe("openai");
-    expect((screen.getByLabelText(/API Key/) as HTMLInputElement).value).toBe("");
+    expect((screen.getAllByLabelText(/API Key/)[0] as HTMLInputElement).value).toBe("");
   });
 
   it("offers discovered models to voice route fields", async () => {

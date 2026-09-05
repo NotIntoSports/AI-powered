@@ -203,8 +203,41 @@
   outline-offset: 2px;
 }
 
+.service-form textarea {
+  min-width: 0;
+  min-height: 5rem;
+  resize: vertical;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--shell-border);
+  border-radius: 0.45rem;
+  background: var(--shell-main-bg);
+  color: inherit;
+}
+
+.role-editor,
+.embedding-editor,
+.livekit-editor {
+  margin-top: 1rem;
+  overflow-x: hidden;
+}
+
 @media (max-width: 900px) {
   .services-grid {
     grid-template-columns: 1fr;
+  }
+
+  .provider-model-fields {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 360px) {
+  .app-main,
+  .services-page,
+  .role-editor,
+  .embedding-editor,
+  .livekit-editor,
+  .service-actions {
+    overflow-x: hidden;
   }
 }

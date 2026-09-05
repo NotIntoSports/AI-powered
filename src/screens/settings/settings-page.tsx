@@ -1,5 +1,11 @@
+import { RoleEditor } from "../../features/roles/role-editor";
 import { PageShell } from "../page-shell";
 
 export function SettingsPage() {
-  return <PageShell id="settings" />;
+  return (
+    <>
+      <PageShell id="settings" />
+      <RoleEditor />
+    </>
+  );
 }

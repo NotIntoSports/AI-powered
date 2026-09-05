@@ -1,5 +1,7 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import * as api from "../../api/commands";
+import { EmbeddingEditor } from "../../features/services/embedding-editor";
+import { LiveKitEditor } from "../../features/services/livekit-editor";
 import type { CommandResult, PublicConfig, VoiceRouteMode } from "../../generated/bindings";
 
 const optional = (value: string) => value.trim() || null;
@@ -149,6 +151,8 @@ export function ServicesPage() {
         </div>
       </section>
     </div>
+    <EmbeddingEditor />
+    <LiveKitEditor />
   </section>;
 }
 
