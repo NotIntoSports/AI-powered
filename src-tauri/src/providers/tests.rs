@@ -1023,3 +1023,199 @@ mod livekit {
         );
     }
 }
+
+mod openai_realtime {
+    use std::{collections::VecDeque, time::Duration};
+
+    use serde_json::json;
+
+    use super::super::{
+        InputTranscriptAssembler, RealtimeDialectName, RealtimeError, RealtimeTransport,
+        realtime_dialect, realtime_url, session_update_event, wait_session_updated,
+    };
+
+    struct FakeSocket {
+        inbound: VecDeque<Result<String, RealtimeError>>,
+    }
+
+    impl RealtimeTransport for FakeSocket {
+        fn recv_text(&mut self, _timeout: Duration) -> Result<String, RealtimeError> {
+            self.inbound
+                .pop_front()
+                .unwrap_or(Err(RealtimeError::SessionUpdateTimeout))
+        }
+    }
+
+    #[test]
+    fn maps_dashscope_compatible_mode_and_openai_dialects() {
+        let dashscope = realtime_dialect("https://dashscope.aliyuncs.com/v1");
+        assert_eq!(dashscope.name, RealtimeDialectName::Aliyun);
+        assert_eq!(dashscope.audio_format, "pcm");
+        assert_eq!(dashscope.default_voice, None);
+
+        let compatible = realtime_dialect("https://gateway.example/compatible-mode/v1");
+        assert_eq!(compatible.name, RealtimeDialectName::Aliyun);
+        assert_eq!(compatible.audio_format, "pcm");
+        assert_eq!(compatible.default_voice, None);
+
+        let openai = realtime_dialect("https://api.openai.com/v1");
+        assert_eq!(openai.name, RealtimeDialectName::Openai);
+        assert_eq!(openai.audio_format, "pcm16");
+        assert_eq!(openai.default_voice, Some("alloy"));
+    }
+
+    #[test]
+    fn maps_http_and_https_realtime_urls() {
+        assert_eq!(
+            realtime_url("http://example.test/v1", "gpt-4o-realtime-preview")
+                .unwrap()
+                .as_str(),
+            "ws://example.test/v1/realtime?model=gpt-4o-realtime-preview"
+        );
+        assert_eq!(
+            realtime_url(
+                "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "qwen-audio-3.0-realtime-plus"
+            )
+            .unwrap()
+            .as_str(),
+            "wss://dashscope.aliyuncs.com/api-ws/v1/realtime?model=qwen-audio-3.0-realtime-plus"
+        );
+        assert_eq!(
+            realtime_url(
+                "https://token-plan.cn-beijing.maas.aliyuncs.com/v1",
+                "qwen-audio"
+            )
+            .unwrap()
+            .as_str(),
+            "wss://token-plan.cn-beijing.maas.aliyuncs.com/api-ws/v1/realtime?model=qwen-audio"
+        );
+        assert_eq!(
+            realtime_url("wss://example.com/api-ws/v1/realtime", "qwen-audio")
+                .unwrap()
+                .as_str(),
+            "wss://example.com/api-ws/v1/realtime?model=qwen-audio"
+        );
+    }
+
+    #[test]
+    fn rejects_ftp_userinfo_query_and_fragment_urls() {
+        for base_url in [
+            "ftp://example.test/v1",
+            "https://user@example.test/v1",
+            "https://example.test/v1?marker=synthetic",
+            "https://example.test/v1#synthetic",
+        ] {
+            let error = realtime_url(base_url, "model").unwrap_err();
+            assert_eq!(error.code(), "REALTIME_URL_INVALID");
+            assert!(!error.to_string().contains("synthetic"));
+            assert!(!error.to_string().contains("user"));
+        }
+    }
+
+    #[test]
+    fn assembler_streams_deltas_then_final_and_ignores_late_partial() {
+        let mut assembler = InputTranscriptAssembler::new();
+        assert_eq!(
+            assembler.update(
+                "input_transcript_delta",
+                &json!({"item_id": "qwen-1", "text": "今天", "stash": "天气", "delta": ""})
+            ),
+            Some(("qwen-1".into(), "今天天气".into(), false))
+        );
+        assert_eq!(
+            assembler.update(
+                "input_transcript_delta",
+                &json!({"item_id": "openai-1", "text": "", "stash": "", "delta": "你"})
+            ),
+            Some(("openai-1".into(), "你".into(), false))
+        );
+        assert_eq!(
+            assembler.update(
+                "input_transcript_delta",
+                &json!({"item_id": "openai-1", "text": "", "stash": "", "delta": "好"})
+            ),
+            Some(("openai-1".into(), "你好".into(), false))
+        );
+        assert_eq!(
+            assembler.update(
+                "input_transcript_completed",
+                &json!({"item_id": "openai-1", "transcript": "你好。"})
+            ),
+            Some(("openai-1".into(), "你好。".into(), true))
+        );
+        assembler.update(
+            "input_transcript_completed",
+            &json!({"item_id": "item-1", "transcript": "最终"}),
+        );
+        assert_eq!(
+            assembler.update(
+                "input_transcript_delta",
+                &json!({"item_id": "item-1", "text": "旧", "stash": "", "delta": ""})
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn handshake_waits_for_session_updated_and_times_out() {
+        let mut socket = FakeSocket {
+            inbound: VecDeque::from([
+                Ok(r#"{"type":"session.created"}"#.into()),
+                Ok(r#"{"type":"session.updated"}"#.into()),
+            ]),
+        };
+        wait_session_updated(&mut socket, Duration::from_secs(1)).unwrap();
+
+        let mut silent = FakeSocket {
+            inbound: VecDeque::new(),
+        };
+        let error = wait_session_updated(&mut silent, Duration::from_millis(50)).unwrap_err();
+        assert_eq!(error.code(), "REALTIME_SESSION_UPDATE_TIMEOUT");
+    }
+
+    #[test]
+    fn handshake_sanitizes_remote_error_codes() {
+        let mut socket = FakeSocket {
+            inbound: VecDeque::from([Ok(json!({
+                "type": "error",
+                "error": {
+                    "code": "invalid_value",
+                    "message": "bad field sk-secret-must-not-escape"
+                }
+            })
+            .to_string())]),
+        };
+        let error = wait_session_updated(&mut socket, Duration::from_secs(1)).unwrap_err();
+        assert_eq!(error.code(), "invalid_value");
+        assert!(!error.to_string().contains("sk-secret-must-not-escape"));
+        assert!(!error.to_string().contains("bad field"));
+    }
+
+    #[test]
+    fn session_update_uses_dialect_audio_and_voice_defaults() {
+        let aliyun = session_update_event(
+            "",
+            "中文回复",
+            &realtime_dialect("https://dashscope.aliyuncs.com/compatible-mode/v1"),
+        );
+        let openai = session_update_event(
+            "",
+            "Reply briefly",
+            &realtime_dialect("https://api.openai.com/v1"),
+        );
+        let custom = session_update_event(
+            "custom-voice",
+            "Reply briefly",
+            &realtime_dialect("https://api.openai.com/v1"),
+        );
+        assert_eq!(aliyun["session"]["input_audio_format"], "pcm");
+        assert_eq!(aliyun["session"]["output_audio_format"], "pcm");
+        assert!(aliyun["session"].get("voice").is_none());
+        assert_eq!(openai["session"]["input_audio_format"], "pcm16");
+        assert_eq!(openai["session"]["voice"], "alloy");
+        assert_eq!(custom["session"]["voice"], "custom-voice");
+        assert!(aliyun["session"].get("input_audio_transcription").is_none());
+        assert_eq!(aliyun["type"], "session.update");
+    }
+}

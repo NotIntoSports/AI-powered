@@ -2,6 +2,7 @@ mod cascade;
 mod embedding;
 mod livekit;
 mod openai_compatible;
+mod openai_realtime;
 
 use std::fmt;
 
@@ -22,6 +23,12 @@ pub(crate) use livekit::{control_url, room_list_token};
 pub use openai_compatible::OpenAiCompatibleProbe;
 #[cfg(test)]
 pub(crate) use openai_compatible::{normalize_models_url, parse_model_catalog};
+#[cfg(test)]
+pub(crate) use openai_realtime::{
+    InputTranscriptAssembler, RealtimeDialectName, RealtimeTransport, realtime_dialect,
+    realtime_url, session_update_event, wait_session_updated,
+};
+pub use openai_realtime::{OpenAiCompatibleRealtime, RealtimeError, RealtimeModel, RealtimeTurn};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderEndpoint {
