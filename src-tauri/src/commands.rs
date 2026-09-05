@@ -12,6 +12,7 @@ use crate::{
     services::{
         EmbeddingConfigSaveInput, EmbeddingService, EmbeddingServiceError, EmbeddingTestResult,
         LiveKitSettingsError, LiveKitSettingsSaveInput, LiveKitSettingsService, LiveKitTestResult,
+        MaterialSearchHit, MaterialService, MaterialServiceError, MaterialSummary,
         ModelDiscoveryResult, ProviderSaveInput, ProviderService, ProviderServiceError,
         ProviderTestResult, RoleProfileCopyInput, RoleProfileSaveInput, RoleProfileService,
         RoleProfileServiceError, VoiceRouteSaveInput, VoiceRouteService, VoiceRouteServiceError,
@@ -220,6 +221,115 @@ fn embedding_probe<T: ts_rs::TS>() -> Result<OpenAiCompatibleEmbeddingProbe, Com
 fn livekit_probe<T: ts_rs::TS>() -> Result<OfficialLiveKitProbe, CommandResult<T>> {
     OfficialLiveKitProbe::new()
         .map_err(|error| service_error(error.code(), "LiveKit client is unavailable"))
+}
+
+fn material_service_error<T: ts_rs::TS>(error: MaterialServiceError) -> CommandResult<T> {
+    let code = error.code();
+    let message = match code {
+        "MATERIAL_TYPE_UNSUPPORTED" => "Unsupported material type",
+        "MATERIAL_TOO_LARGE" => "Material is too large",
+        "MATERIAL_NOT_UTF8" => "Material is not valid UTF-8",
+        "MATERIAL_NOT_FOUND" => "Material not found",
+        "MATERIAL_PATH_INVALID" => "Material path is invalid",
+        _ => "Material operation failed",
+    };
+    let mut public = PublicError::new(code, message, false);
+    if let Some(field) = match code {
+        "MATERIAL_PATH_INVALID" => Some("path"),
+        "MATERIAL_NOT_FOUND" => Some("id"),
+        _ => None,
+    } {
+        public = public.with_field(field);
+    }
+    CommandResult::Err { error: public }
+}
+
+fn resolve_import_path(path: &str) -> Result<std::path::PathBuf, MaterialServiceError> {
+    let path = std::path::Path::new(path);
+    if path.is_relative() {
+        return Err(MaterialServiceError::PathInvalid);
+    }
+    let canonical = std::fs::canonicalize(path).map_err(|_| MaterialServiceError::PathInvalid)?;
+    if !canonical.is_file() {
+        return Err(MaterialServiceError::PathInvalid);
+    }
+    Ok(canonical)
+}
+
+fn with_materials<T: serde::Serialize + ts_rs::TS>(
+    state: &AppState,
+    work: impl FnOnce(&MaterialService<'_>) -> Result<T, MaterialServiceError>,
+) -> CommandResult<T> {
+    let database = match state.database.lock() {
+        Ok(guard) => guard,
+        Err(_) => {
+            return service_error("DATABASE_OPERATION_FAILED", "Database is unavailable");
+        }
+    };
+    let Some(database) = database.as_ref() else {
+        return service_error("DATABASE_OPERATION_FAILED", "Database is unavailable");
+    };
+    work(&MaterialService::new(database, &state.paths.data_directory))
+        .map_or_else(material_service_error, |data| CommandResult::Ok { data })
+}
+
+fn material_list_cmd(state: &AppState) -> CommandResult<Vec<MaterialSummary>> {
+    with_materials(state, |service| service.list())
+}
+
+fn material_import_cmd(state: &AppState, path: String) -> CommandResult<MaterialSummary> {
+    let path = match resolve_import_path(&path) {
+        Ok(path) => path,
+        Err(error) => return material_service_error(error),
+    };
+    with_materials(state, |service| service.import_file(path))
+}
+
+fn material_search_cmd(
+    state: &AppState,
+    query: String,
+    top_k: Option<u32>,
+) -> CommandResult<Vec<MaterialSearchHit>> {
+    with_materials(state, |service| service.search_text(&query, top_k))
+}
+
+fn material_delete_cmd(state: &AppState, id: String) -> CommandResult<FoundationStatus> {
+    with_materials(state, |service| {
+        service.delete(&id)?;
+        Ok(FoundationStatus { ready: true })
+    })
+}
+
+#[tauri::command]
+pub fn material_list(state: State<'_, AppState>) -> CommandResult<Vec<MaterialSummary>> {
+    material_list_cmd(&state)
+}
+
+#[tauri::command]
+pub fn material_import(state: State<'_, AppState>, path: String) -> CommandResult<MaterialSummary> {
+    let _guard = match service_guard(&state) {
+        Ok(guard) => guard,
+        Err(error) => return error,
+    };
+    material_import_cmd(&state, path)
+}
+
+#[tauri::command]
+pub fn material_search(
+    state: State<'_, AppState>,
+    query: String,
+    top_k: Option<u32>,
+) -> CommandResult<Vec<MaterialSearchHit>> {
+    material_search_cmd(&state, query, top_k)
+}
+
+#[tauri::command]
+pub fn material_delete(state: State<'_, AppState>, id: String) -> CommandResult<FoundationStatus> {
+    let _guard = match service_guard(&state) {
+        Ok(guard) => guard,
+        Err(error) => return error,
+    };
+    material_delete_cmd(&state, id)
 }
 
 fn service_guard<T: ts_rs::TS>(
@@ -868,5 +978,160 @@ mod tests {
         assert!(!report.contains("openingMessage"));
         assert!(!report.contains("styleInstructions"));
         assert!(report.contains("interviewer"));
+    }
+
+    fn material_paths(directory: &tempfile::TempDir) -> AppPaths {
+        AppPaths {
+            data_directory: directory.path().join("data"),
+            logs_directory: directory.path().join("logs"),
+            config_path: directory.path().join("config.json"),
+        }
+    }
+
+    fn material_state(directory: &tempfile::TempDir) -> AppState {
+        let paths = material_paths(directory);
+        std::fs::write(&paths.config_path, r#"{"configVersion":1}"#).unwrap();
+        AppState::initialize(paths, Arc::new(MemorySecretStore::default())).unwrap()
+    }
+
+    fn command_error_code<T: serde::Serialize + ts_rs::TS>(
+        result: &crate::contracts::CommandResult<T>,
+    ) -> String {
+        let value = serde_json::to_value(result).unwrap();
+        value["error"]["code"].as_str().unwrap().to_owned()
+    }
+
+    fn command_error_message<T: serde::Serialize + ts_rs::TS>(
+        result: &crate::contracts::CommandResult<T>,
+    ) -> String {
+        let value = serde_json::to_value(result).unwrap();
+        value["error"]["message"].as_str().unwrap().to_owned()
+    }
+
+    #[test]
+    fn material_write_commands_take_the_service_guard() {
+        let source = include_str!("commands.rs");
+        let import = source
+            .split("pub fn material_import")
+            .nth(1)
+            .expect("material_import command")
+            .split("pub fn material_search")
+            .next()
+            .unwrap();
+        let delete = source
+            .split("pub fn material_delete")
+            .nth(1)
+            .expect("material_delete command")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap();
+        assert!(import.contains("service_guard"));
+        assert!(delete.contains("service_guard"));
+    }
+
+    #[test]
+    fn material_read_commands_skip_the_service_guard() {
+        let source = include_str!("commands.rs");
+        let list = source
+            .split("pub fn material_list")
+            .nth(1)
+            .expect("material_list command")
+            .split("pub fn material_import")
+            .next()
+            .unwrap();
+        let search = source
+            .split("pub fn material_search")
+            .nth(1)
+            .expect("material_search command")
+            .split("pub fn material_delete")
+            .next()
+            .unwrap();
+        assert!(!list.contains("service_guard"));
+        assert!(!search.contains("service_guard"));
+    }
+
+    #[test]
+    fn material_import_rejects_relative_missing_and_directory_paths() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = material_state(&directory);
+        let relative = super::material_import_cmd(&state, "notes.txt".into());
+        assert_eq!(command_error_code(&relative), "MATERIAL_PATH_INVALID");
+        assert!(!command_error_message(&relative).contains("notes.txt"));
+
+        let missing = directory.path().join("missing.txt");
+        let missing = super::material_import_cmd(&state, missing.to_string_lossy().into_owned());
+        assert_eq!(command_error_code(&missing), "MATERIAL_PATH_INVALID");
+
+        let folder = directory.path().join("folder");
+        std::fs::create_dir(&folder).unwrap();
+        let as_dir = super::material_import_cmd(&state, folder.to_string_lossy().into_owned());
+        assert_eq!(command_error_code(&as_dir), "MATERIAL_PATH_INVALID");
+        assert!(!command_error_message(&as_dir).contains("SELECT"));
+    }
+
+    #[test]
+    fn material_commands_fail_closed_when_database_is_missing() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = material_state(&directory);
+        *state.database.lock().unwrap() = None;
+        let listed = super::material_list_cmd(&state);
+        assert_eq!(command_error_code(&listed), "DATABASE_OPERATION_FAILED");
+        let searched = super::material_search_cmd(&state, "订单服务".into(), None);
+        assert_eq!(command_error_code(&searched), "DATABASE_OPERATION_FAILED");
+    }
+
+    #[test]
+    fn material_commands_list_import_search_and_delete() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = material_state(&directory);
+        let source = directory.path().join("resume.md");
+        std::fs::write(
+            &source,
+            "工作经历\n2019.03-2021.06 阿里巴巴 高级工程师\n负责订单服务与 Kafka 链路。",
+        )
+        .unwrap();
+
+        let imported = serde_json::to_value(super::material_import_cmd(
+            &state,
+            source.to_string_lossy().into_owned(),
+        ))
+        .unwrap();
+        assert_eq!(imported["ok"], true);
+        assert_eq!(imported["data"]["fileName"], "resume.md");
+        assert!(imported["data"].get("extractedText").is_none());
+        let id = imported["data"]["id"].as_str().unwrap().to_owned();
+
+        let listed = serde_json::to_value(super::material_list_cmd(&state)).unwrap();
+        assert_eq!(listed["ok"], true);
+        assert_eq!(listed["data"][0]["id"], id);
+        assert!(listed["data"][0].get("extractedText").is_none());
+
+        let hits =
+            serde_json::to_value(super::material_search_cmd(&state, "订单服务".into(), None))
+                .unwrap();
+        assert_eq!(hits["ok"], true);
+        assert_eq!(hits["data"][0]["materialId"], id);
+        assert!(
+            hits["data"][0]["snippet"]
+                .as_str()
+                .unwrap()
+                .contains("订单服务")
+        );
+        assert!(hits["data"][0].get("extractedText").is_none());
+
+        let operators = serde_json::to_value(super::material_search_cmd(
+            &state,
+            "订单服务 OR".into(),
+            Some(5),
+        ))
+        .unwrap();
+        assert_eq!(operators["ok"], true);
+        assert_ne!(operators["error"]["code"], "MATERIAL_OPERATION_FAILED");
+
+        let deleted = serde_json::to_value(super::material_delete_cmd(&state, id)).unwrap();
+        assert_eq!(deleted["ok"], true);
+        assert_eq!(deleted["data"]["ready"], true);
+        let empty = serde_json::to_value(super::material_list_cmd(&state)).unwrap();
+        assert_eq!(empty["data"].as_array().unwrap().len(), 0);
     }
 }

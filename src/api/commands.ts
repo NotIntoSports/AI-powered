@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
-import type { CommandResult, DiagnosticsExportResult, EmbeddingConfig, EmbeddingConfigSaveInput, EmbeddingTestResult, FoundationStatus, LiveKitConfig, LiveKitSettingsSaveInput, LiveKitTestResult, ModelDiscoveryResult, ProviderConfig, ProviderSaveInput, ProviderTestResult, PublicConfig, RoleProfileConfig, RoleProfileCopyInput, RoleProfileSaveInput, StartupState, VoiceRouteConfig, VoiceRouteSaveInput, VoiceRouteTestResult } from "../generated/bindings";
+import type { CommandResult, DiagnosticsExportResult, EmbeddingConfig, EmbeddingConfigSaveInput, EmbeddingTestResult, FoundationStatus, LiveKitConfig, LiveKitSettingsSaveInput, LiveKitTestResult, MaterialSearchHit, MaterialSummary, ModelDiscoveryResult, ProviderConfig, ProviderSaveInput, ProviderTestResult, PublicConfig, RoleProfileConfig, RoleProfileCopyInput, RoleProfileSaveInput, StartupState, VoiceRouteConfig, VoiceRouteSaveInput, VoiceRouteTestResult } from "../generated/bindings";
 
 export function getFoundationStatus() {
   return invoke<CommandResult<FoundationStatus>>("foundation_get_status");
@@ -108,4 +108,20 @@ export function restoreDefaultConfig() {
 
 export function openAppDirectory(kind: "config" | "data") {
   return invoke<CommandResult<FoundationStatus>>("open_app_directory", { kind });
+}
+
+export function listMaterials() {
+  return invoke<CommandResult<MaterialSummary[]>>("material_list");
+}
+
+export function importMaterial(path: string) {
+  return invoke<CommandResult<MaterialSummary>>("material_import", { path });
+}
+
+export function searchMaterials(query: string, topK?: number) {
+  return invoke<CommandResult<MaterialSearchHit[]>>("material_search", { query, topK });
+}
+
+export function deleteMaterial(id: string) {
+  return invoke<CommandResult<FoundationStatus>>("material_delete", { id });
 }

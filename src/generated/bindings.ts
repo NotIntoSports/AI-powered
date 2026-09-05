@@ -66,4 +66,8 @@ export type LiveKitSettingsSaveInput = { url: string | null, apiKey: string | nu
 
 export type LiveKitTestResult = { ready: boolean, };
 
+export type MaterialSummary = { id: string, fileName: string, contentSha256: string, mediaType: string, byteSize: number, status: string, chunkCount: number, };
+
+export type MaterialSearchHit = { materialId: string, chunkId: string, fileName: string, section: string, snippet: string, rank: number, };
+
 export type CommandResult<T> = { ok: true; data: T } | { ok: false; error: PublicError };

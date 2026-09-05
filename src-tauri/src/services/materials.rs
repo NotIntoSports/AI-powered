@@ -1,5 +1,8 @@
 use std::path::Path;
 
+use serde::Serialize;
+use ts_rs::TS;
+
 use crate::{
     database::{Database, DatabaseError},
     materials::{CHUNKER_VERSION, MaterialStore, NewMaterial, chunk_text, store::sha256_hex},
@@ -10,14 +13,18 @@ pub use crate::materials::MaterialSearchHit;
 pub const PARSER_VERSION: &str = "utf8-plain-v1";
 const MAX_MATERIAL_BYTES: u64 = 8 * 1024 * 1024;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct MaterialSummary {
     pub id: String,
     pub file_name: String,
     pub content_sha256: String,
     pub media_type: String,
+    #[ts(type = "number")]
     pub byte_size: i64,
     pub status: String,
+    #[ts(type = "number")]
     pub chunk_count: i64,
 }
 
@@ -27,6 +34,7 @@ pub enum MaterialServiceError {
     TooLarge,
     NotUtf8,
     NotFound,
+    PathInvalid,
     Operation,
 }
 
@@ -37,6 +45,7 @@ impl MaterialServiceError {
             Self::TooLarge => "MATERIAL_TOO_LARGE",
             Self::NotUtf8 => "MATERIAL_NOT_UTF8",
             Self::NotFound => "MATERIAL_NOT_FOUND",
+            Self::PathInvalid => "MATERIAL_PATH_INVALID",
             Self::Operation => "MATERIAL_OPERATION_FAILED",
         }
     }
@@ -140,6 +149,14 @@ impl<'a> MaterialService<'a> {
             store.enqueue_cleanup(&stored_path, "MATERIAL_FILE_DELETE_FAILED")?;
         }
         Ok(())
+    }
+
+    pub fn list(&self) -> Result<Vec<MaterialSummary>, MaterialServiceError> {
+        Ok(MaterialStore::new(self.database)
+            .list()?
+            .into_iter()
+            .map(summary)
+            .collect())
     }
 
     pub fn search_text(
@@ -409,5 +426,123 @@ mod tests {
         let escaped = service.search_text("%", None).unwrap();
         assert_eq!(escaped.len(), 1);
         assert!(escaped[0].snippet.contains("100%"));
+    }
+
+    #[test]
+    fn search_text_fts_operators_do_not_fail_closed() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("resume.md");
+        std::fs::write(
+            &source,
+            "工作经历\n2019.03-2021.06 阿里巴巴 高级工程师\n负责订单服务与 Kafka 链路。",
+        )
+        .unwrap();
+        let database = opened(&directory);
+        let service = MaterialService::new(&database, directory.path());
+        service.import_file(&source).unwrap();
+
+        for query in ["订单服务*", "订单服务 OR", "订单 OR 服务"] {
+            let result = service.search_text(query, None);
+            assert!(
+                result.is_ok(),
+                "query {query:?} must return hits or empty, not {:?}: {:?}",
+                result.as_ref().err().map(super::MaterialServiceError::code),
+                result.err()
+            );
+            assert_ne!(
+                result.as_ref().err().map(super::MaterialServiceError::code),
+                Some("MATERIAL_OPERATION_FAILED"),
+                "query {query:?} must not fail solely due to FTS operator parsing"
+            );
+        }
+    }
+
+    #[test]
+    fn list_returns_metadata_including_failed_excluding_deleting() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = opened(&directory);
+        let service = MaterialService::new(&database, directory.path());
+
+        let ready_source = directory.path().join("ready.md");
+        std::fs::write(
+            &ready_source,
+            "负责订单服务与 Kafka 链路，完整句子用于检索。",
+        )
+        .unwrap();
+        let ready = service.import_file(&ready_source).unwrap();
+
+        let failed_source = directory.path().join("failed.md");
+        std::fs::write(&failed_source, "另一份失败状态材料，用于列表过滤。").unwrap();
+        let failed = service.import_file(&failed_source).unwrap();
+        database
+            .with_connection(|connection| {
+                connection.execute(
+                    "UPDATE materials SET status = 'failed' WHERE id = ?1",
+                    rusqlite::params![failed.id],
+                )
+            })
+            .unwrap();
+
+        let deleting_source = directory.path().join("deleting.md");
+        std::fs::write(&deleting_source, "即将删除的材料，不应出现在列表中。").unwrap();
+        let deleting = service.import_file(&deleting_source).unwrap();
+        MaterialStore::new(&database)
+            .block_retrieval(&deleting.id)
+            .unwrap();
+
+        let listed = service.list().unwrap();
+        let ids: Vec<&str> = listed.iter().map(|item| item.id.as_str()).collect();
+        assert!(ids.contains(&ready.id.as_str()));
+        assert!(ids.contains(&failed.id.as_str()));
+        assert!(!ids.contains(&deleting.id.as_str()));
+        assert_eq!(listed.len(), 2);
+        for item in &listed {
+            assert!(!item.file_name.is_empty());
+            assert!(!item.content_sha256.is_empty());
+            assert!(!item.media_type.is_empty());
+            assert!(item.byte_size > 0);
+        }
+        let failed_row = listed.iter().find(|item| item.id == failed.id).unwrap();
+        assert_eq!(failed_row.status, "failed");
+        let ready_row = listed.iter().find(|item| item.id == ready.id).unwrap();
+        assert_eq!(ready_row.status, "text_ready");
+        assert_eq!(ready_row.file_name, "ready.md");
+    }
+
+    #[test]
+    fn public_dtos_serialize_camel_case_without_document_body() {
+        let summary = super::MaterialSummary {
+            id: "m1".into(),
+            file_name: "resume.md".into(),
+            content_sha256: "abc".into(),
+            media_type: "text/markdown".into(),
+            byte_size: 12,
+            status: "text_ready".into(),
+            chunk_count: 1,
+        };
+        let summary_json = serde_json::to_value(&summary).unwrap();
+        assert_eq!(summary_json["fileName"], "resume.md");
+        assert_eq!(summary_json["contentSha256"], "abc");
+        assert_eq!(summary_json["mediaType"], "text/markdown");
+        assert_eq!(summary_json["byteSize"], 12);
+        assert_eq!(summary_json["chunkCount"], 1);
+        assert!(summary_json.get("extractedText").is_none());
+        assert!(summary_json.get("extracted_text").is_none());
+
+        let hit = crate::materials::MaterialSearchHit {
+            material_id: "m1".into(),
+            chunk_id: "m1:0".into(),
+            file_name: "resume.md".into(),
+            section: "工作经历".into(),
+            snippet: "负责订单服务".into(),
+            rank: 1.5,
+        };
+        let hit_json = serde_json::to_value(&hit).unwrap();
+        assert_eq!(hit_json["materialId"], "m1");
+        assert_eq!(hit_json["chunkId"], "m1:0");
+        assert_eq!(hit_json["fileName"], "resume.md");
+        assert_eq!(hit_json["snippet"], "负责订单服务");
+        assert!(hit_json.get("extractedText").is_none());
+        assert!(hit_json.get("content").is_none());
     }
 }

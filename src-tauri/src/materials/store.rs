@@ -1,4 +1,6 @@
 use rusqlite::{OptionalExtension, params};
+use serde::Serialize;
+use ts_rs::TS;
 
 use crate::database::{Database, DatabaseError};
 
@@ -6,7 +8,9 @@ const DEFAULT_TOP_K: u32 = 20;
 const MAX_TOP_K: u32 = 20;
 const SNIPPET_CHARS: usize = 160;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct MaterialSearchHit {
     pub material_id: String,
     pub chunk_id: String,
@@ -200,10 +204,25 @@ impl<'a> MaterialStore<'a> {
         }
         let top_k = top_k.clamp(1, MAX_TOP_K);
         if query.chars().count() >= 3 {
-            self.search_match(query, top_k)
+            self.search_match(&fts_phrase(query), top_k)
         } else {
             self.search_like(query, top_k)
         }
+    }
+
+    pub fn list(&self) -> Result<Vec<MaterialRecord>, DatabaseError> {
+        self.database.with_connection(|connection| {
+            let mut statement = connection.prepare(
+                "SELECT materials.id, file_name, stored_path, content_sha256, media_type, byte_size,
+                        status, retrieval_blocked,
+                        (SELECT COUNT(*) FROM material_chunks WHERE material_chunks.material_id = materials.id)
+                 FROM materials
+                 WHERE status != 'deleting'
+                 ORDER BY created_at DESC, id ASC",
+            )?;
+            let rows = statement.query_map([], map_material_record)?;
+            rows.collect::<Result<Vec<_>, _>>()
+        })
     }
 
     fn search_match(
@@ -266,22 +285,28 @@ impl<'a> MaterialStore<'a> {
         );
         self.database.with_connection(|connection| {
             connection
-                .query_row(&sql, params, |row| {
-                    Ok(MaterialRecord {
-                        id: row.get(0)?,
-                        file_name: row.get(1)?,
-                        stored_path: row.get(2)?,
-                        content_sha256: row.get(3)?,
-                        media_type: row.get(4)?,
-                        byte_size: row.get(5)?,
-                        status: row.get(6)?,
-                        retrieval_blocked: row.get::<_, i64>(7)? == 1,
-                        chunk_count: row.get(8)?,
-                    })
-                })
+                .query_row(&sql, params, map_material_record)
                 .optional()
         })
     }
+}
+
+fn map_material_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<MaterialRecord> {
+    Ok(MaterialRecord {
+        id: row.get(0)?,
+        file_name: row.get(1)?,
+        stored_path: row.get(2)?,
+        content_sha256: row.get(3)?,
+        media_type: row.get(4)?,
+        byte_size: row.get(5)?,
+        status: row.get(6)?,
+        retrieval_blocked: row.get::<_, i64>(7)? == 1,
+        chunk_count: row.get(8)?,
+    })
+}
+
+fn fts_phrase(query: &str) -> String {
+    format!("\"{}\"", query.replace('"', "\"\""))
 }
 
 fn map_search_hit(row: &rusqlite::Row<'_>) -> rusqlite::Result<MaterialSearchHit> {

@@ -132,3 +132,23 @@ commands.allow = ["livekit_settings_test"]
 identifier = "allow-livekit-settings-enable"
 description = "Allows enabling or disabling a tested LiveKit transport."
 commands.allow = ["livekit_settings_enable"]
+
+[[permission]]
+identifier = "allow-material-list"
+description = "Allows listing local material metadata without extracted document text."
+commands.allow = ["material_list"]
+
+[[permission]]
+identifier = "allow-material-import"
+description = "Allows importing one user-selected local text file as a material."
+commands.allow = ["material_import"]
+
+[[permission]]
+identifier = "allow-material-search"
+description = "Allows searching indexed material snippets without exposing full document text."
+commands.allow = ["material_search"]
+
+[[permission]]
+identifier = "allow-material-delete"
+description = "Allows deleting one local material and its indexed rows."
+commands.allow = ["material_delete"]

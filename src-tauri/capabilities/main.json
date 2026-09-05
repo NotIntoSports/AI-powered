@@ -31,6 +31,10 @@
     "allow-embedding-config-delete",
     "allow-livekit-settings-save",
     "allow-livekit-settings-test",
-    "allow-livekit-settings-enable"
+    "allow-livekit-settings-enable",
+    "allow-material-list",
+    "allow-material-import",
+    "allow-material-search",
+    "allow-material-delete"
   ]
 }

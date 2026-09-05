@@ -9,17 +9,21 @@ import {
   activateSpeechRoute,
   copyRoleProfile,
   deleteEmbeddingConfig,
+  deleteMaterial,
   deleteModelProvider,
   deleteRoleProfile,
   deleteSpeechRoute,
   discoverModelProvider,
   enableLiveKitSettings,
   getConfigPublic,
+  importMaterial,
+  listMaterials,
   saveEmbeddingConfig,
   saveLiveKitSettings,
   saveModelProvider,
   saveRoleProfile,
   saveSpeechRoute,
+  searchMaterials,
   testEmbeddingConfig,
   testLiveKitSettings,
   testModelProvider,
@@ -121,5 +125,21 @@ describe("Phase 3 service adapters", () => {
     expect(invokeMock).toHaveBeenNthCalledWith(9, "livekit_settings_save", { input: livekit });
     expect(invokeMock).toHaveBeenNthCalledWith(10, "livekit_settings_test");
     expect(invokeMock).toHaveBeenNthCalledWith(11, "livekit_settings_enable", { enabled: true });
+  });
+});
+
+describe("materials adapters", () => {
+  it("uses exact material command names and payloads", async () => {
+    invokeMock.mockResolvedValue({ ok: true, data: {} });
+    await listMaterials();
+    await importMaterial("E:/docs/resume.md");
+    await searchMaterials("订单服务", 5);
+    await searchMaterials("订单");
+    await deleteMaterial("material-1");
+    expect(invokeMock).toHaveBeenNthCalledWith(1, "material_list");
+    expect(invokeMock).toHaveBeenNthCalledWith(2, "material_import", { path: "E:/docs/resume.md" });
+    expect(invokeMock).toHaveBeenNthCalledWith(3, "material_search", { query: "订单服务", topK: 5 });
+    expect(invokeMock).toHaveBeenNthCalledWith(4, "material_search", { query: "订单", topK: undefined });
+    expect(invokeMock).toHaveBeenNthCalledWith(5, "material_delete", { id: "material-1" });
   });
 });
