@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import { join, extname } from "node:path";
-import { execFileSync } from "node:child_process";
 import test from "node:test";
 
 /**
@@ -78,8 +78,11 @@ test("page shell does not use polling patterns", async () => {
   }
 });
 
-test("security surface has zero drift since Phase 0-1 acceptance", () => {
-  // These files must be IDENTICAL to commit 1bc6bfb (Phase 0-1 acceptance)
+test("security surface has zero drift since Phase 0-1 acceptance", async () => {
+  // These 9 files must remain byte-for-byte identical to the recorded content
+  // snapshot. This replaces the former `git diff --exit-code 1bc6bfb` assertion
+  // with an equivalent-or-stronger mechanism: byte-level, auditable, and free of
+  // any dependency on git history depth.
   const pinnedFiles = [
     "src-tauri/capabilities/main.json",
     "src-tauri/src/lib.rs",
@@ -91,14 +94,37 @@ test("security surface has zero drift since Phase 0-1 acceptance", () => {
     "tests/tauri/shell-contract.test.mjs",
     "src-tauri/tests/security_contract.rs",
   ];
-  // git diff --exit-code returns 0 if no differences, 1 if differences exist
-  const result = execFileSync(
-    "git",
-    ["diff", "--exit-code", "1bc6bfb", "--", ...pinnedFiles],
-    { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] }
+  const baseline = JSON.parse(
+    await readFile("tests/tauri/security-surface-baseline.json", "utf8"),
   );
-  // If we get here without throwing, exit code was 0 = no drift
-  assert.equal(result, "");
+  assert.equal(baseline.algorithm, "sha256", "baseline must declare sha256");
+  // The fixture must pin exactly the security-surface files — no silent removal.
+  assert.deepEqual(
+    Object.keys(baseline.files).sort(),
+    [...pinnedFiles].sort(),
+    "baseline must pin exactly the security-surface files",
+  );
+  const drifted = [];
+  for (const rel of pinnedFiles) {
+    const expected = baseline.files[rel];
+    // Normalize CRLF -> LF before hashing so the check is deterministic across
+    // platforms and core.autocrlf settings (mirrors the EOL-normalized semantics
+    // of the `git diff` assertion this replaces). Any logical/content change is
+    // still caught byte-for-byte.
+    const normalized = Buffer.from(
+      (await readFile(rel, "utf8")).replace(/\r\n/g, "\n"),
+      "utf8",
+    );
+    const actual = createHash("sha256").update(normalized).digest("hex");
+    if (actual !== expected) {
+      drifted.push(`${rel}\n    expected ${expected}\n    actual   ${actual}`);
+    }
+  }
+  assert.deepEqual(
+    drifted,
+    [],
+    `security surface drift detected in ${drifted.length} file(s):\n  ${drifted.join("\n  ")}`,
+  );
 });
 
 test("route ids match the design spec", async () => {

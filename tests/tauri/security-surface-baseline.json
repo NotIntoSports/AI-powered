@@ -1,0 +1,16 @@
+{
+  "comment": "Content-snapshot baseline for the pinned security-surface files. page-shell-contract.test.mjs recomputes each file's SHA-256 (after CRLF->LF normalization for cross-platform/core.autocrlf determinism) and asserts equality with these values. Update only when a Phase 3 change is intentionally accepted.",
+  "algorithm": "sha256",
+  "normalization": "crlf-to-lf",
+  "files": {
+    "src-tauri/capabilities/main.json": "c9eeca7416bd2ea1249f8fc87b98e1cc6f49eea67a164a892cb9dd991d155589",
+    "src-tauri/src/lib.rs": "c062f6d0ef2db5b9af7cbaaa7eeadc9874d30ea39f856ead0aa65687a5f1a2bd",
+    "src-tauri/src/contracts.rs": "008d1211f57f9fb08752b967e6706721aedb0727ca92a870b76466bc5cf6c2d8",
+    "src-tauri/src/commands.rs": "2a1d098dbda16d5fdfb581054f9e60b436974745eb2bd660c5ad6cbf32af0d26",
+    "src-tauri/tauri.conf.json": "90f68864746c5f8583397e7cdacb3b34e9397afeb7128cb34f837f4235a286e0",
+    "src/api/commands.ts": "f8bd1b14b57080294163a6af0af49b5f5564fc87f5849b6f648918c0e0e09e17",
+    "src/generated/bindings.ts": "4d5a001ced3cec7bac89ae3196d3e9cfd39c1e535c1dc7d52f9dd2a18b3e293f",
+    "tests/tauri/shell-contract.test.mjs": "209b892d2421a814e9fb0e14ca34a9f0b15ec8645c8c131e07a82ac6a375bbc3",
+    "src-tauri/tests/security_contract.rs": "3f605c3af831059b394ba09635b5b8047d376091a50c6a51f317999d59d9be31"
+  }
+}
