@@ -6,9 +6,6 @@
   "permissions": [
     "core:default",
     "allow-foundation-get-status",
-    "allow-secret-set",
-    "allow-secret-delete",
-    "allow-secret-status",
     "allow-diagnostics-export",
     "allow-config-get-startup-state",
     "allow-config-get-public",

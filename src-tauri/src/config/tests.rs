@@ -146,6 +146,10 @@ fn rejects_unknown_versions_and_broken_references() {
 #[test]
 fn rejects_unsafe_urls_inline_secrets_and_invalid_retention() {
     assert_eq!(
+        parse_error(r#"{"configVersion":1,"models":{"providers":[{"id":"bad","baseUrl":"https://example.com/v1?api_key=leak"}]}}"#).code(),
+        "CONFIG_URL_INVALID"
+    );
+    assert_eq!(
         parse_error(r#"{"configVersion":1,"models":{"providers":[{"id":"bad","baseUrl":"ftp://example.com"}]}}"#).code(),
         "CONFIG_URL_INVALID"
     );
@@ -157,6 +161,14 @@ fn rejects_unsafe_urls_inline_secrets_and_invalid_retention() {
         parse_error(r#"{"configVersion":1,"diagnostics":{"logRetentionDays":0}}"#).code(),
         "CONFIG_FIELD_INVALID"
     );
+}
+
+#[test]
+fn active_voice_route_flags_must_match_the_active_id() {
+    let base = r#"{"configVersion":1,"speech":{"voiceRoutes":[{"id":"r1","active":true,"ready":true,"status":"ready","configVersion":1},{"id":"r2","active":true,"ready":true,"status":"ready","configVersion":1}],"activeVoiceRouteId":"r1"}}"#;
+    assert_eq!(parse_error(base).code(), "CONFIG_ACTIVE_ROUTE_INVALID");
+    let mismatch = r#"{"configVersion":1,"speech":{"voiceRoutes":[{"id":"r1","active":false,"ready":true,"status":"ready","configVersion":1}],"activeVoiceRouteId":"r1"}}"#;
+    assert_eq!(parse_error(mismatch).code(), "CONFIG_ACTIVE_ROUTE_INVALID");
 }
 
 #[test]
@@ -291,4 +303,39 @@ fn failed_last_good_write_does_not_commit_primary_config() {
             .is_err()
     );
     assert_eq!(store.load().unwrap().diagnostics.log_retention_days, 14);
+}
+
+#[test]
+fn concurrent_updates_do_not_lose_each_others_changes() {
+    use std::{sync::mpsc, thread, time::Duration};
+
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("config.json");
+    let store = ConfigStore::new(path);
+    store.restore_defaults().unwrap();
+    let first = store.clone();
+    let second = store.clone();
+    let (loaded_tx, loaded_rx) = mpsc::channel();
+    let worker = thread::spawn(move || {
+        first
+            .update(|config| {
+                loaded_tx.send(()).unwrap();
+                thread::sleep(Duration::from_millis(100));
+                config.application.locale = Some("zh-CN".into());
+                Ok(())
+            })
+            .unwrap();
+    });
+    loaded_rx.recv().unwrap();
+    second
+        .update(|config| {
+            config.diagnostics.log_retention_days = 30;
+            Ok(())
+        })
+        .unwrap();
+    worker.join().unwrap();
+
+    let loaded = store.load().unwrap();
+    assert_eq!(loaded.application.locale.as_deref(), Some("zh-CN"));
+    assert_eq!(loaded.diagnostics.log_retention_days, 30);
 }

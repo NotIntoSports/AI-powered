@@ -85,4 +85,20 @@ describe("ServicesPage", () => {
     expect((screen.getByLabelText("供应商 ID") as HTMLInputElement).value).toBe("openai");
     expect((screen.getByLabelText(/API Key/) as HTMLInputElement).value).toBe("");
   });
+
+  it("offers discovered models to voice route fields", async () => {
+    vi.mocked(commands.getConfigPublic).mockResolvedValue({
+      ok: true,
+      data: { ...emptyConfig, models: { providers: [{ id: "openai", name: "OpenAI", baseUrl: "https://example.test/v1", credential: null }], activeProviderId: null } },
+    });
+    vi.mocked(commands.discoverModelProvider).mockResolvedValue({
+      ok: true,
+      data: { providerId: "openai", models: [{ id: "model-a" }] },
+    });
+    const { container } = render(<ServicesPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "发现模型" }));
+    fireEvent.change(screen.getByLabelText("ASR 供应商"), { target: { value: "openai" } });
+    await waitFor(() => expect(container.querySelector('#models-asr option[value="model-a"]')).not.toBeNull());
+    expect((screen.getByLabelText("ASR 模型") as HTMLInputElement).getAttribute("list")).toBe("models-asr");
+  });
 });

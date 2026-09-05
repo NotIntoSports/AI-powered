@@ -25,12 +25,12 @@
       "ttsProviderId": "example-provider",
       "ttsModelId": "example-tts-model",
       "voiceId": "example-voice",
-      "active": true,
+      "active": false,
       "ready": false,
       "status": "model_not_ready",
       "configVersion": 1
     }],
-    "activeVoiceRouteId": "example-route"
+    "activeVoiceRouteId": null
   },
   "transport": { "livekitUrl": null },
   "knowledge": { "embeddingProviderId": "example-provider" },

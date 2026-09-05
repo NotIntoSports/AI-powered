@@ -75,10 +75,48 @@ impl ProviderProbe for OpenProbe {
         _: &ProviderEndpoint,
         _: Option<&str>,
     ) -> Result<Vec<DiscoveredModel>, ProviderError> {
-        Ok(vec![DiscoveredModel {
-            id: "model-a".into(),
-        }])
+        Ok(["model-a", "asr-1", "llm-1", "tts-1", "realtime"]
+            .into_iter()
+            .map(|id| DiscoveredModel { id: id.into() })
+            .collect())
     }
+}
+
+struct FailProbe;
+
+impl ProviderProbe for FailProbe {
+    fn discover_models(
+        &self,
+        _: &ProviderEndpoint,
+        _: Option<&str>,
+    ) -> Result<Vec<DiscoveredModel>, ProviderError> {
+        Err(ProviderError::Timeout)
+    }
+}
+
+struct NoAuthProbe;
+
+impl ProviderProbe for NoAuthProbe {
+    fn discover_models(
+        &self,
+        _: &ProviderEndpoint,
+        credential: Option<&str>,
+    ) -> Result<Vec<DiscoveredModel>, ProviderError> {
+        assert!(credential.is_none());
+        Ok(vec![DiscoveredModel { id: "local".into() }])
+    }
+}
+
+#[test]
+fn provider_with_unconfigured_credential_slot_supports_no_auth_endpoint() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("config.json");
+    std::fs::write(&path, r#"{"configVersion":1,"models":{"providers":[{"id":"local","baseUrl":"http://127.0.0.1:11434/v1","credential":{"reference":"providers/local/api-key","configured":false}}]}}"#).unwrap();
+    let config = ConfigStore::new(path);
+    let secrets = SecretService::new("test", Arc::new(MemorySecretStore::default())).unwrap();
+    let service = ProviderService::new(&config, &secrets, &NoAuthProbe);
+
+    assert_eq!(service.discover("local").unwrap().models[0].id, "local");
 }
 
 #[test]
@@ -155,4 +193,83 @@ fn e2e_route_rejects_cascaded_fields() {
         })
         .unwrap_err();
     assert_eq!(error.code(), "VOICE_ROUTE_FIELDS_INVALID");
+}
+
+#[test]
+fn failed_retest_deactivates_and_unreadies_route() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("config.json");
+    std::fs::write(&path, r#"{"configVersion":1,"models":{"providers":[{"id":"e2e","baseUrl":"https://e2e.test/v1"}]},"speech":{"voiceRoutes":[{"id":"route","name":"Route","mode":"e2e","e2eProviderId":"e2e","e2eModelId":"realtime","active":true,"ready":true,"status":"ready","configVersion":1}],"activeVoiceRouteId":"route"}}"#).unwrap();
+    let config = ConfigStore::new(path);
+    let secrets = SecretService::new("test", Arc::new(MemorySecretStore::default())).unwrap();
+    let service = super::VoiceRouteService::new(&config, &secrets, &FailProbe);
+    assert_eq!(
+        service.test("route").unwrap_err().code(),
+        "PROVIDER_TIMEOUT"
+    );
+    let loaded = config.load().unwrap();
+    assert!(loaded.speech.active_voice_route_id.is_none());
+    assert!(!loaded.speech.voice_routes[0].active);
+    assert!(!loaded.speech.voice_routes[0].ready);
+}
+
+#[test]
+fn voice_route_test_rejects_a_model_missing_from_provider_catalog() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("config.json");
+    std::fs::write(
+        &path,
+        r#"{"configVersion":1,"models":{"providers":[{"id":"e2e","baseUrl":"https://e2e.test/v1"}]}}"#,
+    )
+    .unwrap();
+    let config = ConfigStore::new(path);
+    let secrets = SecretService::new("test", Arc::new(MemorySecretStore::default())).unwrap();
+    let service = super::VoiceRouteService::new(&config, &secrets, &OpenProbe);
+    service
+        .save(super::VoiceRouteSaveInput {
+            id: "missing-model".into(),
+            name: "Missing model".into(),
+            mode: crate::config::VoiceRouteMode::E2e,
+            asr_provider_id: None,
+            asr_model_id: None,
+            llm_provider_id: None,
+            llm_model_id: None,
+            tts_provider_id: None,
+            tts_model_id: None,
+            voice_id: None,
+            e2e_provider_id: Some("e2e".into()),
+            e2e_model_id: Some("does-not-exist".into()),
+        })
+        .unwrap();
+
+    assert_eq!(
+        service.test("missing-model").unwrap_err().code(),
+        "VOICE_ROUTE_MODEL_NOT_FOUND"
+    );
+    let route = &config.load().unwrap().speech.voice_routes[0];
+    assert!(!route.ready);
+    assert_eq!(route.status.as_deref(), Some("test_failed"));
+}
+
+#[test]
+fn incomplete_legacy_route_cannot_be_tested_or_activated() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("config.json");
+    std::fs::write(
+        &path,
+        r#"{"configVersion":1,"speech":{"voiceRoutes":[{"id":"legacy","name":"Legacy","mode":"cascaded"}]}}"#,
+    )
+    .unwrap();
+    let config = ConfigStore::new(path);
+    let secrets = SecretService::new("test", Arc::new(MemorySecretStore::default())).unwrap();
+    let service = super::VoiceRouteService::new(&config, &secrets, &OpenProbe);
+
+    assert_eq!(
+        service.test("legacy").unwrap_err().code(),
+        "VOICE_ROUTE_FIELDS_INVALID"
+    );
+    assert_eq!(
+        service.activate("legacy").unwrap_err().code(),
+        "VOICE_ROUTE_NOT_READY"
+    );
 }

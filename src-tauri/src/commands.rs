@@ -3,12 +3,9 @@ use tauri::State;
 use crate::{
     app_state::AppState,
     config::{ProviderConfig, PublicConfig, VoiceRouteConfig, public_view},
-    contracts::{
-        CommandResult, DiagnosticsExportResult, FoundationStatus, SecretStatus, StartupState,
-    },
+    contracts::{CommandResult, DiagnosticsExportResult, FoundationStatus, StartupState},
     error::PublicError,
     providers::OpenAiCompatibleProbe,
-    secrets::SecretError,
     services::{
         ModelDiscoveryResult, ProviderSaveInput, ProviderService, ProviderServiceError,
         ProviderTestResult, VoiceRouteSaveInput, VoiceRouteService, VoiceRouteServiceError,
@@ -110,11 +107,37 @@ fn service_error<T: ts_rs::TS>(code: &str, message: &str) -> CommandResult<T> {
 }
 
 fn provider_service_error<T: ts_rs::TS>(error: ProviderServiceError) -> CommandResult<T> {
-    service_error(error.code(), "Provider operation failed")
+    let code = error.code();
+    let mut public = PublicError::new(
+        code,
+        "Provider operation failed",
+        matches!(code, "PROVIDER_TIMEOUT" | "PROVIDER_REQUEST_FAILED"),
+    );
+    if let Some(field) = match code {
+        "PROVIDER_ID_INVALID" => Some("id"),
+        "CONFIG_URL_INVALID" | "PROVIDER_ENDPOINT_INVALID" => Some("baseUrl"),
+        _ => None,
+    } {
+        public = public.with_field(field);
+    }
+    CommandResult::Err { error: public }
 }
 
 fn route_service_error<T: ts_rs::TS>(error: VoiceRouteServiceError) -> CommandResult<T> {
-    service_error(error.code(), "Voice route operation failed")
+    let code = error.code();
+    let mut public = PublicError::new(
+        code,
+        "Voice route operation failed",
+        matches!(code, "PROVIDER_TIMEOUT" | "PROVIDER_REQUEST_FAILED"),
+    );
+    if let Some(field) = match code {
+        "VOICE_ROUTE_ID_INVALID" => Some("id"),
+        "VOICE_ROUTE_FIELDS_INVALID" | "VOICE_ROUTE_MODEL_NOT_FOUND" => Some("route"),
+        _ => None,
+    } {
+        public = public.with_field(field);
+    }
+    CommandResult::Err { error: public }
 }
 
 fn provider_probe<T: ts_rs::TS>() -> Result<OpenAiCompatibleProbe, CommandResult<T>> {
@@ -122,11 +145,26 @@ fn provider_probe<T: ts_rs::TS>() -> Result<OpenAiCompatibleProbe, CommandResult
         .map_err(|error| service_error(error.code(), "Provider client is unavailable"))
 }
 
+fn service_guard<T: ts_rs::TS>(
+    state: &AppState,
+) -> Result<std::sync::MutexGuard<'_, ()>, CommandResult<T>> {
+    state.service_lock.lock().map_err(|_| {
+        service_error(
+            "SERVICE_BUSY",
+            "Service configuration is temporarily unavailable",
+        )
+    })
+}
+
 #[tauri::command(async)]
 pub fn model_provider_save(
     state: State<'_, AppState>,
     input: ProviderSaveInput,
 ) -> CommandResult<ProviderConfig> {
+    let _guard = match service_guard(&state) {
+        Ok(guard) => guard,
+        Err(error) => return error,
+    };
     let probe = match provider_probe() {
         Ok(probe) => probe,
         Err(error) => return error,
@@ -141,6 +179,10 @@ pub fn model_provider_test(
     state: State<'_, AppState>,
     provider_id: String,
 ) -> CommandResult<ProviderTestResult> {
+    let _guard = match service_guard(&state) {
+        Ok(guard) => guard,
+        Err(error) => return error,
+    };
     let probe = match provider_probe() {
         Ok(probe) => probe,
         Err(error) => return error,
@@ -155,6 +197,10 @@ pub fn model_provider_discover(
     state: State<'_, AppState>,
     provider_id: String,
 ) -> CommandResult<ModelDiscoveryResult> {
+    let _guard = match service_guard(&state) {
+        Ok(guard) => guard,
+        Err(error) => return error,
+    };
     let probe = match provider_probe() {
         Ok(probe) => probe,
         Err(error) => return error,
@@ -169,6 +215,10 @@ pub fn model_provider_activate(
     state: State<'_, AppState>,
     provider_id: String,
 ) -> CommandResult<ProviderConfig> {
+    let _guard = match service_guard(&state) {
+        Ok(guard) => guard,
+        Err(error) => return error,
+    };
     let probe = match provider_probe() {
         Ok(probe) => probe,
         Err(error) => return error,
@@ -183,6 +233,10 @@ pub fn model_provider_delete(
     state: State<'_, AppState>,
     provider_id: String,
 ) -> CommandResult<FoundationStatus> {
+    let _guard = match service_guard(&state) {
+        Ok(guard) => guard,
+        Err(error) => return error,
+    };
     let probe = match provider_probe() {
         Ok(probe) => probe,
         Err(error) => return error,
@@ -199,6 +253,10 @@ pub fn speech_route_save(
     state: State<'_, AppState>,
     input: VoiceRouteSaveInput,
 ) -> CommandResult<VoiceRouteConfig> {
+    let _guard = match service_guard(&state) {
+        Ok(guard) => guard,
+        Err(error) => return error,
+    };
     let probe = match provider_probe() {
         Ok(probe) => probe,
         Err(error) => return error,
@@ -213,6 +271,10 @@ pub fn speech_route_test(
     state: State<'_, AppState>,
     route_id: String,
 ) -> CommandResult<VoiceRouteTestResult> {
+    let _guard = match service_guard(&state) {
+        Ok(guard) => guard,
+        Err(error) => return error,
+    };
     let probe = match provider_probe() {
         Ok(probe) => probe,
         Err(error) => return error,
@@ -227,6 +289,10 @@ pub fn speech_route_activate(
     state: State<'_, AppState>,
     route_id: String,
 ) -> CommandResult<VoiceRouteConfig> {
+    let _guard = match service_guard(&state) {
+        Ok(guard) => guard,
+        Err(error) => return error,
+    };
     let probe = match provider_probe() {
         Ok(probe) => probe,
         Err(error) => return error,
@@ -241,6 +307,10 @@ pub fn speech_route_delete(
     state: State<'_, AppState>,
     route_id: String,
 ) -> CommandResult<FoundationStatus> {
+    let _guard = match service_guard(&state) {
+        Ok(guard) => guard,
+        Err(error) => return error,
+    };
     let probe = match provider_probe() {
         Ok(probe) => probe,
         Err(error) => return error,
@@ -335,20 +405,16 @@ fn open_directory(_: &std::path::Path) -> Result<(), ()> {
     Err(())
 }
 
-fn secret_failure(error: SecretError) -> CommandResult<SecretStatus> {
-    CommandResult::Err {
-        error: PublicError::new(error.code(), error.to_string(), false),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
-    use super::public_config;
+    use super::{provider_service_error, public_config, route_service_error};
     use crate::{
         app_state::{AppPaths, AppState},
+        providers::ProviderError,
         secrets::MemorySecretStore,
+        services::{ProviderServiceError, VoiceRouteServiceError},
     };
 
     #[test]
@@ -401,37 +467,23 @@ mod tests {
         assert!(json.contains("\"ok\":false"));
         assert!(json.contains("CONFIG_INVALID"));
     }
-}
 
-#[tauri::command]
-pub fn secret_set(
-    state: State<'_, AppState>,
-    reference: String,
-    value: String,
-) -> CommandResult<SecretStatus> {
-    state
-        .secrets
-        .set(&reference, &value)
-        .map_or_else(secret_failure, |data| CommandResult::Ok { data })
-}
-
-#[tauri::command]
-pub fn secret_delete(state: State<'_, AppState>, reference: String) -> CommandResult<SecretStatus> {
-    state
-        .secrets
-        .delete(&reference)
-        .map_or_else(secret_failure, |data| CommandResult::Ok { data })
-}
-
-#[tauri::command]
-pub fn secret_status(
-    state: State<'_, AppState>,
-    references: Vec<String>,
-) -> CommandResult<Vec<SecretStatus>> {
-    match state.secrets.statuses(&references) {
-        Ok(data) => CommandResult::Ok { data },
-        Err(error) => CommandResult::Err {
-            error: PublicError::new(error.code(), error.to_string(), false),
-        },
+    #[test]
+    fn service_errors_preserve_field_and_retry_contracts() {
+        let provider = serde_json::to_value(provider_service_error::<()>(
+            ProviderServiceError::InvalidId,
+        ))
+        .unwrap();
+        assert_eq!(provider["error"]["field"], "id");
+        let route = serde_json::to_value(route_service_error::<()>(
+            VoiceRouteServiceError::FieldsInvalid,
+        ))
+        .unwrap();
+        assert_eq!(route["error"]["field"], "route");
+        let timeout = serde_json::to_value(provider_service_error::<()>(
+            ProviderServiceError::Provider(ProviderError::Timeout),
+        ))
+        .unwrap();
+        assert_eq!(timeout["error"]["retryable"], true);
     }
 }

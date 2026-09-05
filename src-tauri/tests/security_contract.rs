@@ -43,9 +43,6 @@ fn capability_is_explicit_and_has_no_generic_process_or_filesystem_access() {
     let baseline = [
         "core:default",
         "allow-foundation-get-status",
-        "allow-secret-set",
-        "allow-secret-delete",
-        "allow-secret-status",
         "allow-diagnostics-export",
         "allow-config-get-startup-state",
         "allow-config-restore-last-good",

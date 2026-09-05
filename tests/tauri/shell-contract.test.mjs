@@ -24,9 +24,6 @@ test("parallel Tauri shell preserves legacy entry points", async () => {
   const baselinePermissions = [
     "core:default",
     "allow-foundation-get-status",
-    "allow-secret-set",
-    "allow-secret-delete",
-    "allow-secret-status",
     "allow-diagnostics-export",
     "allow-config-get-startup-state",
     "allow-config-restore-last-good",

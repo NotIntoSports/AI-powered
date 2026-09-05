@@ -2,6 +2,7 @@ use std::{
     fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
+    sync::{Arc, Mutex},
 };
 
 use super::{AppConfigV1, ConfigError, ConfigPatch};
@@ -15,11 +16,15 @@ pub enum ConfigLoadOutcome {
 #[derive(Debug, Clone)]
 pub struct ConfigStore {
     path: PathBuf,
+    write_lock: Arc<Mutex<()>>,
 }
 
 impl ConfigStore {
     pub fn new(path: PathBuf) -> Self {
-        Self { path }
+        Self {
+            path,
+            write_lock: Arc::new(Mutex::new(())),
+        }
     }
 
     pub fn load(&self) -> Result<AppConfigV1, ConfigError> {
@@ -53,6 +58,7 @@ impl ConfigStore {
     }
 
     pub fn save_patch(&self, patch: ConfigPatch) -> Result<AppConfigV1, ConfigError> {
+        let _guard = self.lock_writes()?;
         let mut config = self.load()?;
         if let Some(diagnostics) = patch.diagnostics
             && let Some(days) = diagnostics.log_retention_days
@@ -68,6 +74,7 @@ impl ConfigStore {
     where
         F: FnOnce(&mut AppConfigV1) -> Result<(), ConfigError>,
     {
+        let _guard = self.lock_writes()?;
         let mut config = self.load()?;
         mutation(&mut config)?;
         self.write_validated(&config)?;
@@ -79,6 +86,7 @@ impl ConfigStore {
     }
 
     pub fn restore_last_good(&self) -> Result<AppConfigV1, ConfigError> {
+        let _guard = self.lock_writes()?;
         let config = self.load_last_good()?;
         self.write_validated(&config)?;
         Ok(config)
@@ -91,9 +99,19 @@ impl ConfigStore {
     }
 
     pub fn restore_defaults(&self) -> Result<AppConfigV1, ConfigError> {
+        let _guard = self.lock_writes()?;
         let config = AppConfigV1::default();
         self.write_validated(&config)?;
         Ok(config)
+    }
+
+    fn lock_writes(&self) -> Result<std::sync::MutexGuard<'_, ()>, ConfigError> {
+        self.write_lock.lock().map_err(|_| {
+            ConfigError::new(
+                "CONFIG_WRITE_FAILED",
+                "Configuration write lock is unavailable",
+            )
+        })
     }
 
     fn write_validated(&self, config: &AppConfigV1) -> Result<(), ConfigError> {
@@ -103,8 +121,19 @@ impl ConfigStore {
         // The primary file is the commit point. Write the recovery copy first so
         // a backup failure can never leave callers observing a committed primary
         // while they roll back a related Credential Manager mutation.
-        atomic_write(&self.last_good_path(), &json)?;
-        atomic_write(&self.path, &json)
+        let backup_path = self.last_good_path();
+        let previous_backup = fs::read(&backup_path).ok();
+        atomic_write(&backup_path, &json)?;
+        if let Err(error) = atomic_write(&self.path, &json) {
+            match previous_backup {
+                Some(bytes) => atomic_write(&backup_path, &bytes)?,
+                None => {
+                    let _ = fs::remove_file(&backup_path);
+                }
+            }
+            return Err(error);
+        }
+        Ok(())
     }
 }
 

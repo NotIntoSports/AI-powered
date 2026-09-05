@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -44,6 +44,7 @@ pub enum VoiceRouteServiceError {
     FieldsInvalid,
     NotFound,
     NotReady,
+    ModelNotFound,
     Config(ConfigError),
     Provider(ProviderServiceError),
 }
@@ -55,6 +56,7 @@ impl VoiceRouteServiceError {
             Self::FieldsInvalid => "VOICE_ROUTE_FIELDS_INVALID",
             Self::NotFound => "VOICE_ROUTE_NOT_FOUND",
             Self::NotReady => "VOICE_ROUTE_NOT_READY",
+            Self::ModelNotFound => "VOICE_ROUTE_MODEL_NOT_FOUND",
             Self::Config(error) => error.code(),
             Self::Provider(error) => error.code(),
         }
@@ -142,12 +144,27 @@ impl<'a> VoiceRouteService<'a> {
             .find(|route| route.id == route_id)
             .cloned()
             .ok_or(VoiceRouteServiceError::NotFound)?;
-        let providers = provider_ids(&route);
+        validate_stored_route(&route)?;
+        let provider_models = provider_models(&route);
+        let providers = provider_models.keys().cloned().collect::<Vec<_>>();
         let provider_service = ProviderService::new(self.config, self.secrets, self.probe);
-        for provider_id in &providers {
-            provider_service
-                .test(provider_id)
-                .map_err(VoiceRouteServiceError::Provider)?;
+        for (provider_id, required_models) in &provider_models {
+            let discovered = match provider_service.discover(provider_id) {
+                Ok(discovered) => discovered,
+                Err(error) => {
+                    mark_test_failed(self.config, route_id)?;
+                    return Err(VoiceRouteServiceError::Provider(error));
+                }
+            };
+            let available = discovered
+                .models
+                .into_iter()
+                .map(|model| model.id)
+                .collect::<BTreeSet<_>>();
+            if !required_models.is_subset(&available) {
+                mark_test_failed(self.config, route_id)?;
+                return Err(VoiceRouteServiceError::ModelNotFound);
+            }
         }
         self.config
             .update(|config| {
@@ -292,17 +309,63 @@ fn clean(value: Option<String>) -> Option<String> {
     })
 }
 
-fn provider_ids(route: &VoiceRouteConfig) -> Vec<String> {
-    [
-        route.asr_provider_id.as_ref(),
-        route.llm_provider_id.as_ref(),
-        route.tts_provider_id.as_ref(),
-        route.e2e_provider_id.as_ref(),
-    ]
-    .into_iter()
-    .flatten()
-    .cloned()
-    .collect::<BTreeSet<_>>()
-    .into_iter()
-    .collect()
+fn provider_models(route: &VoiceRouteConfig) -> BTreeMap<String, BTreeSet<String>> {
+    let mut providers = BTreeMap::<String, BTreeSet<String>>::new();
+    for (provider, model) in [
+        (&route.asr_provider_id, &route.asr_model_id),
+        (&route.llm_provider_id, &route.llm_model_id),
+        (&route.tts_provider_id, &route.tts_model_id),
+        (&route.e2e_provider_id, &route.e2e_model_id),
+    ] {
+        if let (Some(provider), Some(model)) = (provider, model) {
+            providers
+                .entry(provider.clone())
+                .or_default()
+                .insert(model.clone());
+        }
+    }
+    providers
+}
+
+fn mark_test_failed(
+    config_store: &ConfigStore,
+    route_id: &str,
+) -> Result<(), VoiceRouteServiceError> {
+    config_store
+        .update(|config| {
+            let current = config
+                .speech
+                .voice_routes
+                .iter_mut()
+                .find(|item| item.id == route_id)
+                .ok_or_else(|| {
+                    ConfigError::new("VOICE_ROUTE_NOT_FOUND", "Voice route not found")
+                })?;
+            current.ready = false;
+            current.active = false;
+            current.status = Some("test_failed".into());
+            if config.speech.active_voice_route_id.as_deref() == Some(route_id) {
+                config.speech.active_voice_route_id = None;
+            }
+            Ok(())
+        })
+        .map(|_| ())
+        .map_err(VoiceRouteServiceError::Config)
+}
+
+fn validate_stored_route(route: &VoiceRouteConfig) -> Result<(), VoiceRouteServiceError> {
+    validate_route_input(&VoiceRouteSaveInput {
+        id: route.id.clone(),
+        name: route.name.clone(),
+        mode: route.mode,
+        asr_provider_id: route.asr_provider_id.clone(),
+        asr_model_id: route.asr_model_id.clone(),
+        llm_provider_id: route.llm_provider_id.clone(),
+        llm_model_id: route.llm_model_id.clone(),
+        tts_provider_id: route.tts_provider_id.clone(),
+        tts_model_id: route.tts_model_id.clone(),
+        voice_id: route.voice_id.clone(),
+        e2e_provider_id: route.e2e_provider_id.clone(),
+        e2e_model_id: route.e2e_model_id.clone(),
+    })
 }

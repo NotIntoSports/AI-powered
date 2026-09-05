@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
+use zeroize::Zeroizing;
 
 use crate::{
     config::{ConfigError, ConfigStore, ProviderConfig, SecretSlot},
@@ -7,7 +8,7 @@ use crate::{
     secrets::{SecretError, SecretService},
 };
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Deserialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[ts(rename_all = "camelCase")]
 pub struct ProviderSaveInput {
@@ -49,6 +50,8 @@ pub enum ProviderServiceError {
     Config(ConfigError),
     Secret(SecretError),
     Provider(ProviderError),
+    CredentialRollback,
+    CredentialCleanup,
 }
 
 impl ProviderServiceError {
@@ -60,6 +63,8 @@ impl ProviderServiceError {
             Self::Config(error) => error.code(),
             Self::Secret(error) => error.code(),
             Self::Provider(error) => error.code(),
+            Self::CredentialRollback => "SECRET_ROLLBACK_FAILED",
+            Self::CredentialCleanup => "SECRET_CLEANUP_FAILED",
         }
     }
 }
@@ -83,24 +88,27 @@ impl<'a> ProviderService<'a> {
         }
     }
 
-    pub fn save(&self, input: ProviderSaveInput) -> Result<ProviderConfig, ProviderServiceError> {
+    pub fn save(
+        &self,
+        mut input: ProviderSaveInput,
+    ) -> Result<ProviderConfig, ProviderServiceError> {
         validate_provider_id(&input.id)?;
         let reference = credential_reference(&input.id);
         let old_secret = self
             .secrets
             .read(&reference)
             .map_err(ProviderServiceError::Secret)?;
-        let submitted = input.api_key.filter(|value| !value.trim().is_empty());
+        let submitted = input
+            .api_key
+            .take()
+            .filter(|value| !value.trim().is_empty())
+            .map(Zeroizing::new);
         if let Some(value) = submitted.as_deref() {
             self.secrets
                 .set(&reference, value)
                 .map_err(ProviderServiceError::Secret)?;
         }
-        let configured = self
-            .secrets
-            .status(&reference)
-            .map_err(ProviderServiceError::Secret)?
-            .configured;
+        let configured = submitted.is_some() || old_secret.is_some();
         let provider = ProviderConfig {
             id: input.id.clone(),
             name: input.name.filter(|name| !name.trim().is_empty()),
@@ -142,7 +150,8 @@ impl<'a> ProviderService<'a> {
                         self.secrets,
                         &reference,
                         old_secret.as_deref().map(String::as_str),
-                    );
+                    )
+                    .map_err(|_| ProviderServiceError::CredentialRollback)?;
                 }
                 Err(ProviderServiceError::Config(error))
             }
@@ -163,11 +172,17 @@ impl<'a> ProviderService<'a> {
         let credential = provider
             .credential
             .as_ref()
+            .filter(|slot| slot.configured)
             .map(|slot| self.secrets.read(&slot.reference))
             .transpose()
             .map_err(ProviderServiceError::Secret)?
             .flatten();
-        if provider.credential.is_some() && credential.is_none() {
+        if provider
+            .credential
+            .as_ref()
+            .is_some_and(|slot| slot.configured)
+            && credential.is_none()
+        {
             return Err(ProviderServiceError::Secret(SecretError::Backend));
         }
         let models = self
@@ -220,48 +235,63 @@ impl<'a> ProviderService<'a> {
     pub fn delete(&self, provider_id: &str) -> Result<(), ProviderServiceError> {
         validate_provider_id(provider_id)?;
         let reference = credential_reference(provider_id);
-        self.config
-            .update(|config| {
-                if config
-                    .speech
-                    .voice_routes
-                    .iter()
-                    .any(|route| route_uses_provider(route, provider_id))
-                    || config.knowledge.embedding_provider_id.as_deref() == Some(provider_id)
-                {
-                    return Err(ConfigError::new("PROVIDER_IN_USE", "Provider is in use"));
-                }
-                let original = config.models.providers.len();
-                config
-                    .models
-                    .providers
-                    .retain(|provider| provider.id != provider_id);
-                if original == config.models.providers.len() {
-                    return Err(ConfigError::new("PROVIDER_NOT_FOUND", "Provider not found"));
-                }
-                if config.models.active_provider_id.as_deref() == Some(provider_id) {
-                    config.models.active_provider_id = None;
-                }
-                Ok(())
-            })
-            .map_err(|error| match error.code() {
-                "PROVIDER_IN_USE" => ProviderServiceError::InUse,
-                "PROVIDER_NOT_FOUND" => ProviderServiceError::NotFound,
-                _ => ProviderServiceError::Config(error),
-            })?;
+        let provider_exists = self
+            .config
+            .load()
+            .map_err(ProviderServiceError::Config)?
+            .models
+            .providers
+            .iter()
+            .any(|provider| provider.id == provider_id);
+        if provider_exists {
+            self.config
+                .update(|config| {
+                    if config
+                        .speech
+                        .voice_routes
+                        .iter()
+                        .any(|route| route_uses_provider(route, provider_id))
+                        || config.knowledge.embedding_provider_id.as_deref() == Some(provider_id)
+                    {
+                        return Err(ConfigError::new("PROVIDER_IN_USE", "Provider is in use"));
+                    }
+                    let original = config.models.providers.len();
+                    config
+                        .models
+                        .providers
+                        .retain(|provider| provider.id != provider_id);
+                    if original == config.models.providers.len() {
+                        return Err(ConfigError::new("PROVIDER_NOT_FOUND", "Provider not found"));
+                    }
+                    if config.models.active_provider_id.as_deref() == Some(provider_id) {
+                        config.models.active_provider_id = None;
+                    }
+                    Ok(())
+                })
+                .map_err(|error| match error.code() {
+                    "PROVIDER_IN_USE" => ProviderServiceError::InUse,
+                    "PROVIDER_NOT_FOUND" => ProviderServiceError::NotFound,
+                    _ => ProviderServiceError::Config(error),
+                })?;
+        }
         self.secrets
             .delete(&reference)
-            .map_err(ProviderServiceError::Secret)?;
+            .map_err(|_| ProviderServiceError::CredentialCleanup)?;
         Ok(())
     }
 }
 
-fn rollback_secret(secrets: &SecretService, reference: &str, prior: Option<&str>) {
+fn rollback_secret(
+    secrets: &SecretService,
+    reference: &str,
+    prior: Option<&str>,
+) -> Result<(), SecretError> {
     if let Some(prior) = prior {
-        let _ = secrets.set(reference, prior);
+        secrets.set(reference, prior)?;
     } else {
-        let _ = secrets.delete(reference);
+        secrets.delete(reference)?;
     }
+    Ok(())
 }
 
 fn validate_provider_id(id: &str) -> Result<(), ProviderServiceError> {

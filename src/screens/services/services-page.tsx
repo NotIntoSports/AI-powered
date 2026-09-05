@@ -3,6 +3,7 @@ import * as api from "../../api/commands";
 import type { CommandResult, PublicConfig, VoiceRouteMode } from "../../generated/bindings";
 
 const optional = (value: string) => value.trim() || null;
+const errorText = (error: { code: string; message: string; field?: string | null }) => `${error.field ? error.field + "：" : ""}${error.code}：${error.message}`;
 const initialRoute = { id: "", name: "", mode: "cascaded" as VoiceRouteMode, asrProviderId: "", asrModelId: "", llmProviderId: "", llmModelId: "", ttsProviderId: "", ttsModelId: "", voiceId: "", e2eProviderId: "", e2eModelId: "" };
 
 export function ServicesPage() {
@@ -17,7 +18,7 @@ export function ServicesPage() {
     try {
       const result = await api.getConfigPublic();
       if (result.ok) { setConfig(result.data); setMessage(""); }
-      else setMessage(result.error.code + "：" + result.error.message);
+      else setMessage(errorText(result.error));
     } catch {
       setMessage("IPC_UNAVAILABLE：无法读取本地配置");
     }
@@ -28,10 +29,14 @@ export function ServicesPage() {
     setBusy(true);
     try {
       const result = await action();
-      if (!result.ok) { setMessage(result.error.code + "：" + result.error.message); return false; }
-      setMessage(success);
       await reload();
+      if (!result.ok) { setMessage(errorText(result.error)); return false; }
+      setMessage(success);
       return true;
+    } catch {
+      await reload();
+      setMessage("IPC_UNAVAILABLE：本地操作失败");
+      return false;
     } finally { setBusy(false); }
   }
 
@@ -51,7 +56,9 @@ export function ServicesPage() {
       if (result.ok) {
         setModels((current) => ({ ...current, [id]: result.data.models.map((model) => model.id) }));
         setMessage("已发现 " + result.data.models.length + " 个模型");
-      } else setMessage(result.error.code + "：" + result.error.message);
+      } else setMessage(errorText(result.error));
+    } catch {
+      setMessage("IPC_UNAVAILABLE：模型发现失败");
     } finally { setBusy(false); }
   }
 
@@ -113,10 +120,10 @@ export function ServicesPage() {
           <label>线路名称<input required value={route.name} onChange={(e) => setRouteField("name", e.target.value)}/></label>
           <label>模式<select value={route.mode} onChange={(e) => setRouteField("mode", e.target.value)}><option value="cascaded">级联 ASR → LLM → TTS</option><option value="e2e">端到端 Realtime</option></select></label>
           {route.mode === "cascaded" ? <>
-            <ProviderModelFields prefix="ASR" providers={providers} provider={route.asrProviderId} model={route.asrModelId} onProvider={(v) => setRouteField("asrProviderId", v)} onModel={(v) => setRouteField("asrModelId", v)}/>
-            <ProviderModelFields prefix="LLM" providers={providers} provider={route.llmProviderId} model={route.llmModelId} onProvider={(v) => setRouteField("llmProviderId", v)} onModel={(v) => setRouteField("llmModelId", v)}/>
-            <ProviderModelFields prefix="TTS" providers={providers} provider={route.ttsProviderId} model={route.ttsModelId} onProvider={(v) => setRouteField("ttsProviderId", v)} onModel={(v) => setRouteField("ttsModelId", v)}/>
-          </> : <ProviderModelFields prefix="Realtime" providers={providers} provider={route.e2eProviderId} model={route.e2eModelId} onProvider={(v) => setRouteField("e2eProviderId", v)} onModel={(v) => setRouteField("e2eModelId", v)}/>}
+            <ProviderModelFields prefix="ASR" providers={providers} provider={route.asrProviderId} model={route.asrModelId} modelChoices={models[route.asrProviderId] ?? []} onProvider={(v) => setRouteField("asrProviderId", v)} onModel={(v) => setRouteField("asrModelId", v)}/>
+            <ProviderModelFields prefix="LLM" providers={providers} provider={route.llmProviderId} model={route.llmModelId} modelChoices={models[route.llmProviderId] ?? []} onProvider={(v) => setRouteField("llmProviderId", v)} onModel={(v) => setRouteField("llmModelId", v)}/>
+            <ProviderModelFields prefix="TTS" providers={providers} provider={route.ttsProviderId} model={route.ttsModelId} modelChoices={models[route.ttsProviderId] ?? []} onProvider={(v) => setRouteField("ttsProviderId", v)} onModel={(v) => setRouteField("ttsModelId", v)}/>
+          </> : <ProviderModelFields prefix="Realtime" providers={providers} provider={route.e2eProviderId} model={route.e2eModelId} modelChoices={models[route.e2eProviderId] ?? []} onProvider={(v) => setRouteField("e2eProviderId", v)} onModel={(v) => setRouteField("e2eModelId", v)}/>}
           <label>音色 ID（可选）<input value={route.voiceId} onChange={(e) => setRouteField("voiceId", e.target.value)}/></label>
           <button disabled={busy || providers.length === 0} type="submit">保存语音线路</button>
         </form>
@@ -145,9 +152,10 @@ export function ServicesPage() {
   </section>;
 }
 
-function ProviderModelFields(props: { prefix: string; providers: PublicConfig["models"]["providers"]; provider: string; model: string; onProvider: (value: string) => void; onModel: (value: string) => void }) {
+function ProviderModelFields(props: { prefix: string; providers: PublicConfig["models"]["providers"]; provider: string; model: string; modelChoices: string[]; onProvider: (value: string) => void; onModel: (value: string) => void }) {
+  const listId = `models-${props.prefix.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
   return <div className="provider-model-fields">
     <label>{props.prefix} 供应商<select required value={props.provider} onChange={(e) => props.onProvider(e.target.value)}><option value="">请选择</option>{props.providers.map((item) => <option key={item.id} value={item.id}>{item.name || item.id}</option>)}</select></label>
-    <label>{props.prefix} 模型<input required value={props.model} onChange={(e) => props.onModel(e.target.value)}/></label>
+    <label>{props.prefix} 模型<input required list={listId} value={props.model} onChange={(e) => props.onModel(e.target.value)}/><datalist id={listId}>{props.modelChoices.map((model) => <option key={model} value={model}/>)}</datalist></label>
   </div>;
 }

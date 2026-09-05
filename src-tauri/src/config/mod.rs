@@ -302,6 +302,14 @@ impl AppConfigV1 {
         ensure_unique(self.role_profiles.iter().map(|item| item.id.as_str()))?;
         for provider in &self.models.providers {
             validate_url(&provider.base_url, &["http", "https"])?;
+            if let Some(credential) = &provider.credential
+                && credential.reference != format!("providers/{}/api-key", provider.id)
+            {
+                return Err(ConfigError::new(
+                    "CONFIG_SECRET_REFERENCE_INVALID",
+                    "Provider credential reference is not canonical",
+                ));
+            }
         }
         if let Some(url) = &self.transport.livekit_url {
             validate_url(url, &["ws", "wss"])?;
@@ -329,6 +337,27 @@ impl AppConfigV1 {
                 "CONFIG_REFERENCE_MISSING",
                 "Active voice route does not exist",
             ));
+        }
+        let active_routes = self
+            .speech
+            .voice_routes
+            .iter()
+            .filter(|route| route.active)
+            .collect::<Vec<_>>();
+        match self.speech.active_voice_route_id.as_deref() {
+            Some(active_id)
+                if active_routes.len() == 1
+                    && active_routes[0].id == active_id
+                    && active_routes[0].ready
+                    && active_routes[0].status.as_deref() == Some("ready")
+                    && active_routes[0].config_version > 0 => {}
+            None if active_routes.is_empty() => {}
+            _ => {
+                return Err(ConfigError::new(
+                    "CONFIG_ACTIVE_ROUTE_INVALID",
+                    "Active voice route flags are inconsistent",
+                ));
+            }
         }
         for route in &self.speech.voice_routes {
             for provider_id in [
@@ -399,6 +428,8 @@ fn validate_url(raw: &str, schemes: &[&str]) -> Result<(), ConfigError> {
         || url.host_str().is_none()
         || !url.username().is_empty()
         || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
     {
         return Err(ConfigError::new(
             "CONFIG_URL_INVALID",

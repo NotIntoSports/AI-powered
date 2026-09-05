@@ -25,7 +25,6 @@ impl PublicError {
         }
     }
 
-    #[cfg(test)]
     pub fn with_field(mut self, field: impl Into<String>) -> Self {
         self.field = Some(field.into());
         self

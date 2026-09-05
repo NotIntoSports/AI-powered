@@ -41,9 +41,6 @@ pub fn run() {
         }))
         .invoke_handler(tauri::generate_handler![
             commands::foundation_get_status,
-            commands::secret_set,
-            commands::secret_delete,
-            commands::secret_status,
             commands::diagnostics_export,
             commands::config_get_startup_state,
             commands::config_get_public,
