@@ -13,6 +13,9 @@ jobs:
         with:
           node-version: 24
           cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.96"
       - run: npm ci
       - name: Reject local-only docs and agent ledgers
         shell: pwsh
@@ -28,3 +31,4 @@ jobs:
       - run: npx tsc -p tsconfig.tauri.json --noEmit
       - run: npm run test:tauri-ui
       - run: node --test tests/tauri/*.test.mjs
+      - run: npm run test:tauri
