@@ -2,6 +2,7 @@ use tauri::State;
 
 use crate::{
     app_state::AppState,
+    config::{PublicConfig, public_view},
     contracts::{
         CommandResult, DiagnosticsExportResult, FoundationStatus, SecretStatus, StartupState,
     },
@@ -74,6 +75,26 @@ pub fn config_get_startup_state(state: State<'_, AppState>) -> CommandResult<Sta
     CommandResult::Ok {
         data: state.startup_state(),
     }
+}
+
+/// Thin, read-only projection of the loaded configuration onto its redacted
+/// public contract. The real logic lives in [`crate::config::public_view`]; this
+/// only maps the load outcome into a [`CommandResult`]. It never writes and never
+/// reads a secret value — credentials surface only as `SecretSlot` references.
+fn public_config(state: &AppState) -> CommandResult<PublicConfig> {
+    match state.config.load() {
+        Ok(config) => CommandResult::Ok {
+            data: public_view(&config),
+        },
+        Err(error) => CommandResult::Err {
+            error: PublicError::new(error.code(), "Configuration is unavailable", false),
+        },
+    }
+}
+
+#[tauri::command]
+pub fn config_get_public(state: State<'_, AppState>) -> CommandResult<PublicConfig> {
+    public_config(&state)
 }
 
 #[tauri::command]
@@ -162,6 +183,68 @@ fn open_directory(_: &std::path::Path) -> Result<(), ()> {
 fn secret_failure(error: SecretError) -> CommandResult<SecretStatus> {
     CommandResult::Err {
         error: PublicError::new(error.code(), error.to_string(), false),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::public_config;
+    use crate::{
+        app_state::{AppPaths, AppState},
+        secrets::MemorySecretStore,
+    };
+
+    #[test]
+    fn config_get_public_returns_redacted_config_without_secret_material() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = AppPaths {
+            data_directory: directory.path().join("data"),
+            logs_directory: directory.path().join("logs"),
+            config_path: directory.path().join("config.json"),
+        };
+        std::fs::write(
+            &paths.config_path,
+            r#"{"configVersion":1,"models":{"providers":[{"id":"p1","baseUrl":"https://one.example","credential":{"reference":"providers/p1/api-key","configured":true}}]}}"#,
+        )
+        .unwrap();
+        let state = AppState::initialize(paths, Arc::new(MemorySecretStore::default())).unwrap();
+
+        let json = serde_json::to_string(&public_config(&state)).unwrap();
+        // The command returns the redacted PublicConfig: ok=true with the credential
+        // surviving only as a SecretSlot reference + configured flag.
+        assert!(json.contains("\"ok\":true"));
+        assert!(json.contains("\"configVersion\":1"));
+        assert!(json.contains("providers/p1/api-key"));
+        assert!(json.contains("\"configured\":true"));
+        // No secret material keyword crosses the IPC boundary.
+        let lower = json.to_ascii_lowercase();
+        for needle in [
+            "apikey",
+            "password",
+            "secretvalue",
+            "secretcontents",
+            "token",
+        ] {
+            assert!(!lower.contains(needle), "leaked secret material: {needle}");
+        }
+    }
+
+    #[test]
+    fn config_get_public_surfaces_load_failure_as_command_error() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = AppPaths {
+            data_directory: directory.path().join("data"),
+            logs_directory: directory.path().join("logs"),
+            config_path: directory.path().join("config.json"),
+        };
+        std::fs::write(&paths.config_path, "not-json").unwrap();
+        let state = AppState::initialize(paths, Arc::new(MemorySecretStore::default())).unwrap();
+
+        let json = serde_json::to_string(&public_config(&state)).unwrap();
+        assert!(json.contains("\"ok\":false"));
+        assert!(json.contains("CONFIG_INVALID"));
     }
 }
 

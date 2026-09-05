@@ -39,13 +39,17 @@ test("generated bindings have a deterministic warning header", async () => {
 });
 
 test("only the command adapter imports the low-level Tauri invoke API", async () => {
-  // Same contract the previous `rg -l` scan enforced: the set of .ts/.tsx files under
-  // src importing "@tauri-apps/api/core" must be exactly { src/api/commands.ts }.
+  // Same contract the previous `rg -l` scan enforced: the set of PRODUCTION .ts/.tsx
+  // files under src importing "@tauri-apps/api/core" must be exactly { src/api/commands.ts }.
+  // Test doubles (*.test.*) legitimately mock the low-level invoke API and are exempt,
+  // mirroring page-shell-contract's `.test.` exclusion; every production module is still scanned.
   const files = [];
   for (const file of await collectSourceFiles("src")) {
+    const normalized = file.replaceAll("\\", "/");
+    if (normalized.includes(".test.")) continue;
     const content = await readFile(file, "utf8");
     if (content.includes("@tauri-apps/api/core")) {
-      files.push(file.replaceAll("\\", "/"));
+      files.push(normalized);
     }
   }
   files.sort();

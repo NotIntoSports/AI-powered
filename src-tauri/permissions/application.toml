@@ -29,6 +29,11 @@ description = "Allows reading the public configuration startup state."
 commands.allow = ["config_get_startup_state"]
 
 [[permission]]
+identifier = "allow-config-get-public"
+description = "Allows reading the redacted public configuration; secret values are never exposed."
+commands.allow = ["config_get_public"]
+
+[[permission]]
 identifier = "allow-config-restore-last-good"
 description = "Allows restoring the validated last-good local configuration."
 commands.allow = ["config_restore_last_good"]

@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
-import type { CommandResult, DiagnosticsExportResult, FoundationStatus, SecretStatus, StartupState } from "../generated/bindings";
+import type { CommandResult, DiagnosticsExportResult, FoundationStatus, PublicConfig, SecretStatus, StartupState } from "../generated/bindings";
 
 export function getFoundationStatus() {
   return invoke<CommandResult<FoundationStatus>>("foundation_get_status");
@@ -24,6 +24,10 @@ export function exportDiagnostics(destination: string) {
 
 export function getStartupState() {
   return invoke<CommandResult<StartupState>>("config_get_startup_state");
+}
+
+export function getConfigPublic() {
+  return invoke<CommandResult<PublicConfig>>("config_get_public");
 }
 
 export function restoreLastGoodConfig() {

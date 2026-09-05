@@ -1,14 +1,14 @@
 {
-  "comment": "Content-snapshot baseline for the pinned security-surface files. page-shell-contract.test.mjs recomputes each file's SHA-256 (after CRLF->LF normalization for cross-platform/core.autocrlf determinism) and asserts equality with these values. Update only when a Phase 3 change is intentionally accepted.",
+  "comment": "Content-snapshot baseline for the pinned security-surface files. page-shell-contract.test.mjs recomputes each file's SHA-256 (after CRLF->LF normalization for cross-platform/core.autocrlf determinism) and asserts equality with these values. Re-baseline SOP (when/how to refresh): WHEN - only when a change to a pinned security-surface file is intentional and reviewed (e.g. adding a capability permission plus its command, or regenerating bindings.ts after a public DTO change); never to silently absorb unexplained drift. HOW - (1) make the intended change; (2) run the full gate so cargo test regenerates src/generated/bindings.ts; (3) recompute each pinned file's CRLF->LF-normalized SHA-256; (4) update ONLY the changed entries below and verify every file you did not intend to touch keeps its prior hash (a changed hash there means real drift - stop and investigate); (5) confirm page-shell-contract's 'security surface has zero drift' test passes; (6) commit the fixture in the SAME commit as the code change so the accepted drift stays auditable.",
   "algorithm": "sha256",
   "normalization": "crlf-to-lf",
   "files": {
-    "src-tauri/capabilities/main.json": "c9eeca7416bd2ea1249f8fc87b98e1cc6f49eea67a164a892cb9dd991d155589",
-    "src-tauri/src/lib.rs": "da43e10f2d0d7a3de37c2466b5dfb8f2e7c4ab50bba5013e94a0ccd8cd63e85b",
+    "src-tauri/capabilities/main.json": "6ea7be6a9f884bbd0230d885ad3a301bb7244573a72c1cd9d7d6b5dc4420f219",
+    "src-tauri/src/lib.rs": "7fc973aeffb1bf92a3b811dbb5fadbb5c6ad3d1528ebeac478a290829da0677b",
     "src-tauri/src/contracts.rs": "020f2c0c55ab84ec9fbf878d1172575fee7ba1080a2dd7b48235bc81be5b7236",
-    "src-tauri/src/commands.rs": "2a1d098dbda16d5fdfb581054f9e60b436974745eb2bd660c5ad6cbf32af0d26",
+    "src-tauri/src/commands.rs": "52425147dcbfe4465dc14cc30bc38302d23799ed5f983bb101b409c0b4f37810",
     "src-tauri/tauri.conf.json": "90f68864746c5f8583397e7cdacb3b34e9397afeb7128cb34f837f4235a286e0",
-    "src/api/commands.ts": "f8bd1b14b57080294163a6af0af49b5f5564fc87f5849b6f648918c0e0e09e17",
+    "src/api/commands.ts": "8815e4555f4548a2003998c5f5b00db10ffec06d41abdc2d4c1f5ed28393b1b4",
     "src/generated/bindings.ts": "ff47bc3f548f7b4988fea28b96666f41ad26f87f3d038c3c0f31e39af6e208bd",
     "tests/tauri/shell-contract.test.mjs": "7707ff0eafb3e9c2444aa6491a3821ef31c45d3c4adc27b551ce25bedd568302",
     "src-tauri/tests/security_contract.rs": "ae1f18ed04a3a932069903c0a0947e8357c8bd001fb587ff677e22a212e1fc8a"

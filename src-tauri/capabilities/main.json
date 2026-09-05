@@ -11,6 +11,7 @@
     "allow-secret-status",
     "allow-diagnostics-export",
     "allow-config-get-startup-state",
+    "allow-config-get-public",
     "allow-config-restore-last-good",
     "allow-config-restore-defaults",
     "allow-open-app-directory"

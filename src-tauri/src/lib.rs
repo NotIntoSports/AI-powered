@@ -44,6 +44,7 @@ pub fn run() {
             commands::secret_status,
             commands::diagnostics_export,
             commands::config_get_startup_state,
+            commands::config_get_public,
             commands::config_restore_last_good,
             commands::config_restore_defaults,
             commands::open_app_directory,
