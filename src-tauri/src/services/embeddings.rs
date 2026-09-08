@@ -14,7 +14,8 @@ const TEST_INPUT: &str = "AI Virtual Assistant embedding connectivity test";
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[ts(rename_all = "camelCase")]
 pub struct EmbeddingConfigSaveInput {
-    pub id: String,
+    #[serde(default)]
+    pub id: Option<String>,
     #[serde(default)]
     pub provider_id: String,
     #[serde(default)]
@@ -141,7 +142,8 @@ impl<'a> EmbeddingService<'a> {
         &self,
         mut input: EmbeddingConfigSaveInput,
     ) -> Result<EmbeddingConfig, EmbeddingServiceError> {
-        let id = input.id.trim().to_owned();
+        let id = super::ids::resolve_optional_id(input.id.as_deref())
+            .map_err(|_| EmbeddingServiceError::InvalidId)?;
         let provider_id = input.provider_id.trim().to_owned();
         let base_url = input
             .base_url
@@ -149,7 +151,6 @@ impl<'a> EmbeddingService<'a> {
             .map(|value| value.trim().to_owned())
             .filter(|value| !value.is_empty());
         let model_id = input.model_id.trim().to_owned();
-        validate_id(&id)?;
         if model_id.is_empty() || !(1..=65_536).contains(&input.dimensions) {
             return Err(EmbeddingServiceError::FieldsInvalid);
         }

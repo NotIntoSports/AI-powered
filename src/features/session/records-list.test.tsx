@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as commands from "../../api/commands";
-import type { SessionDetail, SessionSummary, SessionTurnView } from "../../generated/bindings";
+import type { PublicConfig, SessionDetail, SessionSummary, SessionTurnView } from "../../generated/bindings";
 import { RecordsList } from "./records-list";
 
 vi.mock("../../api/commands", () => ({
@@ -10,6 +10,7 @@ vi.mock("../../api/commands", () => ({
   getSession: vi.fn(),
   exportSession: vi.fn(),
   deleteSession: vi.fn(),
+  getConfigPublic: vi.fn(),
 }));
 
 function summary(overrides: Partial<SessionSummary> = {}): SessionSummary {
@@ -46,9 +47,36 @@ function detail(overrides: Partial<SessionDetail> = {}): SessionDetail {
   };
 }
 
+function emptyConfig(overrides: Partial<PublicConfig> = {}): PublicConfig {
+  return {
+    configVersion: 1,
+    application: { locale: null },
+    models: { providers: [], activeProviderId: null },
+    speech: { voiceRoutes: [], activeVoiceRouteId: null },
+    transport: {
+      livekit: { enabled: false, url: null, apiKey: null, apiSecret: null, ready: false, status: null, configVersion: 0 },
+    },
+    knowledge: { embeddingConfigs: [], activeEmbeddingConfigId: null },
+    storage: { exportDirectory: null },
+    roleProfiles: [{
+      id: "role-1",
+      name: "面试官",
+      systemPrompt: "",
+      openingMessage: "",
+      styleInstructions: "",
+      active: true,
+      configVersion: 1,
+    }],
+    activeRoleProfileId: "role-1",
+    diagnostics: { logRetentionDays: 14 },
+    ...overrides,
+  };
+}
+
 describe("RecordsList", () => {
   beforeEach(() => {
     vi.mocked(commands.listSessions).mockResolvedValue({ ok: true, data: [] });
+    vi.mocked(commands.getConfigPublic).mockResolvedValue({ ok: true, data: emptyConfig() });
   });
 
   afterEach(() => {
@@ -87,7 +115,7 @@ describe("RecordsList", () => {
     const { container } = render(<RecordsList />);
     expect(await screen.findByText("sess-1")).toBeTruthy();
     expect(container.textContent).toContain("已完成");
-    expect(screen.getByText("角色 role-1")).toBeTruthy();
+    expect(screen.getByText("角色 面试官")).toBeTruthy();
     expect(container.querySelector("time")?.getAttribute("datetime")).toBe("2026-09-05T10:00:00Z");
     fireEvent.click(screen.getByRole("button", { name: "查看" }));
     await waitFor(() => expect(commands.getSession).toHaveBeenCalledWith("sess-1"));
@@ -210,6 +238,13 @@ describe("RecordsList", () => {
     expect(await screen.findByText("已中断")).toBeTruthy();
     expect(screen.getByText("角色 未指定")).toBeTruthy();
     expect(container.querySelector("time")?.getAttribute("datetime")).toBe("2026-09-05T10:05:00Z");
+  });
+
+  it("shows 已删除角色 when the saved role no longer exists", async () => {
+    vi.mocked(commands.getConfigPublic).mockResolvedValue({ ok: true, data: emptyConfig({ roleProfiles: [], activeRoleProfileId: null }) });
+    vi.mocked(commands.listSessions).mockResolvedValue({ ok: true, data: [summary()] });
+    render(<RecordsList />);
+    expect(await screen.findByText("角色 已删除角色")).toBeTruthy();
   });
 
   it("retains the list and re-enables its actions when opening a record fails", async () => {

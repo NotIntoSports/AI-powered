@@ -9,7 +9,7 @@
     "src-tauri/src/commands.rs": "ae880b434188f2ebbbf58e96a4ad0acce73e7b48742548787839950f379d3716",
     "src-tauri/tauri.conf.json": "90f68864746c5f8583397e7cdacb3b34e9397afeb7128cb34f837f4235a286e0",
     "src/api/commands.ts": "042919d2eb7bd7aa2685f4626039231b0debb3185b751a87461469fe82007efc",
-    "src/generated/bindings.ts": "de7593bf4581d2e06e6dbd34f235ace3845d7a9871e204a2d8b0f5daef24153a",
+    "src/generated/bindings.ts": "e69553cf65801b48c4750831baa019b530206f7ba49049d856c82c083a5f89a3",
     "tests/tauri/shell-contract.test.mjs": "7a9e13b97754f371ec3e95d3c01cc888394e007207ea16371768574e09ed452f",
     "src-tauri/tests/security_contract.rs": "22e42bfb76980bd585e6b012585207d39a1a8848b707336b0ebbc14f7dfb7ea3"
   }

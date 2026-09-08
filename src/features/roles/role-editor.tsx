@@ -14,13 +14,14 @@ const emptyRole = {
   styleInstructions: "",
 };
 
+const optionalId = (value: string) => value.trim() || null;
+
 export function RoleEditor() {
   const [config, setConfig] = useState<PublicConfig | null>(null);
   const [message, setMessage] = useState("正在读取本地配置…");
   const [busy, setBusy] = useState(false);
   const [role, setRole] = useState(emptyRole);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
-  const [copyTargets, setCopyTargets] = useState<Record<string, string>>({});
 
   const reload = useCallback(async () => {
     try {
@@ -40,21 +41,21 @@ export function RoleEditor() {
     void reload();
   }, [reload]);
 
-  async function run(action: () => Promise<CommandResult<unknown>>, success: string) {
+  async function run<T>(action: () => Promise<CommandResult<T>>, success: string) {
     setBusy(true);
     try {
       const result = await action();
       await reload();
       if (!result.ok) {
         setMessage(errorText(result.error));
-        return false;
+        return result;
       }
       setMessage(success);
-      return true;
+      return result;
     } catch {
       await reload();
       setMessage("IPC_UNAVAILABLE：本地操作失败");
-      return false;
+      return null;
     } finally {
       setBusy(false);
     }
@@ -62,10 +63,10 @@ export function RoleEditor() {
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    await run(
+    const result = await run(
       () =>
         api.saveRoleProfile({
-          id: role.id.trim(),
+          id: optionalId(role.id),
           name: role.name.trim(),
           systemPrompt: role.systemPrompt.trim(),
           openingMessage: role.openingMessage.trim(),
@@ -73,6 +74,9 @@ export function RoleEditor() {
         }),
       "角色已保存",
     );
+    if (result?.ok) {
+      setRole((current) => ({ ...current, id: result.data.id }));
+    }
   }
 
   const profiles = config?.roleProfiles ?? [];
@@ -88,17 +92,7 @@ export function RoleEditor() {
       )}
       <div className="configuration-columns">
         <form className="service-form configuration-editor" onSubmit={submit}>
-          <h3>{profiles.some((item) => item.id === role.id) ? "编辑角色" : "创建角色"}</h3>
-          <label>
-            角色 ID
-            <input
-              required
-              maxLength={64}
-              pattern="[a-z0-9_-]+"
-              value={role.id}
-              onChange={(event) => setRole({ ...role, id: event.target.value })}
-            />
-          </label>
+          <h3>{role.id && profiles.some((item) => item.id === role.id) ? "编辑角色" : "创建角色"}</h3>
           <label>
             显示名称
             <input
@@ -144,8 +138,6 @@ export function RoleEditor() {
               item={item}
               busy={busy}
               pendingDelete={pendingDelete === item.id}
-              copyTarget={copyTargets[item.id] ?? ""}
-              onCopyTarget={(value) => setCopyTargets((current) => ({ ...current, [item.id]: value }))}
               onEdit={() =>
                 setRole({
                   id: item.id,
@@ -161,7 +153,7 @@ export function RoleEditor() {
                   () =>
                     api.copyRoleProfile({
                       sourceId: item.id,
-                      id: (copyTargets[item.id] ?? "").trim(),
+                      id: null,
                     }),
                   "角色已复制",
                 )
@@ -187,8 +179,6 @@ export function RoleEditor() {
     item: RoleProfileConfig;
     busy: boolean;
     pendingDelete: boolean;
-    copyTarget: string;
-    onCopyTarget: (value: string) => void;
     onEdit: () => void;
     onActivate: () => void;
     onCopy: () => void;
@@ -198,7 +188,6 @@ export function RoleEditor() {
     return (
       <article className="service-card">
         <h3>{item.name}</h3>
-        <p className="muted">{item.id}</p>
         {item.active && <span className="status-badge">当前启用</span>}
         {item.configVersion === 0 && <p>需复查后保存才能启用</p>}
         <div className="service-actions">
@@ -208,23 +197,13 @@ export function RoleEditor() {
           <button disabled={props.busy || item.configVersion === 0} onClick={props.onActivate}>
             设为默认
           </button>
+          <button disabled={props.busy || item.configVersion === 0} onClick={props.onCopy}>
+            复制
+          </button>
           <button className="button-danger" disabled={props.busy} onClick={props.onDelete}>
             {props.pendingDelete ? "确认删除" : "删除"}
           </button>
         </div>
-        <div className="service-actions configuration-copy">
-          <label>
-            复制为
-            <input
-              aria-label={"复制 " + item.id + " 的新 ID"}
-              value={props.copyTarget}
-              onChange={(event) => props.onCopyTarget(event.target.value)}
-            />
-          </label>
-          <button disabled={props.busy || item.configVersion === 0} onClick={props.onCopy}>
-            复制
-          </button>
-      </div>
     </article>
   );
 }

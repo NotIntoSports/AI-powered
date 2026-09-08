@@ -11,10 +11,10 @@ const optional = (value: string) => value.trim() || null;
 const errorText = (error: { code: string; message: string; field?: string | null }) => `${error.field ? error.field + "：" : ""}${error.code}：${error.message}`;
 const providerTestMessage = (error: { code: string; message: string; field?: string | null }) => {
   switch (error.code) {
-    case "PROVIDER_TIMEOUT": return "连接超时，请检查接口基址或网络";
+    case "PROVIDER_TIMEOUT": return "连接超时，请检查接入地址或网络";
     case "PROVIDER_REQUEST_FAILED": return "连接失败：供应商接口没有正常响应";
     case "PROVIDER_UNAUTHORIZED": return "连接失败：API Key 无效或没有权限";
-    case "PROVIDER_ENDPOINT_INVALID": return "连接失败：接口基址无效";
+    case "PROVIDER_ENDPOINT_INVALID": return "连接失败：接入地址无效";
     case "PROVIDER_RESPONSE_INVALID": return "已连通，但模型列表无法解析";
     case "PROVIDER_RESPONSE_TOO_LARGE": return "连接失败：供应商返回内容过大";
     case "PROVIDER_CLIENT_UNAVAILABLE": return "连接失败：本机无法发起请求";
@@ -65,18 +65,18 @@ export function ServicesPage() {
   }, []);
   useEffect(() => { void reload(); }, [reload]);
 
-  async function run(action: () => Promise<CommandResult<unknown>>, success: string) {
+  async function run<T>(action: () => Promise<CommandResult<T>>, success: string) {
     setBusy(true);
     try {
       const result = await action();
       await reload(false);
-      if (!result.ok) { announce(errorText(result.error), "error"); return false; }
+      if (!result.ok) { announce(errorText(result.error), "error"); return result; }
       announce(success, "success");
-      return true;
+      return result;
     } catch {
       await reload(false);
       announce("IPC_UNAVAILABLE：本地操作失败", "error");
-      return false;
+      return null;
     } finally { setBusy(false); }
   }
 
@@ -111,7 +111,11 @@ export function ServicesPage() {
   async function submitProvider(event: FormEvent) {
     event.preventDefault();
     try {
-      await run(() => api.saveModelProvider({ id: provider.id.trim(), name: optional(provider.name), baseUrl: provider.baseUrl.trim(), apiKey: optional(provider.apiKey) }), "供应商已保存");
+      const result = await run(() => api.saveModelProvider({ id: optional(provider.id), name: provider.name.trim() || null, baseUrl: provider.baseUrl.trim(), apiKey: optional(provider.apiKey) }), "供应商已保存");
+      if (result?.ok) {
+        setProvider((current) => ({ ...current, id: result.data.id, apiKey: "" }));
+        return;
+      }
     } finally {
       setProvider((current) => ({ ...current, apiKey: "" }));
     }
@@ -133,8 +137,8 @@ export function ServicesPage() {
   async function submitRoute(event: FormEvent) {
     event.preventDefault();
     const cascaded = route.mode === "cascaded";
-    await run(() => api.saveSpeechRoute({
-      id: route.id.trim(), name: route.name.trim(), mode: route.mode,
+    const result = await run(() => api.saveSpeechRoute({
+      id: optional(route.id), name: route.name.trim(), mode: route.mode,
       asrProviderId: cascaded ? optional(route.asrProviderId) : null,
       asrModelId: cascaded ? optional(route.asrModelId) : null,
       llmProviderId: cascaded ? optional(route.llmProviderId) : null,
@@ -145,6 +149,7 @@ export function ServicesPage() {
       e2eProviderId: cascaded ? null : optional(route.e2eProviderId),
       e2eModelId: cascaded ? null : optional(route.e2eModelId),
     }), "语音线路已保存，请先测试再启用");
+    if (result?.ok) setRoute((current) => ({ ...current, id: result.data.id }));
   }
 
   const providers = config?.models.providers ?? [];
@@ -164,9 +169,8 @@ export function ServicesPage() {
         <div className="configuration-columns">
         <form className="service-form configuration-editor" onSubmit={submitProvider}>
           <h3>{provider.id && providers.some((item) => item.id === provider.id) ? "编辑供应商" : "添加供应商"}</h3>
-          <label>供应商 ID<input required pattern="[a-z0-9_-]+" value={provider.id} onChange={(e) => setProvider({ ...provider, id: e.target.value })}/></label>
-          <label>显示名称<input value={provider.name} onChange={(e) => setProvider({ ...provider, name: e.target.value })}/></label>
-          <label>接口基址<input required type="url" placeholder="https://example.com/v1" value={provider.baseUrl} onChange={(e) => setProvider({ ...provider, baseUrl: e.target.value })}/></label>
+          <label>显示名称<input required value={provider.name} onChange={(e) => setProvider({ ...provider, name: e.target.value })}/></label>
+          <label>接入地址<input required type="url" placeholder="https://example.com/v1" value={provider.baseUrl} onChange={(e) => setProvider({ ...provider, baseUrl: e.target.value })}/></label>
           <label>API Key<input type="password" autoComplete="new-password" value={provider.apiKey} onChange={(e) => setProvider({ ...provider, apiKey: e.target.value })}/><small>留空会保留已保存的密钥</small></label>
           <button className="button-primary" disabled={busy} type="submit">保存供应商</button>
         </form>
@@ -174,13 +178,13 @@ export function ServicesPage() {
           <h3>已配置供应商 <span className="configuration-count">{providers.length}</span></h3>
           {providers.length === 0 && <p className="empty-state">还没有供应商。</p>}
           {providers.map((item) => <article className="service-card" key={item.id}>
-            <h3>{item.name || item.id}</h3><p>{item.baseUrl}</p>
+            <h3>{item.name || "未命名供应商"}</h3><p>{item.baseUrl}</p>
             <p>密钥：{item.credential?.configured ? "已安全保存" : "未配置"}</p>
             {config?.models.activeProviderId === item.id && <span className="status-badge">当前默认</span>}
             {providerTests[item.id] && <p className="service-test-result" data-tone={providerTests[item.id].tone} role="status">{providerTests[item.id].text}</p>}
             <div className="service-actions">
-              <button aria-label={"编辑 " + (item.name || item.id)} disabled={busy} onClick={() => setProvider({ id: item.id, name: item.name ?? "", baseUrl: item.baseUrl, apiKey: "" })}>编辑</button>
-              <button aria-label={"测试 " + (item.name || item.id)} disabled={busy} onClick={() => void testProvider(item.id)}>{providerTests[item.id]?.tone === "pending" ? "测试中…" : "测试"}</button>
+              <button aria-label={"编辑 " + (item.name || "未命名供应商")} disabled={busy} onClick={() => setProvider({ id: item.id, name: item.name ?? "", baseUrl: item.baseUrl, apiKey: "" })}>编辑</button>
+              <button aria-label={"测试 " + (item.name || "未命名供应商")} disabled={busy} onClick={() => void testProvider(item.id)}>{providerTests[item.id]?.tone === "pending" ? "测试中…" : "测试"}</button>
               <button disabled={busy} onClick={() => void discover(item.id)}>发现模型</button>
               <button disabled={busy} onClick={() => void run(() => api.activateModelProvider(item.id), "默认供应商已更新")}>设为默认</button>
               <button className="button-danger" disabled={busy} onClick={() => void run(() => api.deleteModelProvider(item.id), "供应商已删除")}>删除</button>
@@ -196,7 +200,6 @@ export function ServicesPage() {
         <div className="configuration-columns">
         <form className="service-form configuration-editor" onSubmit={submitRoute}>
           <h3>{route.id && config?.speech.voiceRoutes.some((item) => item.id === route.id) ? "编辑线路" : "添加线路"}</h3>
-          <label>线路 ID<input required pattern="[a-z0-9_-]+" value={route.id} onChange={(e) => setRouteField("id", e.target.value)}/></label>
           <label>线路名称<input required value={route.name} onChange={(e) => setRouteField("name", e.target.value)}/></label>
           <label>模式<select value={route.mode} onChange={(e) => setRouteField("mode", e.target.value)}><option value="cascaded">级联 ASR → LLM → TTS</option><option value="e2e">端到端 Realtime</option></select></label>
           {route.mode === "cascaded" ? <>
@@ -241,7 +244,7 @@ export function ServicesPage() {
 function ProviderModelFields(props: { prefix: string; providers: PublicConfig["models"]["providers"]; provider: string; model: string; modelChoices: string[]; onProvider: (value: string) => void; onModel: (value: string) => void }) {
   const listId = `models-${props.prefix.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
   return <div className="provider-model-fields">
-    <label>{props.prefix} 供应商<select required value={props.provider} onChange={(e) => props.onProvider(e.target.value)}><option value="">请选择</option>{props.providers.map((item) => <option key={item.id} value={item.id}>{item.name || item.id}</option>)}</select></label>
+    <label>{props.prefix} 供应商<select required value={props.provider} onChange={(e) => props.onProvider(e.target.value)}><option value="">请选择</option>{props.providers.map((item) => <option key={item.id} value={item.id}>{item.name || "未命名供应商"}</option>)}</select></label>
     <label>{props.prefix} 模型<input required list={listId} value={props.model} onChange={(e) => props.onModel(e.target.value)}/><datalist id={listId}>{props.modelChoices.map((model) => <option key={model} value={model}/>)}</datalist></label>
   </div>;
 }

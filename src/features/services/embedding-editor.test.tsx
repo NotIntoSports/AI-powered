@@ -71,7 +71,6 @@ describe("EmbeddingEditor", () => {
 
     render(<EmbeddingEditor />);
     expect(await screen.findByText(/可以选用已保存的供应商，或自行填写/)).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("配置 ID"), { target: { value: "primary" } });
     fireEvent.change(screen.getByLabelText("供应商"), { target: { value: "openai" } });
     fireEvent.change(screen.getByLabelText("模型"), { target: { value: "embed-3" } });
     fireEvent.change(screen.getByLabelText("维度"), { target: { value: "8" } });
@@ -81,7 +80,7 @@ describe("EmbeddingEditor", () => {
     fireEvent.click(screen.getByRole("button", { name: "保存 Embedding" }));
     await waitFor(() =>
       expect(commands.saveEmbeddingConfig).toHaveBeenCalledWith({
-        id: "primary",
+        id: null,
         providerId: "openai",
         baseUrl: null,
         apiKey: null,
@@ -105,16 +104,15 @@ describe("EmbeddingEditor", () => {
       data: embedding({ providerId: "", baseUrl: "http://127.0.0.1:8080/v1" }),
     });
     render(<EmbeddingEditor />);
-    await screen.findByLabelText("配置 ID");
-    fireEvent.change(screen.getByLabelText("配置 ID"), { target: { value: "primary" } });
+    await screen.findByLabelText("模型");
     fireEvent.change(screen.getByLabelText("供应商"), { target: { value: "" } });
-    fireEvent.change(screen.getByLabelText("接口基址"), { target: { value: "http://127.0.0.1:8080/v1" } });
+    fireEvent.change(screen.getByLabelText("接入地址"), { target: { value: "http://127.0.0.1:8080/v1" } });
     fireEvent.change(screen.getByLabelText("模型"), { target: { value: "BAAI/bge-m3" } });
     fireEvent.change(screen.getByLabelText("维度"), { target: { value: "1024" } });
     fireEvent.click(screen.getByRole("button", { name: "保存 Embedding" }));
     await waitFor(() =>
       expect(commands.saveEmbeddingConfig).toHaveBeenCalledWith({
-        id: "primary",
+        id: null,
         providerId: "",
         baseUrl: "http://127.0.0.1:8080/v1",
         apiKey: null,
@@ -132,8 +130,7 @@ describe("EmbeddingEditor", () => {
     });
     render(<EmbeddingEditor />);
     await screen.findByText("还没有 Embedding 配置。");
-    fireEvent.change(screen.getByLabelText("配置 ID"), { target: { value: "custom" } });
-    fireEvent.change(screen.getByLabelText("接口基址"), { target: { value: "https://embed.test/v1" } });
+    fireEvent.change(screen.getByLabelText("接入地址"), { target: { value: "https://embed.test/v1" } });
     fireEvent.change(screen.getByLabelText("模型"), { target: { value: "embed-model" } });
     const key = screen.getByLabelText(/API Key/) as HTMLInputElement;
     fireEvent.change(key, { target: { value: "embedding-secret" } });

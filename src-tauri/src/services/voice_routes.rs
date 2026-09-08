@@ -15,7 +15,8 @@ use super::{ProviderService, ProviderServiceError};
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[ts(rename_all = "camelCase")]
 pub struct VoiceRouteSaveInput {
-    pub id: String,
+    #[serde(default)]
+    pub id: Option<String>,
     pub name: String,
     pub mode: VoiceRouteMode,
     pub asr_provider_id: Option<String>,
@@ -86,7 +87,9 @@ impl<'a> VoiceRouteService<'a> {
         &self,
         input: VoiceRouteSaveInput,
     ) -> Result<VoiceRouteConfig, VoiceRouteServiceError> {
-        validate_route_input(&input)?;
+        let id = super::ids::resolve_optional_id(input.id.as_deref())
+            .map_err(|_| VoiceRouteServiceError::InvalidId)?;
+        validate_route_fields(&input)?;
         let mut saved = None;
         self.config
             .update(|config| {
@@ -94,11 +97,11 @@ impl<'a> VoiceRouteService<'a> {
                     .speech
                     .voice_routes
                     .iter()
-                    .find(|route| route.id == input.id)
+                    .find(|route| route.id == id)
                     .map(|route| route.config_version.saturating_add(1))
                     .unwrap_or(1);
                 let route = VoiceRouteConfig {
-                    id: input.id.clone(),
+                    id: id.clone(),
                     name: input.name.trim().to_owned(),
                     mode: input.mode,
                     asr_provider_id: clean(input.asr_provider_id.clone()),
@@ -259,15 +262,7 @@ impl<'a> VoiceRouteService<'a> {
     }
 }
 
-fn validate_route_input(input: &VoiceRouteSaveInput) -> Result<(), VoiceRouteServiceError> {
-    let valid_id = !input.id.is_empty()
-        && input.id.len() <= 64
-        && input.id.bytes().all(|byte| {
-            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'-' | b'_')
-        });
-    if !valid_id {
-        return Err(VoiceRouteServiceError::InvalidId);
-    }
+fn validate_route_fields(input: &VoiceRouteSaveInput) -> Result<(), VoiceRouteServiceError> {
     if input.name.trim().is_empty() {
         return Err(VoiceRouteServiceError::FieldsInvalid);
     }
@@ -354,8 +349,8 @@ fn mark_test_failed(
 }
 
 fn validate_stored_route(route: &VoiceRouteConfig) -> Result<(), VoiceRouteServiceError> {
-    validate_route_input(&VoiceRouteSaveInput {
-        id: route.id.clone(),
+    validate_route_fields(&VoiceRouteSaveInput {
+        id: Some(route.id.clone()),
         name: route.name.clone(),
         mode: route.mode,
         asr_provider_id: route.asr_provider_id.clone(),

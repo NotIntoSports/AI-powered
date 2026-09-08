@@ -42,21 +42,21 @@ export function EmbeddingEditor() {
     void reload();
   }, [reload]);
 
-  async function run(action: () => Promise<CommandResult<unknown>>, success: string) {
+  async function run<T>(action: () => Promise<CommandResult<T>>, success: string) {
     setBusy(true);
     try {
       const result = await action();
       await reload();
       if (!result.ok) {
         setMessage(errorText(result.error));
-        return false;
+        return result;
       }
       setMessage(success);
-      return true;
+      return result;
     } catch {
       await reload();
       setMessage("IPC_UNAVAILABLE：本地操作失败");
-      return false;
+      return null;
     } finally {
       setBusy(false);
     }
@@ -66,10 +66,10 @@ export function EmbeddingEditor() {
     event.preventDefault();
     const usingProvider = Boolean(embedding.providerId.trim());
     try {
-      await run(
+      const result = await run(
         () =>
           api.saveEmbeddingConfig({
-            id: embedding.id.trim(),
+            id: optional(embedding.id),
             providerId: embedding.providerId.trim(),
             baseUrl: usingProvider ? null : optional(embedding.baseUrl),
             apiKey: usingProvider ? null : optional(embedding.apiKey),
@@ -79,6 +79,10 @@ export function EmbeddingEditor() {
           }),
         "Embedding 配置已保存，请先测试再启用",
       );
+      if (result?.ok) {
+        setEmbedding((current) => ({ ...current, id: result.data.id, apiKey: "" }));
+        return;
+      }
     } finally {
       setEmbedding((current) => ({ ...current, apiKey: "" }));
     }
@@ -99,16 +103,7 @@ export function EmbeddingEditor() {
       )}
       <div className="configuration-columns">
         <form className="service-form configuration-editor" onSubmit={submit}>
-          <h3>{items.some((item) => item.id === embedding.id) ? "编辑配置" : "添加配置"}</h3>
-          <label>
-            配置 ID
-            <input
-              required
-              pattern="[a-z0-9_-]+"
-              value={embedding.id}
-              onChange={(event) => setEmbedding({ ...embedding, id: event.target.value })}
-            />
-          </label>
+          <h3>{embedding.id && items.some((item) => item.id === embedding.id) ? "编辑配置" : "添加配置"}</h3>
           <label>
             供应商
             <select
@@ -118,7 +113,7 @@ export function EmbeddingEditor() {
               <option value="">不使用供应商，自行填写地址</option>
               {providers.map((item) => (
                 <option key={item.id} value={item.id}>
-                  {item.name || item.id}
+                  {item.name || "未命名供应商"}
                 </option>
               ))}
             </select>
@@ -126,7 +121,7 @@ export function EmbeddingEditor() {
           {!usingProvider && (
             <>
               <label>
-                接口基址
+                接入地址
                 <input
                   required
                   type="url"
@@ -185,17 +180,20 @@ export function EmbeddingEditor() {
         <div className="service-list configuration-list">
           <h3>已配置模型 <span className="configuration-count">{items.length}</span></h3>
           {items.length === 0 && <p className="empty-state">还没有 Embedding 配置。</p>}
-          {items.map((item) => (
+          {items.map((item) => {
+            const providerName = providers.find((provider) => provider.id === item.providerId)?.name;
+            const source = providerName || item.baseUrl || "自定义";
+            return (
             <article className="service-card" key={item.id}>
-              <h3>{item.id}</h3>
+              <h3>{item.modelId}</h3>
               <p>
-                {item.providerId || item.baseUrl || "自定义"} · {item.modelId} · {item.dimensions} 维 · cosine
+                {source} · {item.dimensions} 维 · cosine
               </p>
               <p>{item.ready ? "测试通过" : "尚未就绪"}</p>
               {item.active && <span className="status-badge">当前启用</span>}
               <div className="service-actions">
                 <button
-                  aria-label={"编辑 " + item.id}
+                  aria-label={"编辑 " + item.modelId}
                   disabled={busy}
                   onClick={() =>
                     setEmbedding({
@@ -225,7 +223,8 @@ export function EmbeddingEditor() {
                 </button>
               </div>
             </article>
-          ))}
+            );
+          })}
         </div>
       </div>
     </section>

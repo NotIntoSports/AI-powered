@@ -77,20 +77,24 @@ describe("RoleEditor", () => {
 
     render(<RoleEditor />);
     await screen.findByText("还没有角色。");
-    fireEvent.change(screen.getByLabelText("角色 ID"), { target: { value: "interviewer" } });
     fireEvent.change(screen.getByLabelText("显示名称"), { target: { value: "Interviewer" } });
     fireEvent.change(screen.getByLabelText("系统提示"), { target: { value: "Ask one question" } });
     fireEvent.change(screen.getByLabelText("开场白"), { target: { value: "Hello" } });
     fireEvent.change(screen.getByLabelText("风格说明"), { target: { value: "Concise" } });
     fireEvent.click(screen.getByRole("button", { name: "保存角色" }));
-    await waitFor(() => expect(commands.saveRoleProfile).toHaveBeenCalled());
+    await waitFor(() => expect(commands.saveRoleProfile).toHaveBeenCalledWith({
+      id: null,
+      name: "Interviewer",
+      systemPrompt: "Ask one question",
+      openingMessage: "Hello",
+      styleInstructions: "Concise",
+    }));
     expect(await screen.findByText("Interviewer")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "编辑 Interviewer" }));
     expect((screen.getByLabelText("系统提示") as HTMLTextAreaElement).value).toBe("Ask one question");
-    fireEvent.change(screen.getByLabelText("复制 interviewer 的新 ID"), { target: { value: "copy" } });
     fireEvent.click(screen.getByRole("button", { name: "复制" }));
-    await waitFor(() => expect(commands.copyRoleProfile).toHaveBeenCalledWith({ sourceId: "interviewer", id: "copy" }));
+    await waitFor(() => expect(commands.copyRoleProfile).toHaveBeenCalledWith({ sourceId: "interviewer", id: null }));
     fireEvent.click(screen.getByRole("button", { name: "设为默认" }));
     await waitFor(() => expect(commands.activateRoleProfile).toHaveBeenCalledWith("interviewer"));
     fireEvent.click(screen.getByRole("button", { name: "删除" }));
@@ -110,11 +114,10 @@ describe("RoleEditor", () => {
     });
     render(<RoleEditor />);
     expect(await screen.findByText("当前启用")).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("角色 ID"), { target: { value: "x" } });
     fireEvent.change(screen.getByLabelText("显示名称"), { target: { value: "X" } });
     fireEvent.click(screen.getByRole("button", { name: "保存角色" }));
     expect((await screen.findByRole("status")).textContent).toContain("name：ROLE_PROFILE_FIELDS_INVALID");
-    expect(screen.getByLabelText("角色 ID").getAttribute("maxLength")).toBe("64");
+    expect(screen.queryByLabelText("角色 ID")).toBeNull();
     expect(screen.getByLabelText("系统提示").getAttribute("maxLength")).toBe("32768");
     expect(screen.getByLabelText("开场白").getAttribute("maxLength")).toBe("4096");
     expect(screen.getByLabelText("风格说明").getAttribute("maxLength")).toBe("8192");

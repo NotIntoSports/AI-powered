@@ -17,7 +17,7 @@ use super::{
 
 fn role_input(id: &str) -> RoleProfileSaveInput {
     RoleProfileSaveInput {
-        id: id.into(),
+        id: Some(id.into()),
         name: " Interviewer ".into(),
         system_prompt: " Ask one question ".into(),
         opening_message: " Hello ".into(),
@@ -63,12 +63,12 @@ fn role_copy_clones_content_as_distinct_inactive_version_one_profile() {
     let copied = service
         .copy(RoleProfileCopyInput {
             source_id: "interviewer".into(),
-            id: "panelist".into(),
+            id: Some("panelist".into()),
         })
         .unwrap();
 
     assert_eq!(copied.id, "panelist");
-    assert_eq!(copied.name, source.name);
+    assert_eq!(copied.name, format!("{} 副本", source.name));
     assert_eq!(copied.system_prompt, source.system_prompt);
     assert_eq!(copied.opening_message, source.opening_message);
     assert_eq!(copied.style_instructions, source.style_instructions);
@@ -91,12 +91,48 @@ fn role_copy_rejects_duplicate_destination_id() {
         service
             .copy(RoleProfileCopyInput {
                 source_id: "interviewer".into(),
-                id: "interviewer".into(),
+                id: Some("interviewer".into()),
             })
             .unwrap_err()
             .code(),
         "ROLE_PROFILE_COPY_ID_IN_USE"
     );
+}
+
+#[test]
+fn role_save_generates_uuid_when_id_is_omitted() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = ConfigStore::new(directory.path().join("config.json"));
+    let service = RoleProfileService::new(&config);
+
+    let saved = service
+        .save(RoleProfileSaveInput {
+            id: None,
+            ..role_input("unused")
+        })
+        .unwrap();
+    assert!(uuid::Uuid::parse_str(&saved.id).is_ok());
+    assert_eq!(saved.name, "Interviewer");
+}
+
+#[test]
+fn role_copy_generates_uuid_and_appends_copy_suffix_when_id_is_omitted() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = ConfigStore::new(directory.path().join("config.json"));
+    let service = RoleProfileService::new(&config);
+    let source = service.save(role_input("interviewer")).unwrap();
+
+    let copied = service
+        .copy(RoleProfileCopyInput {
+            source_id: "interviewer".into(),
+            id: None,
+        })
+        .unwrap();
+
+    assert!(uuid::Uuid::parse_str(&copied.id).is_ok());
+    assert_ne!(copied.id, source.id);
+    assert_eq!(copied.name, "Interviewer 副本");
+    assert_eq!(copied.system_prompt, source.system_prompt);
 }
 
 #[test]
@@ -111,7 +147,7 @@ fn role_save_enforces_id_name_and_all_content_length_limits() {
     at_limits.style_instructions = "s".repeat(8 * 1024);
     assert!(service.save(at_limits).is_ok());
 
-    for id in ["", "Uppercase", &"a".repeat(65)] {
+    for id in ["Uppercase", &"a".repeat(65)] {
         assert_eq!(
             service.save(role_input(id)).unwrap_err().code(),
             "ROLE_PROFILE_ID_INVALID"
@@ -236,7 +272,7 @@ fn role_oversized_legacy_profile_stays_quarantined_without_activation_or_copy() 
         service
             .copy(RoleProfileCopyInput {
                 source_id: "legacy-oversized".into(),
-                id: "review-copy".into(),
+                id: Some("review-copy".into()),
             })
             .unwrap_err()
             .code(),
@@ -270,7 +306,7 @@ fn provider_save_keeps_secret_out_of_config_and_discovers_models() {
 
     let saved = service
         .save(ProviderSaveInput {
-            id: "openai".into(),
+            id: Some("openai".into()),
             name: Some("OpenAI compatible".into()),
             base_url: "https://example.test/v1".into(),
             api_key: Some("credential-value".into()),
@@ -286,6 +322,26 @@ fn provider_save_keeps_secret_out_of_config_and_discovers_models() {
 
     let result = service.discover("openai").unwrap();
     assert_eq!(result.models[0].id, "model-a");
+}
+
+#[test]
+fn provider_save_generates_uuid_when_id_is_omitted() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = ConfigStore::new(directory.path().join("config.json"));
+    config.restore_defaults().unwrap();
+    let secrets = SecretService::new("test", Arc::new(MemorySecretStore::default())).unwrap();
+    let service = ProviderService::new(&config, &secrets, &FakeProbe);
+
+    let saved = service
+        .save(ProviderSaveInput {
+            id: None,
+            name: Some("OpenAI compatible".into()),
+            base_url: "https://example.test/v1".into(),
+            api_key: Some("credential-value".into()),
+        })
+        .unwrap();
+    assert!(uuid::Uuid::parse_str(&saved.id).is_ok());
+    assert_eq!(saved.name.as_deref(), Some("OpenAI compatible"));
 }
 
 #[test]
@@ -394,7 +450,7 @@ fn voice_route_requires_test_before_single_activation() {
     let service = super::VoiceRouteService::new(&config, &secrets, &OpenProbe);
     let route = service
         .save(super::VoiceRouteSaveInput {
-            id: "default".into(),
+            id: Some("default".into()),
             name: "Default".into(),
             mode: crate::config::VoiceRouteMode::Cascaded,
             asr_provider_id: Some("asr".into()),
@@ -431,6 +487,38 @@ fn voice_route_requires_test_before_single_activation() {
 }
 
 #[test]
+fn voice_route_save_generates_uuid_when_id_is_omitted() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("config.json");
+    std::fs::write(
+        &path,
+        r#"{"configVersion":1,"models":{"providers":[{"id":"e2e","baseUrl":"https://e2e.test/v1"}]}}"#,
+    )
+    .unwrap();
+    let config = ConfigStore::new(path);
+    let secrets = SecretService::new("test", Arc::new(MemorySecretStore::default())).unwrap();
+    let service = super::VoiceRouteService::new(&config, &secrets, &OpenProbe);
+    let route = service
+        .save(super::VoiceRouteSaveInput {
+            id: None,
+            name: "Generated".into(),
+            mode: crate::config::VoiceRouteMode::E2e,
+            asr_provider_id: None,
+            asr_model_id: None,
+            llm_provider_id: None,
+            llm_model_id: None,
+            tts_provider_id: None,
+            tts_model_id: None,
+            voice_id: None,
+            e2e_provider_id: Some("e2e".into()),
+            e2e_model_id: Some("realtime".into()),
+        })
+        .unwrap();
+    assert!(uuid::Uuid::parse_str(&route.id).is_ok());
+    assert_eq!(route.name, "Generated");
+}
+
+#[test]
 fn e2e_route_rejects_cascaded_fields() {
     let directory = tempfile::tempdir().unwrap();
     let config = ConfigStore::new(directory.path().join("config.json"));
@@ -439,7 +527,7 @@ fn e2e_route_rejects_cascaded_fields() {
     let service = super::VoiceRouteService::new(&config, &secrets, &OpenProbe);
     let error = service
         .save(super::VoiceRouteSaveInput {
-            id: "bad".into(),
+            id: Some("bad".into()),
             name: "Bad".into(),
             mode: crate::config::VoiceRouteMode::E2e,
             asr_provider_id: Some("asr".into()),
@@ -488,7 +576,7 @@ fn voice_route_test_rejects_a_model_missing_from_provider_catalog() {
     let service = super::VoiceRouteService::new(&config, &secrets, &OpenProbe);
     service
         .save(super::VoiceRouteSaveInput {
-            id: "missing-model".into(),
+            id: Some("missing-model".into()),
             name: "Missing model".into(),
             mode: crate::config::VoiceRouteMode::E2e,
             asr_provider_id: None,
@@ -585,7 +673,7 @@ impl EmbeddingProbe for WrongDimensionProbe {
 
 fn embedding_input(id: &str) -> EmbeddingConfigSaveInput {
     EmbeddingConfigSaveInput {
-        id: id.into(),
+        id: Some(id.into()),
         provider_id: "openai".into(),
         base_url: None,
         api_key: None,
@@ -603,7 +691,7 @@ fn seeded_embedding_store() -> (tempfile::TempDir, ConfigStore, SecretService) {
     let providers = ProviderService::new(&config, &secrets, &FakeProbe);
     providers
         .save(ProviderSaveInput {
-            id: "openai".into(),
+            id: Some("openai".into()),
             name: Some("OpenAI compatible".into()),
             base_url: "https://example.test/v1".into(),
             api_key: Some("credential-value".into()),
@@ -676,6 +764,20 @@ fn embedding_save_validates_provider_model_and_dimensions_and_resets_readiness()
             .active_embedding_config_id
             .is_none()
     );
+}
+
+#[test]
+fn embedding_save_generates_uuid_when_id_is_omitted() {
+    let (_directory, config, secrets) = seeded_embedding_store();
+    let service = EmbeddingService::new(&config, &secrets, &ReadyEmbeddingProbe);
+    let saved = service
+        .save(EmbeddingConfigSaveInput {
+            id: None,
+            ..embedding_input("unused")
+        })
+        .unwrap();
+    assert!(uuid::Uuid::parse_str(&saved.id).is_ok());
+    assert_eq!(saved.model_id, "embed-3");
 }
 
 #[test]
@@ -846,7 +948,7 @@ fn embedding_delete_clears_active_id_and_provider_edit_invalidates_references() 
     service.activate("primary").unwrap();
     ProviderService::new(&config, &secrets, &FakeProbe)
         .save(ProviderSaveInput {
-            id: "openai".into(),
+            id: Some("openai".into()),
             name: Some("Renamed".into()),
             base_url: "https://example.test/v2".into(),
             api_key: None,

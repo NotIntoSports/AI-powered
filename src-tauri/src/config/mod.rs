@@ -821,7 +821,7 @@ fn validate_stable_id(id: &str) -> Result<(), ConfigError> {
     Ok(())
 }
 
-fn is_stable_id(id: &str) -> bool {
+pub(crate) fn is_stable_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 64
         && id.bytes().all(|byte| {

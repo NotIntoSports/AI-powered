@@ -12,7 +12,8 @@ use crate::{
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[ts(rename_all = "camelCase")]
 pub struct ProviderSaveInput {
-    pub id: String,
+    #[serde(default)]
+    pub id: Option<String>,
     pub name: Option<String>,
     pub base_url: String,
     pub api_key: Option<String>,
@@ -92,8 +93,9 @@ impl<'a> ProviderService<'a> {
         &self,
         mut input: ProviderSaveInput,
     ) -> Result<ProviderConfig, ProviderServiceError> {
-        validate_provider_id(&input.id)?;
-        let reference = credential_reference(&input.id);
+        let id = super::ids::resolve_optional_id(input.id.as_deref())
+            .map_err(|_| ProviderServiceError::InvalidId)?;
+        let reference = credential_reference(&id);
         let old_secret = self
             .secrets
             .read(&reference)
@@ -110,7 +112,7 @@ impl<'a> ProviderService<'a> {
         }
         let configured = submitted.is_some() || old_secret.is_some();
         let provider = ProviderConfig {
-            id: input.id.clone(),
+            id,
             name: input.name.filter(|name| !name.trim().is_empty()),
             base_url: input.base_url,
             credential: configured.then(|| SecretSlot {
@@ -245,7 +247,9 @@ impl<'a> ProviderService<'a> {
     }
 
     pub fn delete(&self, provider_id: &str) -> Result<(), ProviderServiceError> {
-        validate_provider_id(provider_id)?;
+        if !crate::config::is_stable_id(provider_id) {
+            return Err(ProviderServiceError::InvalidId);
+        }
         let reference = credential_reference(provider_id);
         let provider_exists = self
             .config
@@ -308,19 +312,6 @@ fn rollback_secret(
         secrets.delete(reference)?;
     }
     Ok(())
-}
-
-fn validate_provider_id(id: &str) -> Result<(), ProviderServiceError> {
-    let valid = !id.is_empty()
-        && id.len() <= 64
-        && id.bytes().all(|byte| {
-            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'-' | b'_')
-        });
-    if valid {
-        Ok(())
-    } else {
-        Err(ProviderServiceError::InvalidId)
-    }
 }
 
 fn credential_reference(provider_id: &str) -> String {

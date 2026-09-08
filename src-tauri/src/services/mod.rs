@@ -1,4 +1,5 @@
 mod embeddings;
+mod ids;
 mod livekit;
 mod materials;
 mod providers;

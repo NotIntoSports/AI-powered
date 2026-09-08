@@ -84,7 +84,7 @@ describe("ServicesPage", () => {
     expect(document.getElementById("services-panel-providers")?.hidden).toBe(true);
 
     fireEvent.click(screen.getByRole("button", { name: "Embedding" }));
-    fireEvent.change(screen.getByLabelText("配置 ID"), { target: { value: "embedding-draft" } });
+    fireEvent.change(screen.getByLabelText("模型"), { target: { value: "embedding-draft" } });
     fireEvent.click(screen.getByRole("button", { name: "LiveKit" }));
     fireEvent.change(screen.getByLabelText("服务 URL"), { target: { value: "wss://draft.test" } });
     fireEvent.click(screen.getByRole("button", { name: "模型供应商" }));
@@ -92,7 +92,7 @@ describe("ServicesPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "语音线路" }));
     expect((screen.getByLabelText("线路名称") as HTMLInputElement).value).toBe("草稿线路");
     fireEvent.click(screen.getByRole("button", { name: "Embedding" }));
-    expect((screen.getByLabelText("配置 ID") as HTMLInputElement).value).toBe("embedding-draft");
+    expect((screen.getByLabelText("模型") as HTMLInputElement).value).toBe("embedding-draft");
     fireEvent.click(screen.getByRole("button", { name: "LiveKit" }));
     expect((screen.getByLabelText("服务 URL") as HTMLInputElement).value).toBe("wss://draft.test");
   });
@@ -104,13 +104,14 @@ describe("ServicesPage", () => {
     });
     render(<ServicesPage />);
     await screen.findByRole("heading", { name: "模型供应商" });
-    fireEvent.change(screen.getByLabelText("供应商 ID"), { target: { value: "openai" } });
     fireEvent.change(screen.getByLabelText("显示名称"), { target: { value: "OpenAI" } });
-    fireEvent.change(screen.getAllByLabelText("接口基址")[0], { target: { value: "https://example.test/v1" } });
+    fireEvent.change(screen.getAllByLabelText("接入地址")[0], { target: { value: "https://example.test/v1" } });
     const key = screen.getAllByLabelText(/API Key/)[0] as HTMLInputElement;
     fireEvent.change(key, { target: { value: "secret-marker" } });
     fireEvent.click(screen.getByRole("button", { name: "保存供应商" }));
-    await waitFor(() => expect(commands.saveModelProvider).toHaveBeenCalled());
+    await waitFor(() => expect(commands.saveModelProvider).toHaveBeenCalledWith({
+      id: null, name: "OpenAI", baseUrl: "https://example.test/v1", apiKey: "secret-marker",
+    }));
     expect(key.value).toBe("");
     expect(document.body.textContent).not.toContain("secret-marker");
   });
@@ -134,7 +135,7 @@ describe("ServicesPage", () => {
     });
     render(<ServicesPage />);
     fireEvent.click(await screen.findByRole("button", { name: "编辑 OpenAI" }));
-    expect((screen.getByLabelText("供应商 ID") as HTMLInputElement).value).toBe("openai");
+    expect((screen.getByLabelText("显示名称") as HTMLInputElement).value).toBe("OpenAI");
     expect((screen.getAllByLabelText(/API Key/)[0] as HTMLInputElement).value).toBe("");
   });
 
@@ -173,7 +174,7 @@ describe("ServicesPage", () => {
     });
     render(<ServicesPage />);
     fireEvent.click(await screen.findByRole("button", { name: "测试 OpenAI" }));
-    expect(await screen.findAllByText("连接超时，请检查接口基址或网络")).not.toHaveLength(0);
+    expect(await screen.findAllByText("连接超时，请检查接入地址或网络")).not.toHaveLength(0);
   });
 
   it("offers discovered models to voice route fields", async () => {
@@ -223,7 +224,6 @@ describe("ServicesPage", () => {
     render(<ServicesPage />);
     await screen.findByRole("button", { name: "编辑 OpenAI" });
     fireEvent.click(screen.getByRole("button", { name: "语音线路" }));
-    fireEvent.change(screen.getByLabelText("线路 ID"), { target: { value: "realtime" } });
     fireEvent.change(screen.getByLabelText("线路名称"), { target: { value: "实时线路" } });
     fireEvent.change(screen.getByLabelText("ASR 模型"), { target: { value: "discarded-asr" } });
     fireEvent.change(screen.getByLabelText("模式"), { target: { value: "e2e" } });
@@ -232,7 +232,7 @@ describe("ServicesPage", () => {
     fireEvent.change(screen.getByLabelText("音色 ID（可选）"), { target: { value: "alloy" } });
     fireEvent.click(screen.getByRole("button", { name: "保存语音线路" }));
     await waitFor(() => expect(commands.saveSpeechRoute).toHaveBeenCalledWith({
-      id: "realtime", name: "实时线路", mode: "e2e",
+      id: null, name: "实时线路", mode: "e2e",
       asrProviderId: null, asrModelId: null, llmProviderId: null, llmModelId: null,
       ttsProviderId: null, ttsModelId: null, voiceId: "alloy",
       e2eProviderId: "openai", e2eModelId: "realtime-model",

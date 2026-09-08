@@ -32,6 +32,12 @@ function sessionDate(session: SessionSummary) {
   });
 }
 
+function roleLabel(roleProfileId: string, names: Record<string, string>) {
+  const id = roleProfileId.trim();
+  if (!id) return "未指定";
+  return names[id] || "已删除角色";
+}
+
 export function RecordsList() {
   const [items, setItems] = useState<SessionSummary[]>([]);
   const [detail, setDetail] = useState<SessionDetail | null>(null);
@@ -39,16 +45,31 @@ export function RecordsList() {
   const [busy, setBusy] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [roleNames, setRoleNames] = useState<Record<string, string>>({});
 
   const reload = useCallback(async () => {
     try {
-      const result = await api.listSessions();
-      if (result.ok) {
-        setItems(result.data);
+      const [sessionsResult, configResult] = await Promise.allSettled([
+        api.listSessions(),
+        api.getConfigPublic(),
+      ]);
+      if (configResult.status === "fulfilled" && configResult.value.ok) {
+        setRoleNames(
+          Object.fromEntries(
+            configResult.value.data.roleProfiles.map((profile) => [profile.id, profile.name]),
+          ),
+        );
+      }
+      if (sessionsResult.status !== "fulfilled") {
+        setMessage("IPC_UNAVAILABLE：无法读取会话记录");
+        return;
+      }
+      if (sessionsResult.value.ok) {
+        setItems(sessionsResult.value.data);
         setLoaded(true);
         setMessage("");
       } else {
-        setMessage(errorText(result.error));
+        setMessage(errorText(sessionsResult.value.error));
       }
     } catch {
       setMessage("IPC_UNAVAILABLE：无法读取会话记录");
@@ -151,7 +172,7 @@ export function RecordsList() {
                 {sessionStatus[detail.session.status] ?? detail.session.status}
               </span>
             </div>
-            <p className="library-meta">角色 {detail.session.roleProfileId || "未指定"}</p>
+            <p className="library-meta">角色 {roleLabel(detail.session.roleProfileId, roleNames)}</p>
             <p className="record-id">会话 ID <code>{detail.session.id}</code></p>
           </header>
           {detail.turns.length === 0 && <p className="empty-state">本次会话还没有对话内容。</p>}
@@ -197,7 +218,7 @@ export function RecordsList() {
                   <span className="status-badge" data-tone={item.status === "failed" ? "danger" : "neutral"}>
                     {sessionStatus[item.status] ?? item.status}
                   </span>
-                  <span>角色 {item.roleProfileId || "未指定"}</span>
+                  <span>角色 {roleLabel(item.roleProfileId, roleNames)}</span>
                 </div>
                 <p className="record-id">会话 ID <code>{item.id}</code></p>
               </div>

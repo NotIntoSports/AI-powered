@@ -1436,7 +1436,7 @@ mod tests {
         let secrets = SecretService::new("test", Arc::new(MemorySecretStore::default())).unwrap();
         ProviderService::new(&config, &secrets, &NoopProviderProbe)
             .save(ProviderSaveInput {
-                id: "openai".into(),
+                id: Some("openai".into()),
                 name: Some("OpenAI compatible".into()),
                 base_url: "https://embed.example.test/v1".into(),
                 api_key: Some("credential-value".into()),
@@ -1445,7 +1445,7 @@ mod tests {
         let embeddings = EmbeddingService::new(&config, &secrets, &probe);
         embeddings
             .save(EmbeddingConfigSaveInput {
-                id: "primary".into(),
+                id: Some("primary".into()),
                 provider_id: "openai".into(),
                 base_url: None,
                 api_key: None,
