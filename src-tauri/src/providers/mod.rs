@@ -3,6 +3,7 @@ mod embedding;
 mod livekit;
 mod openai_compatible;
 mod openai_realtime;
+pub mod web_search;
 
 use std::fmt;
 

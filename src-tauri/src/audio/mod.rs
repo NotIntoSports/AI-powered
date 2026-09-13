@@ -1,5 +1,8 @@
 pub mod capture;
+pub mod monitor;
 pub mod pcm;
+pub mod playback;
+pub mod segmenter;
 
 pub use capture::{
     AudioCapture, AudioError, NoopSink, PlaybackSink, RecordingSink, SidecarPoll,

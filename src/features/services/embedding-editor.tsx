@@ -18,7 +18,7 @@ const emptyEmbedding = {
 
 const optional = (value: string) => value.trim() || null;
 
-export function EmbeddingEditor() {
+export function EmbeddingEditor({ focusId = null }: { focusId?: string | null }) {
   const [config, setConfig] = useState<PublicConfig | null>(null);
   const [message, setMessage] = useState("正在读取本地配置…");
   const [busy, setBusy] = useState(false);
@@ -41,6 +41,25 @@ export function EmbeddingEditor() {
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  useEffect(() => {
+    if (!focusId || !config) return;
+    const item = config.knowledge.embeddingConfigs.find((entry) => entry.id === focusId);
+    if (!item) {
+      setEmbedding(emptyEmbedding);
+      setMessage(`找不到 Embedding 配置（${focusId}），请重新选择。`);
+      return;
+    }
+    setEmbedding({
+      id: item.id,
+      providerId: item.providerId,
+      baseUrl: item.baseUrl ?? "",
+      apiKey: "",
+      modelId: item.modelId,
+      dimensions: String(item.dimensions),
+      normalized: item.normalized,
+    });
+  }, [focusId, config]);
 
   async function run<T>(action: () => Promise<CommandResult<T>>, success: string) {
     setBusy(true);

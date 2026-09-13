@@ -1,4 +1,5 @@
 mod locator;
+pub mod presets;
 mod store;
 
 #[cfg(test)]
@@ -57,6 +58,9 @@ pub struct ApplicationConfig {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[ts(rename_all = "camelCase")]
 pub struct ProviderConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub web_capability: Option<crate::providers::web_search::WebCapability>,
     pub id: String,
     #[serde(default)]
     pub name: Option<String>,
@@ -172,12 +176,39 @@ pub enum EmbeddingDistance {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[ts(rename_all = "camelCase")]
+pub enum RoleScenario {
+    Interviewer,
+    Hr,
+    Candidate,
+    MeetingAssistant,
+    LivestreamPresenter,
+}
+
+impl RoleScenario {
+    pub fn from_preset_id(id: &str) -> Option<Self> {
+        match id {
+            "preset-interviewer" => Some(Self::Interviewer),
+            "preset-hr" => Some(Self::Hr),
+            "preset-candidate" => Some(Self::Candidate),
+            "preset-meeting" => Some(Self::MeetingAssistant),
+            "preset-presenter" => Some(Self::LivestreamPresenter),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
 pub struct RoleProfileConfig {
     pub id: String,
     pub name: String,
     pub system_prompt: String,
     pub opening_message: String,
     pub style_instructions: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub scenario: Option<RoleScenario>,
     pub active: bool,
     pub config_version: u32,
 }
@@ -319,6 +350,7 @@ impl From<RoleProfileInput> for RoleProfileConfig {
                 system_prompt: profile.instructions,
                 opening_message: String::new(),
                 style_instructions: String::new(),
+                scenario: None,
                 active: false,
                 config_version: 0,
             },

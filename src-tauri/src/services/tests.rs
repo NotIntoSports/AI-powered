@@ -306,6 +306,7 @@ fn provider_save_keeps_secret_out_of_config_and_discovers_models() {
 
     let saved = service
         .save(ProviderSaveInput {
+            web_capability: None,
             id: Some("openai".into()),
             name: Some("OpenAI compatible".into()),
             base_url: "https://example.test/v1".into(),
@@ -334,6 +335,7 @@ fn provider_save_generates_uuid_when_id_is_omitted() {
 
     let saved = service
         .save(ProviderSaveInput {
+            web_capability: None,
             id: None,
             name: Some("OpenAI compatible".into()),
             base_url: "https://example.test/v1".into(),
@@ -358,6 +360,91 @@ fn provider_delete_rejects_referenced_provider() {
     let service = ProviderService::new(&config, &secrets, &FakeProbe);
 
     assert_eq!(service.delete("p1").unwrap_err().code(), "PROVIDER_IN_USE");
+    let dependencies = service.dependencies("p1").unwrap();
+    assert_eq!(dependencies.len(), 1);
+    assert_eq!(dependencies[0].id, "r1");
+    assert_eq!(dependencies[0].name, "route");
+    assert_eq!(dependencies[0].kind, "voiceRoute");
+    config
+        .update(|config| {
+            config.speech.voice_routes.clear();
+            Ok(())
+        })
+        .unwrap();
+    assert!(service.dependencies("p1").unwrap().is_empty());
+    service.delete("p1").unwrap();
+    let reopened = ConfigStore::new(directory.path().join("config.json"));
+    assert!(reopened.load().unwrap().models.providers.is_empty());
+}
+
+#[test]
+fn provider_delete_sees_references_added_after_dependency_check() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("config.json");
+    std::fs::write(
+        &path,
+        r#"{"configVersion":1,"models":{"providers":[{"id":"p1","baseUrl":"https://example.test"}]}}"#,
+    )
+    .unwrap();
+    let config = ConfigStore::new(path);
+    let secrets = SecretService::new("test", Arc::new(MemorySecretStore::default())).unwrap();
+    let service = ProviderService::new(&config, &secrets, &FakeProbe);
+    assert!(service.dependencies("p1").unwrap().is_empty());
+    config
+        .update(|config| {
+            config
+                .speech
+                .voice_routes
+                .push(crate::config::VoiceRouteConfig {
+                    id: "r1".into(),
+                    name: "route".into(),
+                    mode: crate::config::VoiceRouteMode::E2e,
+                    asr_provider_id: None,
+                    asr_model_id: None,
+                    llm_provider_id: None,
+                    llm_model_id: None,
+                    tts_provider_id: None,
+                    tts_model_id: None,
+                    voice_id: None,
+                    e2e_provider_id: Some("p1".into()),
+                    e2e_model_id: Some("m1".into()),
+                    active: false,
+                    ready: false,
+                    status: None,
+                    config_version: 1,
+                });
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(service.delete("p1").unwrap_err().code(), "PROVIDER_IN_USE");
+    assert_eq!(service.dependencies("p1").unwrap().len(), 1);
+}
+
+#[test]
+fn provider_delete_keeps_provider_when_config_write_fails() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("config.json");
+    std::fs::write(
+        &path,
+        r#"{"configVersion":1,"models":{"providers":[{"id":"p1","baseUrl":"https://example.test"}]}}"#,
+    )
+    .unwrap();
+    let config = ConfigStore::new(path.clone());
+    let secrets = SecretService::new("test", Arc::new(MemorySecretStore::default())).unwrap();
+    let service = ProviderService::new(&config, &secrets, &FakeProbe);
+    let mut permissions = std::fs::metadata(&path).unwrap().permissions();
+    permissions.set_readonly(true);
+    std::fs::set_permissions(&path, permissions).unwrap();
+    let error = service.delete("p1").unwrap_err();
+    #[allow(clippy::permissions_set_readonly_false)]
+    {
+        let mut permissions = std::fs::metadata(&path).unwrap().permissions();
+        permissions.set_readonly(false);
+        std::fs::set_permissions(&path, permissions).unwrap();
+    }
+    assert_eq!(error.code(), "CONFIG_WRITE_FAILED");
+    let reopened = ConfigStore::new(path);
+    assert_eq!(reopened.load().unwrap().models.providers.len(), 1);
 }
 
 #[test]
@@ -382,6 +469,45 @@ fn provider_delete_rejects_provider_referenced_only_by_embedding_config() {
     let service = ProviderService::new(&config, &secrets, &FakeProbe);
 
     assert_eq!(service.delete("p1").unwrap_err().code(), "PROVIDER_IN_USE");
+    let dependencies = service.dependencies("p1").unwrap();
+    assert_eq!(dependencies.len(), 1);
+    assert_eq!(dependencies[0].id, "embedding-1");
+    assert_eq!(dependencies[0].kind, "embedding");
+}
+
+#[test]
+fn provider_cleanup_can_retry_after_config_is_already_deleted() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("config.json");
+    let config = ConfigStore::new(path.clone());
+    let backend = Arc::new(ScriptedSecretStore::new());
+    let secrets = SecretService::new("test", backend.clone()).unwrap();
+    let service = ProviderService::new(&config, &secrets, &FakeProbe);
+    service
+        .save(ProviderSaveInput {
+            id: Some("p1".into()),
+            name: Some("test".into()),
+            base_url: "https://example.test".into(),
+            api_key: Some("synthetic-secret".into()),
+            web_capability: None,
+        })
+        .unwrap();
+    *backend.fail_delete_suffix.lock().unwrap() = Some("api-key".into());
+    assert_eq!(
+        service.delete("p1").unwrap_err().code(),
+        "SECRET_CLEANUP_FAILED"
+    );
+    assert!(
+        ConfigStore::new(path)
+            .load()
+            .unwrap()
+            .models
+            .providers
+            .is_empty()
+    );
+    *backend.fail_delete_suffix.lock().unwrap() = None;
+    service.delete("p1").unwrap();
+    assert!(!secrets.status("providers/p1/api-key").unwrap().configured);
 }
 
 struct OpenProbe;
@@ -691,6 +817,7 @@ fn seeded_embedding_store() -> (tempfile::TempDir, ConfigStore, SecretService) {
     let providers = ProviderService::new(&config, &secrets, &FakeProbe);
     providers
         .save(ProviderSaveInput {
+            web_capability: None,
             id: Some("openai".into()),
             name: Some("OpenAI compatible".into()),
             base_url: "https://example.test/v1".into(),
@@ -827,7 +954,12 @@ fn embedding_save_accepts_custom_url_without_provider() {
         .unwrap();
     assert!(saved.provider_id.is_empty());
     assert_eq!(saved.base_url.as_deref(), Some("http://127.0.0.1:8080/v1"));
-    assert!(saved.credential.as_ref().is_some_and(|slot| slot.configured));
+    assert!(
+        saved
+            .credential
+            .as_ref()
+            .is_some_and(|slot| slot.configured)
+    );
     service.test("primary").unwrap();
     let captured = calls.lock().unwrap();
     assert_eq!(captured[0].0, "http://127.0.0.1:8080/v1");
@@ -948,6 +1080,7 @@ fn embedding_delete_clears_active_id_and_provider_edit_invalidates_references() 
     service.activate("primary").unwrap();
     ProviderService::new(&config, &secrets, &FakeProbe)
         .save(ProviderSaveInput {
+            web_capability: None,
             id: Some("openai".into()),
             name: Some("Renamed".into()),
             base_url: "https://example.test/v2".into(),

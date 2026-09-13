@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
-import type { AgentCommandInput, AgentCommandResult, CommandResult, DiagnosticsExportResult, EmbeddingConfig, EmbeddingConfigSaveInput, EmbeddingTestResult, FoundationStatus, LegacyMigrationStatus, LegacySessionImport, LiveKitConfig, LiveKitJoinToken, LiveKitSettingsSaveInput, LiveKitTestResult, MaterialIndexResult, MaterialSearchHit, MaterialSummary, ModelDiscoveryResult, ProviderConfig, ProviderSaveInput, ProviderTestResult, PublicConfig, RoleProfileConfig, RoleProfileCopyInput, RoleProfileSaveInput, RuntimeStatus, SessionDetail, SessionExportResult, SessionStartResult, SessionSummary, SessionTurnView, StartupState, VoiceRouteConfig, VoiceRouteSaveInput, VoiceRouteTestResult } from "../generated/bindings";
+import type { AgentCommandInput, AgentCommandResult, CommandResult, DiagnosticsExportResult, EmbeddingConfig, EmbeddingConfigSaveInput, EmbeddingTestResult, FoundationStatus, LegacyMigrationStatus, LegacySessionImport, LiveKitConfig, LiveKitJoinToken, LiveKitSettingsSaveInput, LiveKitTestResult, LivestreamDraftInput, LivestreamGenerateInput, LivestreamRuntime, MaterialIndexResult, MaterialSearchHit, MaterialSummary, ModelDiscoveryResult, ObsRuntimeStatus, ProviderConfig, ProviderSaveInput, ProviderTestResult, PublicConfig, RoleProfileConfig, RoleProfileCopyInput, RoleProfileSaveInput, RuntimeStatus, SecretStatus, SessionDetail, SessionExportResult, SessionStartResult, SessionSummary, SessionTurnView, StartupState, VoiceRouteConfig, VoiceRouteSaveInput, VoiceRouteTestResult } from "../generated/bindings";
 
 export function getFoundationStatus() {
   return invoke<CommandResult<FoundationStatus>>("foundation_get_status");
@@ -44,6 +44,10 @@ export function activateModelProvider(providerId: string) {
 
 export function deleteModelProvider(providerId: string) {
   return invoke<CommandResult<FoundationStatus>>("model_provider_delete", { providerId });
+}
+
+export function getModelProviderDependencies(providerId: string) {
+  return invoke<CommandResult<import("../generated/bindings").ProviderDependency[]>>("model_provider_dependencies", { providerId });
 }
 
 export function saveSpeechRoute(input: VoiceRouteSaveInput) {
@@ -142,12 +146,32 @@ export function indexMaterials() {
   return invoke<CommandResult<MaterialIndexResult>>("material_index");
 }
 
-export function startSession(transportMode?: "direct" | "livekit") {
-  return invoke<CommandResult<SessionStartResult>>("session_start", { transportMode });
+export function listMeetingProcesses() {
+  return invoke<CommandResult<import("../generated/bindings").MeetingProcess[]>>("meeting_process_list");
+}
+
+export function listAudioOutputs() {
+  return invoke<CommandResult<import("../generated/bindings").AudioOutputDevice[]>>("audio_output_list");
+}
+
+export function getVirtualAudioStatus() {
+  return invoke<CommandResult<import("../generated/bindings").VirtualAudioPreparation>>("virtual_audio_status");
+}
+
+export function installVirtualAudio() {
+  return invoke<CommandResult<import("../generated/bindings").VirtualAudioPreparation>>("virtual_audio_install");
+}
+
+export function startSession(transportMode?: "direct" | "livekit", selection?: { roleProfileId: string; voiceRouteId: string; allowWebSearch?: boolean; meetingPid?: number; outputDeviceId?: string }) {
+  return invoke<CommandResult<SessionStartResult>>("session_start", { transportMode, ...selection });
 }
 
 export function stopSession() {
   return invoke<CommandResult<SessionSummary>>("session_stop");
+}
+
+export function openWebSource(url: string) {
+  return invoke<CommandResult<FoundationStatus>>("open_web_source", { url });
 }
 
 export function setSessionMode(mode: "ai_active" | "operator_speaking" | "paused" | "muted") {
@@ -174,10 +198,58 @@ export function finalizeSessionUtterance(text: string) {
   return invoke<CommandResult<SessionTurnView>>("session_finalize_utterance", { text });
 }
 
+export function triggerMeetingAssistant() {
+  return invoke<CommandResult<SessionTurnView>>("session_trigger_assistant");
+}
+
 export function sessionAgentCommand(input: AgentCommandInput) {
   return invoke<CommandResult<AgentCommandResult>>("session_agent_command", { input });
 }
 
 export function getRuntimeStatus() {
   return invoke<CommandResult<RuntimeStatus>>("runtime_get_status");
+}
+
+export function isSessionAudioReady() {
+  return invoke<CommandResult<FoundationStatus>>("session_audio_ready");
+}
+
+export function createLivestreamDraft(input: LivestreamDraftInput) {
+  return invoke<CommandResult<LivestreamRuntime>>("livestream_create_draft", { input });
+}
+
+export function generateLivestream(input: LivestreamGenerateInput) {
+  return invoke<CommandResult<LivestreamRuntime>>("livestream_generate", { input });
+}
+
+export function getLivestream() {
+  return invoke<CommandResult<LivestreamRuntime>>("livestream_get");
+}
+
+export function controlLivestream(action: "confirm" | "start" | "pause" | "takeover" | "resume" | "previous" | "next" | "replay" | "complete") {
+  return invoke<CommandResult<LivestreamRuntime>>("livestream_control", { action });
+}
+
+export function insertLivestreamQuestion(question: string) {
+  return invoke<CommandResult<LivestreamRuntime>>("livestream_insert_question", { question });
+}
+
+export function getObsRuntimeStatus() {
+  return invoke<CommandResult<ObsRuntimeStatus>>("obs_runtime_status");
+}
+
+export function startObsVirtualCamera() {
+  return invoke<CommandResult<ObsRuntimeStatus>>("obs_virtual_camera_start");
+}
+
+export function stopObsVirtualCamera() {
+  return invoke<CommandResult<ObsRuntimeStatus>>("obs_virtual_camera_stop");
+}
+
+export function getObsPasswordStatus() {
+  return invoke<CommandResult<SecretStatus>>("obs_password_status");
+}
+
+export function saveObsPassword(password: string) {
+  return invoke<CommandResult<SecretStatus>>("obs_password_save", { password });
 }

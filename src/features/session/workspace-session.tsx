@@ -4,16 +4,56 @@ import { ArrowUp, Bot, ChevronDown, FileText, Hand, MessageSquare, MicOff, Play,
 import * as api from "../../api/commands";
 import "../../styles/workspace.css";
 import { connectLiveKitRoom, disconnectLiveKitRoom } from "./livekit-room";
+import { PreflightIssues } from "./preflight-issues";
 import type {
   AgentCommandInput,
   CommandResult,
   RuntimeStatus,
   SessionReplyEvent,
   SessionTranscriptEvent,
+  PreflightIssue,
+  PublicConfig,
+  WebSource,
+  MeetingProcess,
+  AudioOutputDevice,
+  VirtualAudioPreparation,
+  RoleScenario,
 } from "../../generated/bindings";
 
+const PRESET_SCENARIOS: Record<string, RoleScenario> = {
+  "preset-interviewer": "interviewer",
+  "preset-hr": "hr",
+  "preset-candidate": "candidate",
+  "preset-meeting": "meetingAssistant",
+  "preset-presenter": "livestreamPresenter",
+};
+
+const MEETING_NAMES: Record<string, string> = {
+  "teams.exe": "Microsoft Teams", "ms-teams.exe": "Microsoft Teams",
+  "wemeetapp.exe": "腾讯会议", "feishu.exe": "飞书", "lark.exe": "Lark",
+  "dingtalk.exe": "钉钉", "zoom.exe": "Zoom",
+};
+
+const PREPARATION_PHASES: Record<string, string> = {
+  checking: "检测安装环境", downloading: "下载安装包", verifying: "校验安装包和签名",
+  authorizing: "等待 Windows 管理员授权", installing: "安装驱动", rechecking: "重新检测音频端点",
+};
+
+function roleScenario(config: PublicConfig | null, roleId: string): RoleScenario | undefined {
+  return config?.roleProfiles.find((role) => role.id === roleId)?.scenario ?? PRESET_SCENARIOS[roleId];
+}
+
 const errorText = (error: { code: string; message: string; field?: string | null }) =>
-  `${error.field ? error.field + "：" : ""}${error.code}：${error.message}`;
+  ({ SESSION_SIDECAR_MISSING: "缺少 AudioBridge 音频组件，请安装或修复音频组件后重试。",
+    MEETING_PROCESS_NOT_AVAILABLE: "所选会议已退出或不再可用，请刷新会议进程。",
+    SESSION_SIDECAR_INVALID_PID: "请选择有效的会议进程。",
+    SESSION_SIDECAR_SPAWN_FAILED: "音频组件启动失败，请检查安装后重试。",
+    PLAYBACK_FAILED: "语音未播放成功，文字回答已保留。请检查所选音频设备。",
+    PLAYBACK_START_FAILED: "无法启动语音播放，请检查 AudioBridge 音频组件。",
+    PLAYBACK_TIMEOUT: "语音播放超时，已停止输出。",
+    PLAYBACK_CANCELLED: "语音播放已取消。",
+    PLAYBACK_NOT_CONFIRMED: "音频组件未确认播放完成，不能标记为已播报。文字回答已保留。",
+  }[error.code] ?? `${error.field ? error.field + "：" : ""}${error.code}：${error.message}`);
 
 const ACTIVE_PHASES = new Set([
   "preparing",
@@ -85,6 +125,91 @@ export function WorkspaceSession({
   const [reply, setReply] = useState("");
   const [unusedMaterials, setUnusedMaterials] = useState(false);
   const [message, setMessage] = useState("正在读取会话状态…");
+  const [issues, setIssues] = useState<PreflightIssue[]>([]);
+  const [config, setConfig] = useState<PublicConfig | null>(null);
+  const [roleProfileId, setRoleProfileId] = useState("");
+  const [voiceRouteId, setVoiceRouteId] = useState("");
+  const [allowWebSearch, setAllowWebSearch] = useState(false);
+  const [webSources, setWebSources] = useState<WebSource[]>([]);
+  const [webDegraded, setWebDegraded] = useState(false);
+  const [pendingConfirmation, setPendingConfirmation] = useState(false);
+  const [confirmationText, setConfirmationText] = useState("");
+  const [inputSource, setInputSource] = useState("text");
+  const [meetingProcesses, setMeetingProcesses] = useState<MeetingProcess[]>([]);
+  const [meetingPid, setMeetingPid] = useState("");
+  const [audioOutputs, setAudioOutputs] = useState<AudioOutputDevice[]>([]);
+  const [outputDeviceId, setOutputDeviceId] = useState("");
+  const [virtualAudio, setVirtualAudio] = useState<VirtualAudioPreparation | null>(null);
+  const [installingAudio, setInstallingAudio] = useState(false);
+  const [audioPreparationPhase, setAudioPreparationPhase] = useState("checking");
+  const [audioRetryBlocked, setAudioRetryBlocked] = useState(false);
+  const [audioAttempted, setAudioAttempted] = useState(false);
+  useEffect(() => {
+    let disposed = false;
+    let unlisten = () => {};
+    Promise.resolve(listen<string>("virtual_audio.preparation.v1", (phase) => {
+      if (!disposed && phase in PREPARATION_PHASES) setAudioPreparationPhase(phase);
+    })).then((cleanup) => { if (disposed) cleanup(); else unlisten = cleanup; }).catch(() => {});
+    return () => { disposed = true; unlisten(); };
+  }, [listen]);
+  async function refreshVirtualAudio() {
+    try {
+      const result = await api.getVirtualAudioStatus();
+      if (!result.ok) { setVirtualAudio(null); setMessage(errorText(result.error)); return; }
+      setVirtualAudio(result.data);
+      setAudioRetryBlocked(result.data.state === "installing");
+      setOutputDeviceId(result.data.renderEndpointId ?? "");
+    } catch { setVirtualAudio(null); setMessage("无法检测虚拟声卡。"); }
+  }
+  async function installVirtualAudio() {
+    if (installingAudio || audioRetryBlocked) return;
+    setInstallingAudio(true); setAudioAttempted(true); setAudioPreparationPhase("checking"); setMessage("");
+    try {
+      const result = await api.installVirtualAudio();
+      if (!result.ok) {
+        setAudioRetryBlocked(["PREREQUISITE_TIMEOUT", "PREREQUISITE_INSTALL_BUSY"].includes(result.error.code));
+        setMessage(result.error.message);
+        return;
+      }
+      setVirtualAudio(result.data); setOutputDeviceId(result.data.renderEndpointId ?? "");
+      setAudioRetryBlocked(result.data.diagnostic?.retryAllowed === false);
+      setMessage(result.data.detail);
+    } catch { setMessage("虚拟声卡安装失败，请稍后重试。"); }
+    finally { setInstallingAudio(false); }
+  }
+  async function refreshAudioOutputs() {
+    setOutputDeviceId("");
+    try {
+      const result = await api.listAudioOutputs();
+      if (result.ok) setAudioOutputs(result.data);
+      else { setAudioOutputs([]); setMessage(errorText(result.error)); }
+    } catch { setAudioOutputs([]); setMessage("无法读取音频输出设备。"); }
+  }
+  async function refreshMeetings() {
+    setMeetingPid("");
+    try {
+      const result = await api.listMeetingProcesses();
+      if (!result.ok) { setMeetingProcesses([]); setMessage(result.error.message); return; }
+      setMeetingProcesses(result.data);
+      setMeetingPid(result.data.length === 1 ? String(result.data[0].pid) : "");
+      if (!result.data.length) setMessage("未检测到会议窗口，请打开 Teams、腾讯会议、飞书、钉钉或 Zoom 后刷新。");
+    } catch { setMeetingProcesses([]); setMessage("无法检测会议进程，请稍后重试。"); }
+  }
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const result = await api.getConfigPublic();
+        if (!cancelled && result.ok) {
+          setConfig(result.data);
+          setRoleProfileId(result.data.activeRoleProfileId ?? "");
+          setVoiceRouteId(result.data.speech.activeVoiceRouteId ?? "");
+          setAllowWebSearch(roleScenario(result.data, result.data.activeRoleProfileId ?? "") === "meetingAssistant");
+        }
+      } catch { /* The runtime preflight supplies actionable configuration errors. */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
   const [busy, setBusy] = useState(false);
   const [utterance, setUtterance] = useState("");
   const [sayText, setSayText] = useState("");
@@ -107,8 +232,11 @@ export function WorkspaceSession({
     setMode(next.mode);
     setUnusedMaterials(next.unusedMaterials);
     setRevision(next.revision);
+    if (next.mode !== "ai_active") {
+      setPendingConfirmation(false);
+    }
     if (next.lastErrorCode) {
-      setMessage(`runtime：${next.lastErrorCode}：会话运行时错误`);
+      setMessage(errorText({ code: next.lastErrorCode, message: "会话运行时错误" }));
     }
   }, []);
 
@@ -142,6 +270,12 @@ export function WorkspaceSession({
               setTranscript(last.userText);
               setReply(last.assistantText);
               setUnusedMaterials(!last.materialsUsed);
+              setWebSources(last.webSources ?? []);
+              setWebDegraded(last.webDegraded ?? false);
+              const pending = last.playbackStatus === "pending_confirmation" && last.userConfirmed !== true
+                && (!statusResult.ok || statusResult.data.mode === "ai_active");
+              setPendingConfirmation(pending);
+              if (pending) setConfirmationText(last.assistantText);
             }
           } else {
             setMessage(errorText(detail.error));
@@ -223,16 +357,29 @@ export function WorkspaceSession({
 
   async function start() {
     setBusy(true);
+    setIssues([]);
+    if (config && (!roleProfileId || !voiceRouteId)) {
+      setIssues([
+        ...(!roleProfileId ? [{ code: "SESSION_ROLE_REQUIRED", area: "role", action: "open_services" }] : []),
+        ...(!voiceRouteId ? [{ code: "SESSION_ROUTE_REQUIRED", area: "speech", action: "open_services" }] : []),
+      ]);
+      setMessage("");
+      setBusy(false);
+      return;
+    }
     try {
-      const result = await api.startSession(transport);
+      if (inputSource === "meeting" && !meetingPid) { setMessage("请刷新并选择会议进程。"); return; }
+      if (inputSource === "meeting" && !virtualAudio?.installed) { setMessage(virtualAudio?.rebootRequired ? "请重启 Windows，使虚拟声卡生效后再开始会议。" : "请先安装并自动配置虚拟声卡。"); return; }
+      const result = roleProfileId && voiceRouteId
+        ? await api.startSession(transport, { roleProfileId, voiceRouteId, allowWebSearch: allowWebSearch && canSearch, ...(inputSource === "meeting" ? { meetingPid: Number(meetingPid) } : {}), ...(outputDeviceId ? { outputDeviceId } : {}) })
+        : await api.startSession(transport);
       if (!result.ok) {
         setMessage(errorText(result.error));
         return;
       }
       if (result.data.kind === "blocked") {
-        setMessage(
-          result.data.issues.map((issue) => `${issue.area}：${issue.code}：${issue.action}`).join("；"),
-        );
+        setIssues(result.data.issues);
+        setMessage("");
         return;
       }
       setSessionId(result.data.session.id);
@@ -240,6 +387,10 @@ export function WorkspaceSession({
       setPhase(result.data.session.status);
       setTranscript("");
       setReply("");
+      setWebSources([]);
+      setWebDegraded(false);
+      setPendingConfirmation(false);
+      setConfirmationText("");
       setUnusedMaterials(false);
       setUtterance("");
       setSayText("");
@@ -271,6 +422,7 @@ export function WorkspaceSession({
     setLivekitState("idle");
     const ok = await run(() => api.stopSession());
     if (ok) {
+      setPendingConfirmation(false);
       await refresh();
     }
   }
@@ -279,6 +431,7 @@ export function WorkspaceSession({
     const ok = await run(() => api.setSessionMode(next));
     if (ok) {
       setMode(next);
+      if (next !== "ai_active") setPendingConfirmation(false);
       await refresh();
     }
   }
@@ -342,6 +495,20 @@ export function WorkspaceSession({
     });
   }
 
+  async function confirmCandidateAnswer(event: FormEvent) {
+    event.preventDefault();
+    const text = confirmationText.trim();
+    if (!text) return;
+    await runAgentCommand({
+      id: commandId(),
+      action: "confirm_candidate",
+      text,
+      answer: null,
+      mode: null,
+      expectedRevision: revision,
+    });
+  }
+
   async function submitCorrect() {
     await runAgentCommand({
       id: commandId(),
@@ -395,6 +562,56 @@ export function WorkspaceSession({
   }
 
   const active = ACTIVE_PHASES.has(phase);
+  const selectedRoleScenario = roleScenario(config, roleProfileId);
+  const hotkeyInFlight = useRef(false);
+  useEffect(() => {
+    if (!active || inputSource !== "meeting" || selectedRoleScenario !== "meetingAssistant") return;
+    let disposed = false;
+    let unlisten = () => {};
+    void (async () => {
+      try {
+        unlisten = await Promise.resolve(listen("session.assistant_hotkey.v1", () => {
+          if (disposed || hotkeyInFlight.current) return;
+          hotkeyInFlight.current = true;
+          void api.triggerMeetingAssistant()
+            .then((result) => {
+              if (!result.ok) setMessage(errorText(result.error));
+              else return refresh();
+            })
+            .catch(() => setMessage("快捷提问失败，请回到工作台重试。"))
+            .finally(() => { hotkeyInFlight.current = false; });
+        }));
+      } catch {
+        if (!disposed) setMessage("全局快捷键事件不可用；仍可在工作台点击提问。");
+      }
+    })();
+    return () => {
+      disposed = true;
+      unlisten();
+    };
+  }, [active, inputSource, selectedRoleScenario, refresh, listen]);
+  const audioFinalizePending = useRef(false);
+  useEffect(() => {
+    if (!active || inputSource !== "meeting" || phase !== "listening" || busy) return;
+    if (!new Set<RoleScenario>(["interviewer", "hr", "candidate", "meetingAssistant"]).has(selectedRoleScenario as RoleScenario)) return;
+    const timer = window.setInterval(() => {
+      if (audioFinalizePending.current) return;
+      void (async () => {
+        try {
+          const ready = await api.isSessionAudioReady();
+          if (!ready.ok || !ready.data.ready || audioFinalizePending.current) return;
+          audioFinalizePending.current = true;
+          await finalizeUtterance("");
+          await refresh();
+        } catch { setMessage("自动转写失败，已保留会话，可重试或人工接管。"); }
+        finally { audioFinalizePending.current = false; }
+      })();
+    }, 250);
+    return () => window.clearInterval(timer);
+  }, [active, inputSource, phase, busy, selectedRoleScenario, finalizeUtterance, refresh]);
+  const selectedRoute = config?.speech.voiceRoutes.find((route) => route.id === voiceRouteId);
+  const searchProtocol = config?.models.providers.find((provider) => provider.id === selectedRoute?.llmProviderId)?.webCapability;
+  const canSearch = selectedRoute?.mode === "cascaded" && !!searchProtocol && searchProtocol !== "none";
 
   return (
     <section className="workspace-session" aria-labelledby="workspace-session-heading">
@@ -410,6 +627,48 @@ export function WorkspaceSession({
           )}
         </div>
         <div className="session-toolbar-controls">
+          {config && <fieldset disabled={busy || active} className="session-selection">
+            <legend>本场会话配置</legend>
+            <label>输入来源<select value={inputSource} onChange={(event) => { setInputSource(event.target.value); if (event.target.value === "meeting") { void refreshMeetings(); void refreshVirtualAudio(); } }}>
+              <option value="text">手动文字</option><option value="meeting">会议音频</option>
+            </select></label>
+            {inputSource === "meeting" && <>
+              <label>会议进程<select value={meetingPid} onChange={(event) => setMeetingPid(event.target.value)}>
+                <option value="">请选择会议进程</option>
+                {meetingProcesses.map((process) => <option key={process.pid} value={process.pid}>{MEETING_NAMES[process.name.toLowerCase()] ?? process.name} · {process.title} · {process.pid}</option>)}
+              </select></label>
+              <button type="button" onClick={() => void refreshMeetings()}>刷新会议进程</button>
+              <small>仅采集所选会议的音频，不采集屏幕。请告知参会者 AI 参与和转写；检测停顿后自动提交完整语句。</small>
+              {selectedRoleScenario === "meetingAssistant" && <small>会议助手普通讨论只转写；被点名、点击发送，或按 Ctrl+Alt+A 时才回答。</small>}
+              {virtualAudio?.state === "missing" && <div className="preflight-card" role="alert">
+                <span>检测到缺少虚拟声卡，是否安装并自动配置？</span>
+                <button type="button" disabled={installingAudio || audioRetryBlocked} onClick={() => void installVirtualAudio()}>{installingAudio ? "正在安装…" : "是，自动安装"}</button>
+              </div>}
+              {installingAudio && <p role="status">{PREPARATION_PHASES[audioPreparationPhase]}… 请勿重复启动安装。</p>}
+              {audioAttempted && !installingAudio && !virtualAudio?.installed && <small>最近安装步骤：{PREPARATION_PHASES[audioPreparationPhase]}。{audioRetryBlocked ? "请先重新检测，确认没有仍在运行的安装任务。" : "失败说明见页面提示；再次安装前会重新检查驱动状态。"}</small>}
+              {!installingAudio && virtualAudio && !virtualAudio.installed && !["missing", "reboot_required"].includes(virtualAudio.state) && <div className="preflight-card" role="alert">{virtualAudio.detail}</div>}
+              <button type="button" disabled={installingAudio} onClick={() => void refreshVirtualAudio()}>重新检测虚拟声卡</button>
+              {virtualAudio?.rebootRequired && <div className="preflight-card" role="alert">虚拟声卡驱动已安装，需要重启 Windows 后继续。软件不会自动重启电脑。</div>}
+              {virtualAudio?.installed && <small>虚拟声卡端点已就绪，将自动绑定音频线路；尚不代表会议对方已能听到声音。</small>}
+            </>}
+            {inputSource !== "meeting" && <><label>语音输出<select value={outputDeviceId} onChange={(event) => setOutputDeviceId(event.target.value)}>
+              <option value="">仅文字，不播放</option>
+              {audioOutputs.map((device) => <option key={device.id} value={device.id}>{device.name}</option>)}
+            </select></label>
+            <button type="button" onClick={() => void refreshAudioOutputs()}>刷新音频设备</button>
+            <small>{outputDeviceId ? "只向所选设备播放。会议需选择虚拟声卡的输入端，并在会议软件选择对应麦克风。" : "当前仅显示文字，AI 语音不会进入会议。"}</small>
+            </>}
+            <label>角色<select value={roleProfileId} onChange={(event) => { const next = event.target.value; setRoleProfileId(next); setAllowWebSearch(roleScenario(config, next) === "meetingAssistant"); }}>
+              <option value="">请选择角色</option>
+              {config.roleProfiles.filter((role) => role.configVersion > 0).map((role) => <option key={role.id} value={role.id}>{role.name}</option>)}
+            </select></label>
+            <label>语音线路<select value={voiceRouteId} onChange={(event) => setVoiceRouteId(event.target.value)}>
+              <option value="">请选择语音线路</option>
+              {config.speech.voiceRoutes.filter((route) => route.configVersion > 0).map((route) => <option key={route.id} value={route.id}>{route.name} · {route.llmModelId ?? route.e2eModelId}</option>)}
+            </select></label>
+            <label><input type="checkbox" disabled={!canSearch} checked={allowWebSearch && canSearch} onChange={(event) => setAllowWebSearch(event.target.checked)} />允许本场联网搜索（可能产生费用）</label>
+            {!canSearch && <small>联网问答需要级联语音线路，并在模型供应商设置中选择支持的搜索协议。</small>}
+          </fieldset>}
           <fieldset className="session-transport">
             <legend>传输方式</legend>
             <label>
@@ -445,6 +704,17 @@ export function WorkspaceSession({
             <button disabled={!active} type="button" onClick={() => void setModeName("operator_speaking")}>
               <Hand size={14} aria-hidden="true" />接管
             </button>
+            <button
+              disabled={!active}
+              type="button"
+              onPointerDown={() => void setModeName("operator_speaking")}
+              onPointerUp={() => void setModeName("ai_active")}
+              onPointerCancel={() => void setModeName("ai_active")}
+              onKeyDown={(event) => { if (event.key === " " || event.key === "Enter") void setModeName("operator_speaking"); }}
+              onKeyUp={(event) => { if (event.key === " " || event.key === "Enter") void setModeName("ai_active"); }}
+            >
+              <Volume2 size={14} aria-hidden="true" />按住人工发言
+            </button>
             <button disabled={busy || !active} type="button" onClick={() => void setModeName("ai_active")}>
               <Bot size={14} aria-hidden="true" />恢复 AI
             </button>
@@ -454,6 +724,12 @@ export function WorkspaceSession({
           </div>
         </div>
       </header>
+      <PreflightIssues issues={issues} />
+      {webDegraded && <p className="services-message">联网搜索未成功，本次回答未联网，请勿作为最新信息使用。</p>}
+      {webSources.length > 0 && <aside className="services-message" aria-label="联网来源">
+        <span>已联网 · 来源：</span>
+        {webSources.map((source) => <button key={source.url} title={source.url} type="button" onClick={() => void run(() => api.openWebSource(source.url))}>{source.title}</button>)}
+      </aside>}
       {message && (
         <p className="services-message session-message" role="status">
           {message}
@@ -480,6 +756,20 @@ export function WorkspaceSession({
                 <h3><Bot size={16} aria-hidden="true" />AI 虚拟助手</h3>
                 <p>{reply}</p>
               </article>
+            )}
+            {pendingConfirmation && (
+              <form className="candidate-confirmation" onSubmit={confirmCandidateAnswer}>
+                <label htmlFor="candidate-confirmation-text">确认播报内容</label>
+                <textarea
+                  id="candidate-confirmation-text"
+                  value={confirmationText}
+                  onChange={(event) => setConfirmationText(event.target.value)}
+                />
+                <p>求职者模式不会自动播报。请核对或编辑后再确认。</p>
+                <button className="button-primary" disabled={busy || !active || !confirmationText.trim()} type="submit">
+                  <Volume2 size={15} aria-hidden="true" />确认并播报
+                </button>
+              </form>
             )}
           </div>
         )}

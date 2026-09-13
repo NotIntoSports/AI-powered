@@ -5,6 +5,7 @@ mod materials;
 mod providers;
 mod roles;
 mod sessions;
+pub use sessions::MeetingCapture;
 mod voice_routes;
 
 pub use embeddings::{
@@ -20,8 +21,8 @@ pub use materials::{
     MaterialSummary,
 };
 pub use providers::{
-    DiscoveredModelDto, ModelDiscoveryResult, ProviderSaveInput, ProviderService,
-    ProviderServiceError, ProviderTestResult,
+    DiscoveredModelDto, ModelDiscoveryResult, ProviderDependency, ProviderSaveInput,
+    ProviderService, ProviderServiceError, ProviderTestResult,
 };
 pub use roles::{
     RoleProfileCopyInput, RoleProfileSaveInput, RoleProfileService, RoleProfileServiceError,

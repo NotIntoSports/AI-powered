@@ -1,17 +1,23 @@
 param(
   [ValidateSet("all", "obs", "virtual-audio")][string]$Component = "all",
-  [string]$Destination = ""
+  [string]$Destination = "",
+  [switch]$ProbeOnly
 )
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+$OutputEncoding = [Console]::OutputEncoding
+try {
+  Import-Module (Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\Modules\Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1") -ErrorAction Stop
+} catch { throw "PREREQUISITE_MODULE_LOAD_FAILED: Windows security module unavailable" }
 $root = Resolve-Path (Join-Path $PSScriptRoot "..")
 if ($Destination) {
   $destination = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Destination)
 } else {
   $destination = Join-Path $root "resources\prerequisites"
 }
-New-Item -ItemType Directory -Force -Path $destination | Out-Null
+if (-not $ProbeOnly) { New-Item -ItemType Directory -Force -Path $destination | Out-Null }
 
 function Get-Sha256([string]$Path) {
   $stream = [System.IO.File]::OpenRead($Path)
@@ -24,6 +30,8 @@ function Get-Sha256([string]$Path) {
 function Get-PinnedArchive($item) {
   $path = Join-Path $destination $item.Name
   if (-not (Test-Path -LiteralPath $path) -or (Get-Sha256 $path) -ne $item.Sha256) {
+    if ($ProbeOnly) { throw "PREREQUISITE_RESOURCE_MISSING: cached archive missing or invalid" }
+    [Console]::WriteLine('{"phase":"downloading"}')
     try {
       Invoke-WebRequest -UseBasicParsing -Uri $item.Url -OutFile $path
     } catch {
@@ -33,6 +41,7 @@ function Get-PinnedArchive($item) {
   if ((Get-Sha256 $path) -ne $item.Sha256) {
     throw "PREREQUISITE_HASH_MISMATCH: $($item.Name)"
   }
+  [Console]::WriteLine('{"phase":"verifying"}')
   return $path
 }
 
@@ -49,6 +58,7 @@ $virtualAudio = @{
 }
 
 if ($Component -eq "all" -or $Component -eq "obs") {
+  if ($ProbeOnly) { throw "PREREQUISITE_RESOURCE_MISSING: diagnostic mode is for virtual audio only" }
   $obsArchive = Get-PinnedArchive $obs
   $obsRoot = Join-Path $destination "obs-portable"
   if (Test-Path -LiteralPath $obsRoot) { Remove-Item -LiteralPath $obsRoot -Recurse -Force }
@@ -65,8 +75,10 @@ if ($Component -eq "all" -or $Component -eq "obs") {
 if ($Component -eq "all" -or $Component -eq "virtual-audio") {
   $driverArchive = Get-PinnedArchive $virtualAudio
   $driverRoot = Join-Path $destination "vb-cable"
-  if (Test-Path -LiteralPath $driverRoot) { Remove-Item -LiteralPath $driverRoot -Recurse -Force }
-  Expand-Archive -LiteralPath $driverArchive -DestinationPath $driverRoot
+  if (-not $ProbeOnly) {
+    if (Test-Path -LiteralPath $driverRoot) { Remove-Item -LiteralPath $driverRoot -Recurse -Force }
+    Expand-Archive -LiteralPath $driverArchive -DestinationPath $driverRoot
+  }
   $setup = Get-ChildItem -LiteralPath $driverRoot -Recurse -Filter "VBCABLE_Setup_x64.exe" | Select-Object -First 1
   if (-not $setup) { throw "PREREQUISITE_RESOURCE_MISSING: VBCABLE_Setup_x64.exe" }
   $signature = Get-AuthenticodeSignature -LiteralPath $setup.FullName

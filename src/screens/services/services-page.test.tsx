@@ -12,6 +12,7 @@ vi.mock("../../api/commands", () => ({
   discoverModelProvider: vi.fn(),
   activateModelProvider: vi.fn(),
   deleteModelProvider: vi.fn(),
+  getModelProviderDependencies: vi.fn(),
   saveSpeechRoute: vi.fn(),
   testSpeechRoute: vi.fn(),
   activateSpeechRoute: vi.fn(),
@@ -50,6 +51,7 @@ const emptyConfig = {
 
 describe("ServicesPage", () => {
   beforeEach(() => {
+    vi.mocked(commands.getModelProviderDependencies).mockResolvedValue({ ok: true, data: [] });
     vi.mocked(commands.getConfigPublic).mockResolvedValue({ ok: true, data: emptyConfig });
   });
   afterEach(() => {
@@ -156,8 +158,98 @@ describe("ServicesPage", () => {
     render(<ServicesPage />);
     fireEvent.click(await screen.findByRole("button", { name: "测试 OpenAI" }));
     expect(await screen.findAllByText("正在测试连接…")).not.toHaveLength(0);
-    finishTest({ ok: true, data: { providerId: "openai", reachable: true, modelCount: 3 } });
-    expect(await screen.findAllByText("连接测试通过，发现 3 个模型")).not.toHaveLength(0);
+    finishTest({ ok: true, data: { providerId: "openai", reachable: true, modelCount: 3, webStatus: "disabled", webSourceCount: 0 } });
+    expect(await screen.findAllByText("连接测试通过，发现 3 个模型；未启用联网")).not.toHaveLength(0);
+  });
+  it("shows provider references instead of deleting and navigates to the route", async () => {
+    vi.mocked(commands.getConfigPublic).mockResolvedValue({ ok: true, data: { ...emptyConfig, models: { providers: [{ id: "p1", name: "千问", baseUrl: "https://example.test", credential: null }], activeProviderId: null } } });
+    vi.mocked(commands.getModelProviderDependencies).mockResolvedValue({ ok: true, data: [{ kind: "voiceRoute", id: "r1", name: "面试线路" }] });
+    render(<ServicesPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "删除" }));
+    expect(await screen.findByText(/面试线路/)).toBeTruthy();
+    expect(commands.deleteModelProvider).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /处理.*面试线路/ }));
+    expect(screen.getByRole("heading", { name: "语音线路" })).toBeTruthy();
+  });
+
+  it("opens the referenced embedding editor instead of only switching category", async () => {
+    vi.mocked(commands.getConfigPublic).mockResolvedValue({
+      ok: true,
+      data: {
+        ...emptyConfig,
+        models: { providers: [{ id: "p1", name: "千问", baseUrl: "https://example.test", credential: null }], activeProviderId: null },
+        knowledge: {
+          embeddingConfigs: [{
+            id: "emb-9", providerId: "p1", baseUrl: null, credential: null, modelId: "text-embedding-v3",
+            dimensions: 1024, distance: "cosine", normalized: true, active: false, ready: false, status: null, configVersion: 1,
+          }],
+          activeEmbeddingConfigId: null,
+        },
+      },
+    });
+    vi.mocked(commands.getModelProviderDependencies).mockResolvedValue({
+      ok: true,
+      data: [{ kind: "embedding", id: "emb-9", name: "text-embedding-v3" }],
+    });
+    render(<ServicesPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "删除" }));
+    fireEvent.click(await screen.findByRole("button", { name: /处理.*text-embedding-v3/ }));
+    expect(screen.getByRole("heading", { name: "Embedding" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "编辑配置" })).toBeTruthy();
+    expect((screen.getByLabelText("模型") as HTMLInputElement).value).toBe("text-embedding-v3");
+  });
+
+  it("requires confirmation before deleting an unreferenced provider", async () => {
+    vi.mocked(commands.getConfigPublic).mockResolvedValue({ ok: true, data: { ...emptyConfig, models: { providers: [{ id: "p1", name: "测试供应商", baseUrl: "https://example.test", credential: null }], activeProviderId: null } } });
+    vi.mocked(commands.deleteModelProvider).mockResolvedValue({ ok: true, data: { ready: true } });
+    render(<ServicesPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "删除" }));
+    const confirm = await screen.findByRole("button", { name: "确认删除供应商" });
+    expect(commands.deleteModelProvider).not.toHaveBeenCalled();
+    fireEvent.click(confirm);
+    await waitFor(() => expect(commands.deleteModelProvider).toHaveBeenCalledWith("p1"));
+  });
+
+  it("keeps a retry action when only credential cleanup fails", async () => {
+    vi.mocked(commands.getConfigPublic).mockResolvedValue({ ok: true, data: { ...emptyConfig, models: { providers: [{ id: "p1", name: "测试供应商", baseUrl: "https://example.test", credential: null }], activeProviderId: null } } });
+    vi.mocked(commands.deleteModelProvider).mockResolvedValueOnce({ ok: false, error: { code: "SECRET_CLEANUP_FAILED", message: "failed", retryable: false, requestId: "test" } }).mockResolvedValueOnce({ ok: true, data: { ready: true } });
+    render(<ServicesPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "删除" }));
+    vi.mocked(commands.getConfigPublic).mockResolvedValue({ ok: true, data: emptyConfig });
+    fireEvent.click(await screen.findByRole("button", { name: "确认删除供应商" }));
+    const retry = await screen.findByRole("button", { name: "重试清理密钥" });
+    expect(await screen.findByText("还没有供应商。")).toBeTruthy();
+    fireEvent.click(retry);
+    await screen.findByText("供应商及密钥已删除");
+    expect(commands.deleteModelProvider).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not hide a refresh failure behind a successful deletion message", async () => {
+    vi.mocked(commands.getConfigPublic).mockResolvedValue({ ok: true, data: { ...emptyConfig, models: { providers: [{ id: "p1", name: "测试供应商", baseUrl: "https://example.test", credential: null }], activeProviderId: null } } });
+    vi.mocked(commands.deleteModelProvider).mockResolvedValue({ ok: true, data: { ready: true } });
+    render(<ServicesPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "删除" }));
+    vi.mocked(commands.getConfigPublic).mockResolvedValue({ ok: false, error: { code: "CONFIG_READ_FAILED", message: "read failed", retryable: false, requestId: "test" } });
+    fireEvent.click(await screen.findByRole("button", { name: "确认删除供应商" }));
+    await screen.findByText(/操作已完成，但无法重新读取配置/);
+    expect(screen.queryByText("供应商及密钥已删除")).toBeNull();
+  });
+
+  it("reports verified provider web-search capability and sources", async () => {
+    vi.mocked(commands.getConfigPublic).mockResolvedValue({
+      ok: true,
+      data: {
+        ...emptyConfig,
+        models: { providers: [{ id: "openai", name: "OpenAI", baseUrl: "https://example.test/v1", credential: { reference: "providers/openai/api-key", configured: true }, webCapability: "openai_responses_web_search" }], activeProviderId: null },
+      },
+    });
+    vi.mocked(commands.testModelProvider).mockResolvedValue({
+      ok: true,
+      data: { providerId: "openai", reachable: true, modelCount: 1, webStatus: "available", webSourceCount: 2 },
+    });
+    render(<ServicesPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "测试 OpenAI" }));
+    expect(await screen.findAllByText("连接测试通过，发现 1 个模型；联网可用，返回 2 个来源")).not.toHaveLength(0);
   });
 
   it("shows a provider test failure on the card and status line", async () => {

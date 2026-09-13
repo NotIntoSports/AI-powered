@@ -3,7 +3,7 @@ import { routeIds, parseHash, formatHash, routeLabel, routeDesignRef, routeCapab
 
 describe("routes", () => {
   it("routeIds is a fixed ordered tuple of 5 pages", () => {
-    expect(routeIds).toEqual(["workspace", "materials", "records", "services", "settings"]);
+    expect(routeIds).toEqual(["workspace", "livestream", "materials", "records", "services", "settings"]);
   });
 
   describe("parseHash", () => {

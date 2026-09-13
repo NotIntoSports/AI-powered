@@ -13,6 +13,7 @@ pub const RING_CAPACITY_BYTES: usize =
 pub struct PcmRing {
     buf: VecDeque<u8>,
     overrun_count: u32,
+    pending_byte: Option<u8>,
 }
 
 impl Default for PcmRing {
@@ -26,11 +27,30 @@ impl PcmRing {
         Self {
             buf: VecDeque::with_capacity(RING_CAPACITY_BYTES),
             overrun_count: 0,
+            pending_byte: None,
         }
     }
 
     pub fn push(&mut self, pcm: &[u8]) {
+        if pcm.is_empty() {
+            return;
+        }
+        let mut pcm = pcm;
+        if let Some(first) = self.pending_byte.take() {
+            self.push_aligned(&[first, pcm[0]]);
+            pcm = &pcm[1..];
+        }
         let data = even_prefix(pcm);
+        self.push_aligned(data);
+        self.pending_byte = pcm.get(data.len()).copied();
+    }
+
+    pub fn clear(&mut self) {
+        self.buf.clear();
+        self.pending_byte = None;
+    }
+
+    fn push_aligned(&mut self, data: &[u8]) {
         if data.is_empty() {
             return;
         }
@@ -165,6 +185,27 @@ mod tests {
         let snap = ring.snapshot();
         assert_eq!(snap.len(), RING_CAPACITY_BYTES);
         assert_eq!(&snap[RING_CAPACITY_BYTES - 4..], &[0xAA, 0xBB, 0xCC, 0xDD]);
+    }
+
+    #[test]
+    fn ring_preserves_samples_across_arbitrary_pipe_boundaries() {
+        let mut ring = PcmRing::new();
+        ring.push(&[1]);
+        ring.push(&[]);
+        assert!(ring.is_empty());
+        ring.push(&[2, 3]);
+        ring.push(&[4, 5, 6, 7]);
+        ring.push(&[8]);
+        assert_eq!(ring.snapshot(), vec![1, 2, 3, 4, 5, 6, 7, 8]);
+    }
+
+    #[test]
+    fn ring_clear_discards_pending_half_sample() {
+        let mut ring = PcmRing::new();
+        ring.push(&[1, 2, 3]);
+        ring.clear();
+        ring.push(&[4, 5]);
+        assert_eq!(ring.snapshot(), vec![4, 5]);
     }
 
     #[test]

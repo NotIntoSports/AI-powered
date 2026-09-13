@@ -27,6 +27,7 @@ const ALLOWED_FIELDS: &[&str] = &[
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AgentCommandAction {
     Say,
+    ConfirmCandidate,
     Retry,
     Correct,
     Report,
@@ -37,6 +38,7 @@ impl AgentCommandAction {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Say => "say",
+            Self::ConfirmCandidate => "confirm_candidate",
             Self::Retry => "retry",
             Self::Correct => "correct",
             Self::Report => "report",
@@ -47,6 +49,7 @@ impl AgentCommandAction {
     fn from_name(name: &str) -> Option<Self> {
         match name {
             "say" => Some(Self::Say),
+            "confirm_candidate" => Some(Self::ConfirmCandidate),
             "retry" => Some(Self::Retry),
             "correct" => Some(Self::Correct),
             "report" => Some(Self::Report),
@@ -119,7 +122,7 @@ impl AgentCommandOutcome {
 pub fn command_requirements(action: AgentCommandAction) -> &'static [&'static str] {
     match action {
         AgentCommandAction::SetMode => &[],
-        AgentCommandAction::Say => &["speak"],
+        AgentCommandAction::Say | AgentCommandAction::ConfirmCandidate => &["speak"],
         AgentCommandAction::Retry | AgentCommandAction::Correct => &["generate", "speak"],
         AgentCommandAction::Report => &["generate"],
     }
@@ -169,7 +172,10 @@ pub fn parse_agent_command(payload: &Value) -> Result<AgentCommand, AgentCommand
     if text.len() > SAY_TEXT_LIMIT || answer.len() > CORRECT_ANSWER_LIMIT {
         return Err(AgentCommandError::Invalid);
     }
-    if (action == AgentCommandAction::Say && text.is_empty())
+    if (matches!(
+        action,
+        AgentCommandAction::Say | AgentCommandAction::ConfirmCandidate
+    ) && text.is_empty())
         || (action == AgentCommandAction::Correct && answer.is_empty())
     {
         return Err(AgentCommandError::Invalid);
@@ -217,7 +223,7 @@ pub fn execute_agent_command(
     mut speak: impl FnMut(&str) -> Result<(), AgentCommandError>,
 ) -> Result<Map<String, Value>, AgentCommandError> {
     match command.action {
-        AgentCommandAction::Say => {
+        AgentCommandAction::Say | AgentCommandAction::ConfirmCandidate => {
             speak(&command.text)?;
             Ok(object([("text", json!(command.text))]))
         }

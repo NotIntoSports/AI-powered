@@ -2,6 +2,7 @@ import { routeLabel, type RouteId } from "../app/routes";
 
 const descriptions: Record<RouteId, string> = {
   workspace: "让对话自然进行，重要时刻由你掌控。",
+  livestream: "根据产品资料准备讲稿，并通过 OBS 输出可控的虚拟直播。",
   materials: "整理参考资料，为每一次回答提供上下文。",
   records: "回顾对话，留存值得继续跟进的内容。",
   services: "连接模型与语音服务，配置你的 AI 能力。",

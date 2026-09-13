@@ -1,7 +1,7 @@
 import { routeIds, routeLabel, type RouteId } from "../app/routes";
-import { FolderOpen, History, MessageSquare, Settings2, SlidersHorizontal, Sparkles } from "lucide-react";
+import { FolderOpen, History, MessageSquare, Radio, Settings2, SlidersHorizontal, Sparkles } from "lucide-react";
 
-const icons = { workspace: MessageSquare, materials: FolderOpen, records: History, services: SlidersHorizontal, settings: Settings2 };
+const icons: Record<RouteId, typeof MessageSquare> = { workspace: MessageSquare, livestream: Radio, materials: FolderOpen, records: History, services: SlidersHorizontal, settings: Settings2 };
 
 export interface AppNavProps {
   current: RouteId;

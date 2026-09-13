@@ -18,7 +18,10 @@ const categories = [
 
 export function SettingsPage() {
   const [migration, setMigration] = useState<LegacyMigrationStatus | null>(null);
-  const [category, setCategory] = useState<(typeof categories)[number]["id"]>("appearance");
+  const [category, setCategory] = useState<(typeof categories)[number]["id"]>(() => {
+    const requested = new URLSearchParams(window.location.search).get("category");
+    return categories.find((item) => item.id === requested)?.id ?? "appearance";
+  });
 
   useEffect(() => {
     void getLegacyMigrationStatus()

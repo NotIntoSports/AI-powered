@@ -16,7 +16,7 @@ fn empty_database_migrates_once_and_passes_integrity_check() {
     database.migrate().unwrap();
     database.migrate().unwrap();
 
-    assert_eq!(database.schema_version().unwrap(), 4);
+    assert_eq!(database.schema_version().unwrap(), 5);
     assert_eq!(database.integrity_check().unwrap(), "ok");
     assert_eq!(
         database.application_table_names().unwrap(),
@@ -111,7 +111,7 @@ fn foundation_database_migrates_to_materials_schema() {
     let database = Database::open(path).unwrap();
     database.migrate().unwrap();
 
-    assert_eq!(database.schema_version().unwrap(), 4);
+    assert_eq!(database.schema_version().unwrap(), 5);
     assert!(
         database
             .application_table_names()
@@ -148,7 +148,7 @@ fn materials_schema_migrates_to_cascade_session_schema() {
     let database = Database::open(path).unwrap();
     database.migrate().unwrap();
 
-    assert_eq!(database.schema_version().unwrap(), 4);
+    assert_eq!(database.schema_version().unwrap(), 5);
     let tables = database.application_table_names().unwrap();
     for name in [
         "sessions",
@@ -226,6 +226,35 @@ fn session_check_allows_livekit_transport() {
 }
 
 #[test]
+fn session_schema_accepts_only_the_application_structured_event_kinds() {
+    let (_directory, database) = database();
+    database.migrate().unwrap();
+    database.execute_batch(
+        "INSERT INTO sessions(id,status,role_profile_id,voice_route_id,transport_mode,updated_at)
+         VALUES ('event-session','listening','','','direct','2026-09-05T00:00:00Z');"
+    ).unwrap();
+    for (seq, kind) in ["web_sources", "turn_meta", "scenario"]
+        .into_iter()
+        .enumerate()
+    {
+        database
+            .execute_batch(&format!(
+                "INSERT INTO session_events(session_id,seq,kind,payload,created_at)
+             VALUES ('event-session',{seq},'{kind}','{{}}','2026-09-05T00:00:00Z');"
+            ))
+            .unwrap_or_else(|_| panic!("structured event kind must be accepted: {kind}"));
+    }
+    assert!(
+        database
+            .execute_batch(
+                "INSERT INTO session_events(session_id,seq,kind,payload,created_at)
+         VALUES ('event-session',99,'arbitrary_plugin_event','{}','2026-09-05T00:00:00Z');"
+            )
+            .is_err()
+    );
+}
+
+#[test]
 fn cascade_session_schema_migrates_to_livekit_transport() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("v3.sqlite3");
@@ -279,7 +308,7 @@ fn cascade_session_schema_migrates_to_livekit_transport() {
     let database = Database::open(path).unwrap();
     database.migrate().unwrap();
 
-    assert_eq!(database.schema_version().unwrap(), 4);
+    assert_eq!(database.schema_version().unwrap(), 5);
     assert_eq!(database.integrity_check().unwrap(), "ok");
     assert_eq!(
         database

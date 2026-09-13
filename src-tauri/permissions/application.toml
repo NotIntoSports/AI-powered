@@ -64,6 +64,11 @@ description = "Allows selecting one configured model provider."
 commands.allow = ["model_provider_activate"]
 
 [[permission]]
+identifier = "allow-model-provider-dependencies"
+description = "Allows reading local references that prevent provider deletion."
+commands.allow = ["model_provider_dependencies"]
+
+[[permission]]
 identifier = "allow-model-provider-delete"
 description = "Allows deleting one unreferenced provider and its credential."
 commands.allow = ["model_provider_delete"]
@@ -219,6 +224,91 @@ description = "Allows executing say, retry, correct, or report on the active ses
 commands.allow = ["session_agent_command"]
 
 [[permission]]
+identifier = "allow-session-trigger-assistant"
+description = "Allows an explicit user shortcut to answer from the active meeting audio buffer."
+commands.allow = ["session_trigger_assistant"]
+
+[[permission]]
 identifier = "allow-runtime-get-status"
 description = "Allows reading the current cascade runtime phase and mode."
 commands.allow = ["runtime_get_status"]
+
+[[permission]]
+identifier = "allow-open-web-source"
+description = "Allows opening a validated HTTP(S) citation in the system browser."
+commands.allow = ["open_web_source"]
+
+[[permission]]
+identifier = "allow-meeting-process-list"
+description = "Allows listing only allowlisted meeting processes with visible windows."
+commands.allow = ["meeting_process_list"]
+
+[[permission]]
+identifier = "allow-audio-output-list"
+description = "Allows enumerating local render endpoints through the owned AudioBridge."
+commands.allow = ["audio_output_list"]
+
+[[permission]]
+identifier = "allow-virtual-audio-status"
+description = "Allows checking whether the managed virtual audio endpoints are active."
+commands.allow = ["virtual_audio_status"]
+
+[[permission]]
+identifier = "allow-virtual-audio-install"
+description = "Allows a user-confirmed, signed and hash-pinned VB-CABLE installation."
+commands.allow = ["virtual_audio_install"]
+
+[[permission]]
+identifier = "allow-session-audio-ready"
+description = "Allows checking whether the active meeting capture has one complete bounded utterance."
+commands.allow = ["session_audio_ready"]
+
+[[permission]]
+identifier = "allow-livestream-create-draft"
+description = "Allows creating a bounded local livestream script draft."
+commands.allow = ["livestream_create_draft"]
+
+[[permission]]
+identifier = "allow-livestream-generate"
+description = "Allows generating a bounded draft from selected local product materials."
+commands.allow = ["livestream_generate"]
+
+[[permission]]
+identifier = "allow-livestream-get"
+description = "Allows reading the current local livestream script and stage state."
+commands.allow = ["livestream_get"]
+
+[[permission]]
+identifier = "allow-livestream-control"
+description = "Allows controlling only the confirmed bounded livestream script."
+commands.allow = ["livestream_control"]
+
+[[permission]]
+identifier = "allow-livestream-insert-question"
+description = "Allows a user-entered question to pause and temporarily interrupt a confirmed livestream script."
+commands.allow = ["livestream_insert_question"]
+
+[[permission]]
+identifier = "allow-obs-runtime-status"
+description = "Allows checking the local OBS application scene and Virtual Camera status."
+commands.allow = ["obs_runtime_status"]
+
+[[permission]]
+identifier = "allow-obs-virtual-camera-start"
+description = "Allows starting OBS Virtual Camera with the application-owned scene."
+commands.allow = ["obs_virtual_camera_start"]
+
+[[permission]]
+identifier = "allow-obs-virtual-camera-stop"
+description = "Allows stopping OBS Virtual Camera without terminating OBS."
+commands.allow = ["obs_virtual_camera_stop"]
+
+[[permission]]
+identifier = "allow-obs-password-status"
+description = "Allows checking whether the local OBS WebSocket password is configured without reading it."
+commands.allow = ["obs_password_status"]
+
+[[permission]]
+identifier = "allow-obs-password-save"
+description = "Allows saving or clearing the local OBS WebSocket password in Windows Credential Manager."
+commands.allow = ["obs_password_save"]

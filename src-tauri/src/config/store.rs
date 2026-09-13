@@ -37,6 +37,24 @@ impl ConfigStore {
     }
 
     pub fn load_for_startup(&self) -> Result<ConfigLoadOutcome, ConfigError> {
+        let outcome = self.load_for_startup_inner()?;
+        let mut config = match &outcome {
+            ConfigLoadOutcome::Ready(config) | ConfigLoadOutcome::Migrated(config) => {
+                config.clone()
+            }
+        };
+        if super::presets::ensure_role_presets(&mut config) {
+            let _guard = self.lock_writes()?;
+            self.write_validated(&config)?;
+            return Ok(match outcome {
+                ConfigLoadOutcome::Ready(_) => ConfigLoadOutcome::Ready(config),
+                ConfigLoadOutcome::Migrated(_) => ConfigLoadOutcome::Migrated(config),
+            });
+        }
+        Ok(outcome)
+    }
+
+    fn load_for_startup_inner(&self) -> Result<ConfigLoadOutcome, ConfigError> {
         if !self.path.exists() {
             return self.restore_defaults().map(ConfigLoadOutcome::Migrated);
         }

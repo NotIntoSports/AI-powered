@@ -141,12 +141,30 @@ pub trait TextToSpeech: Send + Sync {
 
 pub struct OpenAiCompatibleCascade {
     client: Client,
+    web_capability: super::web_search::WebCapability,
+    last_web: std::sync::Mutex<super::web_search::WebCompletion>,
 }
 
 impl OpenAiCompatibleCascade {
     pub fn new() -> Result<Self, CascadeError> {
         let client = build_cascade_client().map_err(|_| CascadeError::ClientUnavailable)?;
-        Ok(Self { client })
+        Ok(Self {
+            client,
+            web_capability: Default::default(),
+            last_web: Default::default(),
+        })
+    }
+
+    pub fn with_web_capability(mut self, capability: super::web_search::WebCapability) -> Self {
+        self.web_capability = capability;
+        self
+    }
+
+    pub fn web_result(&self) -> super::web_search::WebCompletion {
+        self.last_web
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     fn send(&self, request: CascadeHttpRequest<'_>) -> Result<Vec<u8>, CascadeError> {
@@ -224,6 +242,41 @@ impl ChatModel for OpenAiCompatibleCascade {
         model_id: &str,
         messages: &[ChatMessage],
     ) -> Result<String, CascadeError> {
+        use super::web_search::{WebCapability, parse_search_response, search_request};
+        *self.last_web.lock().unwrap_or_else(|e| e.into_inner()) = Default::default();
+        if self.web_capability != WebCapability::None {
+            let suffix = if self.web_capability == WebCapability::QwenChatEnableSearch {
+                "/chat/completions"
+            } else {
+                "/responses"
+            };
+            let request = search_request(self.web_capability, model_id, messages);
+            let searched = self
+                .send(CascadeHttpRequest {
+                    url: normalize_cascade_url(&endpoint.base_url, suffix, CascadeStage::Llm)?,
+                    credential,
+                    content_type: "application/json",
+                    accept: "application/json",
+                    body: serde_json::to_vec(&request)
+                        .map_err(|_| CascadeError::RequestFailed(CascadeStage::Llm))?,
+                    stage: CascadeStage::Llm,
+                    max_bytes: JSON_BODY_LIMIT,
+                })
+                .and_then(|bytes| parse_search_response(self.web_capability, &bytes));
+            match searched {
+                Ok(result) => {
+                    let text = result.text.clone();
+                    *self.last_web.lock().unwrap_or_else(|e| e.into_inner()) = result;
+                    return Ok(text);
+                }
+                Err(_) => {
+                    self.last_web
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .degraded = true
+                }
+            }
+        }
         let url = normalize_chat_completions_url(&endpoint.base_url)?;
         let payload = build_llm_request(model_id, messages);
         let body = serde_json::to_vec(&payload)

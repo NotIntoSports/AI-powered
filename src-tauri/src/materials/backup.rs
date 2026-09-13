@@ -533,6 +533,7 @@ mod tests {
         store
             .update(|config| {
                 config.models.providers.push(ProviderConfig {
+                    web_capability: None,
                     id: "p1".into(),
                     name: Some("Example".into()),
                     base_url: "https://example.com/v1".into(),

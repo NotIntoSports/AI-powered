@@ -4,7 +4,7 @@
  * Design spec: docs/superpowers/specs/2026-09-04-tauri-local-monolith-design.md §6.1–6.5
  */
 
-export const routeIds = ["workspace", "materials", "records", "services", "settings"] as const;
+export const routeIds = ["workspace", "livestream", "materials", "records", "services", "settings"] as const;
 
 export type RouteId = typeof routeIds[number];
 
@@ -30,6 +30,7 @@ export function formatHash(id: RouteId): string {
 export function routeLabel(id: RouteId): string {
   const labels: Record<RouteId, string> = {
     workspace: "工作台",
+    livestream: "虚拟直播",
     materials: "资料",
     records: "记录",
     services: "服务",
@@ -42,6 +43,7 @@ export function routeLabel(id: RouteId): string {
 export function routeDesignRef(id: RouteId): string {
   const refs: Record<RouteId, string> = {
     workspace: "6.1",
+    livestream: "6.1",
     materials: "6.2",
     records: "6.3",
     services: "6.4",
@@ -59,6 +61,12 @@ export function routeCapabilities(id: RouteId): readonly string[] {
       "人工接管与干预控制",
       "音视频连接状态指示",
       "会议桥接卡片",
+    ],
+    livestream: [
+      "本地产品资料生成分段讲稿",
+      "图片或循环视频舞台",
+      "讲稿确认与分段控制",
+      "OBS Virtual Camera 输出",
     ],
     materials: [
       "简历导入与管理",

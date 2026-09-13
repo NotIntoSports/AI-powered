@@ -5,8 +5,8 @@ use std::path::Path;
 #[cfg(test)]
 use crate::config::{
     ApplicationConfig, DiagnosticsConfig, EmbeddingConfig, EmbeddingDistance, KnowledgeConfig,
-    LiveKitConfig, ModelConfig, ProviderConfig, PublicConfig, RoleProfileConfig, SecretSlot,
-    SpeechConfig, StorageConfig, TransportConfig, VoiceRouteConfig, VoiceRouteMode,
+    LiveKitConfig, ModelConfig, ProviderConfig, PublicConfig, RoleProfileConfig, RoleScenario,
+    SecretSlot, SpeechConfig, StorageConfig, TransportConfig, VoiceRouteConfig, VoiceRouteMode,
 };
 use crate::services::LiveKitJoinToken;
 #[cfg(test)]
@@ -163,6 +163,21 @@ pub struct SessionCitationView {
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]
 pub struct SessionTurnView {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub web_sources: Option<Vec<crate::providers::web_search::WebSource>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub web_degraded: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub trigger_source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub user_confirmed: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub playback_status: Option<String>,
     pub id: String,
     #[ts(type = "number")]
     pub turn_index: i64,
@@ -236,6 +251,48 @@ pub struct AgentCommandResult {
     pub error: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
+pub struct LivestreamSegmentDraftInput {
+    pub title: String,
+    pub text: String,
+    pub estimated_seconds: u32,
+    pub sources: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
+pub struct LivestreamDraftInput {
+    pub title: String,
+    pub segments: Vec<LivestreamSegmentDraftInput>,
+    pub loop_enabled: bool,
+    pub media_path: Option<String>,
+    pub media_kind: Option<crate::livestream::LivestreamMediaKind>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
+pub struct LivestreamGenerateInput {
+    pub title: String,
+    pub material_ids: Vec<String>,
+    pub language: String,
+    pub max_segments: u8,
+    pub loop_enabled: bool,
+    pub media_path: Option<String>,
+    pub media_kind: Option<crate::livestream::LivestreamMediaKind>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct LivestreamRuntime {
+    pub script: crate::livestream::LivestreamScript,
+    pub stage: crate::livestream::LivestreamStageState,
+}
+
 #[cfg(test)]
 fn generated_bindings() -> String {
     let config = ts_rs::Config::default();
@@ -255,6 +312,14 @@ fn generated_bindings() -> String {
         SecretSlot::decl(&config),
         ApplicationConfig::decl(&config),
         ProviderConfig::decl(&config),
+        crate::providers::web_search::WebCapability::decl(&config),
+        crate::providers::web_search::WebCapabilityStatus::decl(&config),
+        crate::providers::web_search::WebSource::decl(&config),
+        crate::processes::MeetingProcess::decl(&config),
+        crate::audio::playback::AudioOutputDevice::decl(&config),
+        crate::prerequisites::LocalAudioDevice::decl(&config),
+        crate::prerequisites::VirtualAudioPreparation::decl(&config),
+        crate::prerequisites::PreparationDiagnostic::decl(&config),
         ModelConfig::decl(&config),
         VoiceRouteMode::decl(&config),
         VoiceRouteConfig::decl(&config),
@@ -265,11 +330,13 @@ fn generated_bindings() -> String {
         EmbeddingConfig::decl(&config),
         KnowledgeConfig::decl(&config),
         StorageConfig::decl(&config),
+        RoleScenario::decl(&config),
         RoleProfileConfig::decl(&config),
         DiagnosticsConfig::decl(&config),
         PublicConfig::decl(&config),
         ProviderSaveInput::decl(&config),
         ProviderTestResult::decl(&config),
+        crate::services::ProviderDependency::decl(&config),
         DiscoveredModelDto::decl(&config),
         ModelDiscoveryResult::decl(&config),
         VoiceRouteSaveInput::decl(&config),
@@ -297,6 +364,18 @@ fn generated_bindings() -> String {
         AudioLevelEvent::decl(&config),
         AgentCommandInput::decl(&config),
         AgentCommandResult::decl(&config),
+        crate::livestream::LivestreamState::decl(&config),
+        crate::livestream::LivestreamSegmentStatus::decl(&config),
+        crate::livestream::LivestreamOutputState::decl(&config),
+        crate::livestream::LivestreamMediaKind::decl(&config),
+        crate::livestream::LivestreamSegment::decl(&config),
+        crate::livestream::LivestreamScript::decl(&config),
+        crate::livestream::LivestreamStageState::decl(&config),
+        LivestreamSegmentDraftInput::decl(&config),
+        LivestreamDraftInput::decl(&config),
+        LivestreamGenerateInput::decl(&config),
+        LivestreamRuntime::decl(&config),
+        crate::obs::ObsRuntimeStatus::decl(&config),
         CommandResult::<FoundationStatus>::decl(&config),
     ];
     let header = "// Generated by ts-rs. Do not edit.\n";
@@ -364,6 +443,7 @@ mod tests {
         assert!(bindings.contains("export type VoiceRouteMode"));
         assert!(bindings.contains("export type VoiceRouteConfig"));
         assert!(bindings.contains("export type RoleProfileConfig"));
+        assert!(bindings.contains("export type RoleScenario"));
         assert!(bindings.contains("export type EmbeddingConfig"));
         assert!(bindings.contains("export type LiveKitConfig"));
         assert!(bindings.contains("export type RoleProfileSaveInput"));
@@ -401,6 +481,10 @@ mod tests {
             "AgentCommandInput",
             "AgentCommandResult",
             "LiveKitJoinToken",
+            "LivestreamDraftInput",
+            "LivestreamGenerateInput",
+            "LivestreamRuntime",
+            "ObsRuntimeStatus",
         ] {
             assert!(
                 bindings.contains(&format!("export type {name}")),

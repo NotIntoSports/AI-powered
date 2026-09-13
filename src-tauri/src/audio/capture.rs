@@ -12,6 +12,8 @@ use std::{
 };
 
 use super::pcm::{PcmRing, downsample_48k_to_16k};
+use super::segmenter::UtteranceSegmenter;
+use std::time::{Duration, Instant};
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -112,7 +114,9 @@ pub fn parse_level_peak(line: &str) -> Option<f64> {
 #[derive(Debug)]
 struct CaptureState {
     ring: PcmRing,
+    segmenter: UtteranceSegmenter,
     last_peak: f64,
+    echo_until: Option<Instant>,
 }
 
 #[derive(Debug)]
@@ -153,7 +157,10 @@ impl AudioCapture {
     }
 
     pub fn push_pcm(&mut self, pcm: &[u8]) {
-        self.lock().ring.push(pcm);
+        let mut state = self.lock();
+        state.ring.push(pcm);
+        let suppressed = state.echo_until.is_some_and(|until| Instant::now() < until);
+        state.segmenter.ingest(pcm, suppressed);
     }
 
     pub fn ingest_event_line(&mut self, line: &str) {
@@ -172,6 +179,24 @@ impl AudioCapture {
 
     pub fn pcm_for_asr(&self) -> Vec<u8> {
         downsample_48k_to_16k(&self.snapshot_48k())
+    }
+
+    pub fn utterance_ready(&self) -> bool {
+        self.lock().segmenter.ready()
+    }
+
+    pub fn take_utterance_for_asr(&self) -> Option<Vec<u8>> {
+        self.lock()
+            .segmenter
+            .take()
+            .map(|pcm| downsample_48k_to_16k(&pcm))
+    }
+
+    pub fn suppress_echo_for(&self, duration: Duration) {
+        let mut state = self.lock();
+        state.echo_until = Some(Instant::now() + duration);
+        state.segmenter.reset();
+        state.ring.clear();
     }
 
     pub fn overrun_count(&self) -> u32 {
@@ -204,7 +229,9 @@ impl AudioCapture {
         Self {
             state: Arc::new(Mutex::new(CaptureState {
                 ring: PcmRing::new(),
+                segmenter: UtteranceSegmenter::default(),
                 last_peak: 0.0,
+                echo_until: None,
             })),
             child: Mutex::new(None),
             sidecar_dead: Arc::new(AtomicBool::new(false)),
@@ -222,6 +249,13 @@ impl AudioCapture {
 
     fn start_child(&mut self, exe: &Path, pid: u32) -> Result<(), AudioError> {
         let epoch = self.sidecar_epoch.fetch_add(1, Ordering::SeqCst) + 1;
+        {
+            let mut state = self.lock();
+            state.ring.clear();
+            state.segmenter.reset();
+            state.last_peak = 0.0;
+            state.echo_until = None;
+        }
         self.sidecar_dead.store(false, Ordering::SeqCst);
         let mut command = Command::new(exe);
         command
@@ -248,6 +282,7 @@ impl AudioCapture {
     }
 
     fn stop_child(&mut self) {
+        self.sidecar_epoch.fetch_add(1, Ordering::SeqCst);
         if let Some(mut child) = self.child_lock().take() {
             let _ = child.kill();
             let _ = child.wait();
@@ -313,11 +348,17 @@ fn drain_pcm(
                 mark_sidecar_dead(&dead, &epoch, mine);
                 break;
             }
-            Ok(n) => state
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .ring
-                .push(&buf[..n]),
+            Ok(n) => {
+                let mut state = state
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                if epoch.load(Ordering::SeqCst) != mine {
+                    break;
+                }
+                state.ring.push(&buf[..n]);
+                let suppressed = state.echo_until.is_some_and(|until| Instant::now() < until);
+                state.segmenter.ingest(&buf[..n], suppressed);
+            }
         }
     }
 }
@@ -331,10 +372,13 @@ fn drain_events(
 ) {
     for line in BufReader::new(stderr).lines().map_while(Result::ok) {
         if let Some(peak) = parse_level_peak(&line) {
-            state
+            let mut state = state
                 .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .last_peak = peak;
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if epoch.load(Ordering::SeqCst) != mine {
+                break;
+            }
+            state.last_peak = peak;
         }
     }
     mark_sidecar_dead(&dead, &epoch, mine);
@@ -377,6 +421,34 @@ mod tests {
         assert_eq!(capture.snapshot_48k(), pcm);
         assert_eq!(capture.overrun_count(), 0);
         assert_eq!(capture.pcm_for_asr(), le_i16(&[200]));
+    }
+
+    #[test]
+    fn retired_sidecar_cannot_write_pcm_levels_or_exit_state() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, AtomicU64, Ordering},
+        };
+        let capture = AudioCapture::from_injected();
+        let dead = Arc::new(AtomicBool::new(false));
+        let epoch = Arc::new(AtomicU64::new(2));
+        super::drain_pcm(
+            &[1_u8, 2, 3, 4][..],
+            Arc::clone(&capture.state),
+            Arc::clone(&dead),
+            Arc::clone(&epoch),
+            1,
+        );
+        super::drain_events(
+            &b"{\"type\":\"level\",\"peak\":0.9}\n"[..],
+            Arc::clone(&capture.state),
+            Arc::clone(&dead),
+            Arc::clone(&epoch),
+            1,
+        );
+        assert!(capture.snapshot_48k().is_empty());
+        assert_eq!(capture.last_peak(), 0.0);
+        assert!(!dead.load(Ordering::SeqCst));
     }
 
     #[test]

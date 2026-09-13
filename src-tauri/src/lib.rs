@@ -1,4 +1,5 @@
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 mod app_state;
 pub mod audio;
@@ -8,6 +9,7 @@ pub mod contracts;
 pub mod database;
 pub mod diagnostics;
 pub mod error;
+pub mod livestream;
 pub mod materials;
 pub mod migrate;
 pub mod obs;
@@ -66,7 +68,15 @@ pub fn run() {
         std::process::exit(2);
     }
 
-    let builder = tauri::Builder::default();
+    let builder = tauri::Builder::default().plugin(
+        tauri_plugin_global_shortcut::Builder::new()
+            .with_handler(|app, _, event| {
+                if event.state() == ShortcutState::Pressed {
+                    let _ = app.emit("session.assistant_hotkey.v1", ());
+                }
+            })
+            .build(),
+    );
     let builder = if isolated.is_none() {
         builder.plugin(tauri_plugin_single_instance::init(|app, _, _| {
             if let Some(window) = app.get_webview_window("main") {
@@ -90,6 +100,7 @@ pub fn run() {
             commands::model_provider_discover,
             commands::model_provider_activate,
             commands::model_provider_delete,
+            commands::model_provider_dependencies,
             commands::speech_route_save,
             commands::speech_route_test,
             commands::speech_route_activate,
@@ -119,11 +130,28 @@ pub fn run() {
             commands::session_get,
             commands::session_delete,
             commands::session_finalize_utterance,
+            commands::session_trigger_assistant,
             commands::session_agent_command,
             commands::runtime_get_status,
             commands::config_restore_last_good,
             commands::config_restore_defaults,
             commands::open_app_directory,
+            commands::open_web_source,
+            commands::meeting_process_list,
+            commands::audio_output_list,
+            commands::virtual_audio_status,
+            commands::virtual_audio_install,
+            commands::session_audio_ready,
+            commands::livestream_create_draft,
+            commands::livestream_generate,
+            commands::livestream_get,
+            commands::livestream_control,
+            commands::livestream_insert_question,
+            commands::obs_runtime_status,
+            commands::obs_virtual_camera_start,
+            commands::obs_virtual_camera_stop,
+            commands::obs_password_status,
+            commands::obs_password_save,
         ])
         .setup(move |app| {
             if let Some(isolated) = isolated.as_ref() {
@@ -172,6 +200,10 @@ pub fn run() {
                 .on_navigation(navigation_is_allowed)
                 .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
                 .build()?;
+            let assistant_shortcut =
+                Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyA);
+            let registered = app.global_shortcut().register(assistant_shortcut).is_ok();
+            let _ = app.emit("session.assistant_hotkey_status.v1", registered);
             Ok(())
         })
         .run(tauri::generate_context!())

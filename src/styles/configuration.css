@@ -19,6 +19,10 @@
   display: none;
 }
 
+.configuration-editor { padding: 20px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-muted); }
+.configuration-editor :is(input, select, textarea) { background: var(--surface); }
+.configuration-list { padding-top: 4px; }
+
 .configuration-content .service-panel {
   margin: 0;
   padding: 0;

@@ -84,7 +84,7 @@ export function RoleEditor() {
   return (
     <section className="service-panel role-editor" aria-labelledby="role-editor-heading">
       <h2 className="section-heading" id="role-editor-heading">角色</h2>
-      <p className="configuration-description">用提示词、开场白和表达风格定义你的助手。</p>
+      <p className="configuration-description">用提示词、开场白和表达风格定义你的助手。编辑内置模板后保存会创建个人副本。</p>
       {message && (
         <p className="services-message" role="status">
           {message}
@@ -200,7 +200,7 @@ export function RoleEditor() {
           <button disabled={props.busy || item.configVersion === 0} onClick={props.onCopy}>
             复制
           </button>
-          <button className="button-danger" disabled={props.busy} onClick={props.onDelete}>
+          <button className="button-danger" disabled={props.busy || item.id.startsWith("preset-")} onClick={props.onDelete}>
             {props.pendingDelete ? "确认删除" : "删除"}
           </button>
         </div>

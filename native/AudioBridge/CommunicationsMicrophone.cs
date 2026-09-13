@@ -7,13 +7,15 @@ internal sealed record CommunicationsMicrophoneChange(bool Changed, string Previ
 
 internal static class CommunicationsMicrophone
 {
-    public static CommunicationsMicrophoneChange UseCableOutput()
+    public static CommunicationsMicrophoneChange UseCableOutput(string captureId)
     {
         using var devices = new MMDeviceEnumerator();
         using var previous = devices.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Communications);
-        using var cable = devices.EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active)
-            .FirstOrDefault(device => device.FriendlyName.Contains("CABLE Output", StringComparison.OrdinalIgnoreCase))
-            ?? throw new InvalidOperationException("CABLE_OUTPUT_NOT_FOUND");
+        using var cable = devices.GetDevice(captureId);
+        if (cable.State != DeviceState.Active || cable.DataFlow != DataFlow.Capture ||
+            !(cable.FriendlyName.Contains("CABLE Output", StringComparison.OrdinalIgnoreCase) ||
+              (cable.FriendlyName.Contains("麦克风") && cable.FriendlyName.Contains("VB-Audio"))))
+            throw new InvalidOperationException("CABLE_OUTPUT_NOT_FOUND");
         var changed = !StringComparer.OrdinalIgnoreCase.Equals(previous.ID, cable.ID);
         if (changed) SetDefault(cable.ID);
         using var verified = devices.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Communications);
@@ -22,13 +24,22 @@ internal static class CommunicationsMicrophone
         return new(changed, previous.ID, cable.ID, cable.FriendlyName);
     }
 
-    public static void Restore(string endpointId)
+    public static void Restore(string endpointId, string expectedCurrentId)
     {
-        if (string.IsNullOrWhiteSpace(endpointId)) return;
-        SetDefault(endpointId);
         using var devices = new MMDeviceEnumerator();
-        using var verified = devices.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Communications);
-        if (!StringComparer.OrdinalIgnoreCase.Equals(verified.ID, endpointId))
+        string ReadCurrent() {
+            using var current = devices.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Communications);
+            return current.ID;
+        }
+        RestoreIfUnchanged(endpointId, expectedCurrentId, ReadCurrent, SetDefault);
+    }
+
+    internal static void RestoreIfUnchanged(string endpointId, string expectedCurrentId, Func<string> readCurrent, Action<string> setDefault)
+    {
+        if (string.IsNullOrWhiteSpace(endpointId) || string.IsNullOrWhiteSpace(expectedCurrentId)) return;
+        if (!StringComparer.OrdinalIgnoreCase.Equals(readCurrent(), expectedCurrentId)) return;
+        setDefault(endpointId);
+        if (!StringComparer.OrdinalIgnoreCase.Equals(readCurrent(), endpointId))
             throw new InvalidOperationException("DEFAULT_COMMUNICATIONS_MIC_RESTORE_FAILED");
     }
 

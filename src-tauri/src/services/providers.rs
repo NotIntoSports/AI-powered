@@ -13,6 +13,9 @@ use crate::{
 #[ts(rename_all = "camelCase")]
 pub struct ProviderSaveInput {
     #[serde(default)]
+    #[ts(optional)]
+    pub web_capability: Option<crate::providers::web_search::WebCapability>,
+    #[serde(default)]
     pub id: Option<String>,
     pub name: Option<String>,
     pub base_url: String,
@@ -26,6 +29,8 @@ pub struct ProviderTestResult {
     pub provider_id: String,
     pub reachable: bool,
     pub model_count: usize,
+    pub web_status: crate::providers::web_search::WebCapabilityStatus,
+    pub web_source_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, TS)]
@@ -41,6 +46,15 @@ pub struct ModelDiscoveryResult {
 #[ts(rename_all = "camelCase")]
 pub struct DiscoveredModelDto {
     pub id: String,
+}
+
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ProviderDependency {
+    pub kind: String,
+    pub id: String,
+    pub name: String,
 }
 
 #[derive(Debug)]
@@ -112,6 +126,7 @@ impl<'a> ProviderService<'a> {
         }
         let configured = submitted.is_some() || old_secret.is_some();
         let provider = ProviderConfig {
+            web_capability: input.web_capability,
             id,
             name: input.name.filter(|name| !name.trim().is_empty()),
             base_url: input.base_url,
@@ -224,6 +239,8 @@ impl<'a> ProviderService<'a> {
             provider_id: provider_id.into(),
             reachable: true,
             model_count: discovered.models.len(),
+            web_status: crate::providers::web_search::WebCapabilityStatus::Disabled,
+            web_source_count: 0,
         })
     }
 
@@ -244,6 +261,39 @@ impl<'a> ProviderService<'a> {
             })
             .map_err(ProviderServiceError::Config)?;
         activated.ok_or(ProviderServiceError::NotFound)
+    }
+
+    pub fn dependencies(
+        &self,
+        provider_id: &str,
+    ) -> Result<Vec<ProviderDependency>, ProviderServiceError> {
+        if !crate::config::is_stable_id(provider_id) {
+            return Err(ProviderServiceError::InvalidId);
+        }
+        let config = self.config.load().map_err(ProviderServiceError::Config)?;
+        Ok(config
+            .speech
+            .voice_routes
+            .iter()
+            .filter(|route| route_uses_provider(route, provider_id))
+            .map(|route| ProviderDependency {
+                kind: "voiceRoute".into(),
+                id: route.id.clone(),
+                name: route.name.clone(),
+            })
+            .chain(
+                config
+                    .knowledge
+                    .embedding_configs
+                    .iter()
+                    .filter(|embedding| embedding.provider_id == provider_id)
+                    .map(|embedding| ProviderDependency {
+                        kind: "embedding".into(),
+                        id: embedding.id.clone(),
+                        name: embedding.model_id.clone(),
+                    }),
+            )
+            .collect())
     }
 
     pub fn delete(&self, provider_id: &str) -> Result<(), ProviderServiceError> {

@@ -1,10 +1,10 @@
 :root {
   --surface: #ffffff;
-  --surface-muted: #f7f7f5;
+  --surface-muted: #f5f6f7;
   --surface-hover: #efefec;
   --text: #242424;
   --text-muted: #73736d;
-  --border: #e6e6e1;
+  --border: #e5e7eb;
   --border-strong: #c9c9c2;
   --accent: #292929;
   --accent-contrast: #ffffff;

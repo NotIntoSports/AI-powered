@@ -141,19 +141,23 @@ pub fn parse_process_snapshot(raw: &str) -> Result<Vec<MeetingProcess>, ProcessE
     Ok(rows.iter().filter_map(process_from_json).collect())
 }
 
-pub fn set_default_communications_mic_args() -> Vec<String> {
-    vec!["--set-default-communications-mic".into()]
+pub fn set_default_communications_mic_args(capture_id: &str) -> Vec<String> {
+    vec!["--set-default-communications-mic".into(), capture_id.into()]
 }
 
-pub fn restore_default_communications_mic_args(endpoint_id: &str) -> Vec<String> {
+pub fn restore_default_communications_mic_args(
+    endpoint_id: &str,
+    expected_id: &str,
+) -> Vec<String> {
     vec![
         "--restore-default-communications-mic".into(),
         endpoint_id.to_string(),
+        expected_id.to_string(),
     ]
 }
 
 pub fn meeting_process_powershell_script() -> &'static str {
-    "Get-Process | Where-Object { $_.MainWindowTitle } | Select-Object @{n='pid';e={$_.Id}},@{n='name';e={$_.Path | Split-Path -Leaf}},@{n='title';e={$_.MainWindowTitle}} | ConvertTo-Json -Compress"
+    "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); Get-Process | Where-Object { $_.MainWindowTitle } | Select-Object @{n='pid';e={$_.Id}},@{n='name';e={$_.Path | Split-Path -Leaf}},@{n='title';e={$_.MainWindowTitle}} | ConvertTo-Json -Compress"
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -229,7 +233,8 @@ fn enumerate_via_powershell() -> Result<Vec<MeetingProcess>, ProcessError> {
     if !status.success() {
         return Err(ProcessError::EnumerationFailed);
     }
-    parse_process_snapshot(&String::from_utf8_lossy(&raw))
+    let text = std::str::from_utf8(&raw).map_err(|_| ProcessError::SnapshotInvalid)?;
+    parse_process_snapshot(text)
 }
 
 #[cfg(test)]
@@ -323,12 +328,16 @@ mod tests {
     #[test]
     fn communications_mic_args_match_csharp_cli() {
         assert_eq!(
-            set_default_communications_mic_args(),
-            ["--set-default-communications-mic"]
+            set_default_communications_mic_args("cable"),
+            ["--set-default-communications-mic", "cable"]
         );
         assert_eq!(
-            restore_default_communications_mic_args("endpoint-1"),
-            ["--restore-default-communications-mic", "endpoint-1"]
+            restore_default_communications_mic_args("endpoint-1", "cable"),
+            [
+                "--restore-default-communications-mic",
+                "endpoint-1",
+                "cable"
+            ]
         );
     }
 
@@ -338,6 +347,18 @@ mod tests {
         assert!(script.contains("Get-Process"));
         assert!(script.contains("MainWindowTitle"));
         assert!(script.contains("ConvertTo-Json"));
+        assert!(
+            script.contains("[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)")
+        );
         let _ = PowerShellProcessEnumerator;
+    }
+
+    #[test]
+    fn chinese_meeting_title_round_trips_without_replacement_characters() {
+        let rows = parse_process_snapshot(
+            r#"{"pid":20220,"name":"Feishu.exe","title":"飞书 · 产品评审会议"}"#,
+        )
+        .unwrap();
+        assert_eq!(rows[0].title, "飞书 · 产品评审会议");
     }
 }

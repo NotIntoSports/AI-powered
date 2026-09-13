@@ -1,4 +1,7 @@
-use std::sync::{TryLockError, atomic::Ordering};
+use std::sync::{
+    Arc, TryLockError,
+    atomic::{AtomicBool, Ordering},
+};
 
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -11,13 +14,15 @@ use crate::{
     contracts::{
         AgentCommandInput, AgentCommandResult, AudioLevelEvent, CommandResult,
         DiagnosticsExportResult, FoundationStatus, LegacyMigrationStatus, LegacySessionImport,
-        RuntimeStatus, SessionCitationView, SessionDetail, SessionExportResult, SessionReplyEvent,
+        LivestreamDraftInput, LivestreamGenerateInput, LivestreamRuntime, RuntimeStatus,
+        SessionCitationView, SessionDetail, SessionExportResult, SessionReplyEvent,
         SessionStartResult, SessionSummary, SessionTranscriptEvent, SessionTurnView, StartupState,
     },
     error::PublicError,
     providers::{
-        OfficialLiveKitProbe, OpenAiCompatibleCascade, OpenAiCompatibleEmbeddingProbe,
-        OpenAiCompatibleProbe, OpenAiCompatibleRealtime,
+        ChatMessage, ChatModel, OfficialLiveKitProbe, OpenAiCompatibleCascade,
+        OpenAiCompatibleEmbeddingProbe, OpenAiCompatibleProbe, OpenAiCompatibleRealtime,
+        ProviderEndpoint, TextToSpeech,
     },
     runtime::{
         AgentMode, CascadeCredentials, active_embedding, active_voice_route, parse_agent_command,
@@ -36,6 +41,8 @@ use crate::{
     sessions::{SessionExportError, SessionExportFormat, SessionStore, export_session},
 };
 
+const OBS_PASSWORD_REF: &str = "obs/websocket-password";
+
 #[tauri::command]
 pub fn foundation_get_status() -> CommandResult<FoundationStatus> {
     CommandResult::Ok {
@@ -43,10 +50,990 @@ pub fn foundation_get_status() -> CommandResult<FoundationStatus> {
     }
 }
 
+#[tauri::command]
+pub fn livestream_create_draft(
+    state: State<'_, AppState>,
+    input: LivestreamDraftInput,
+) -> CommandResult<LivestreamRuntime> {
+    let media_path = match resolve_stage_media(input.media_path.as_deref(), input.media_kind) {
+        Ok(path) => path,
+        Err(error) => return CommandResult::Err { error },
+    };
+    let segments = input
+        .segments
+        .into_iter()
+        .map(|segment| {
+            crate::livestream::LivestreamSegment::draft(
+                segment.title,
+                segment.text,
+                segment.estimated_seconds,
+                segment.sources,
+            )
+        })
+        .collect();
+    let script = match crate::livestream::LivestreamScript::draft(
+        input.title.clone(),
+        segments,
+        input.loop_enabled,
+    ) {
+        Ok(script) => script,
+        Err(_) => {
+            return CommandResult::Err {
+                error: PublicError::new("LIVESTREAM_SCRIPT_INVALID", "直播讲稿无效", false),
+            };
+        }
+    };
+    let stage = crate::livestream::LivestreamStageState {
+        product_title: input.title,
+        current_subtitle: String::new(),
+        next_hint: script
+            .segments
+            .first()
+            .map(|segment| format!("下一段：{}", segment.title))
+            .unwrap_or_default(),
+        state: script.state,
+        media_path,
+        media_kind: input.media_kind,
+        output_state: crate::livestream::LivestreamOutputState::Idle,
+        output_error_code: None,
+    };
+    replace_livestream_runtime(&state, script, stage)
+}
+
+#[tauri::command]
+pub fn livestream_generate(
+    state: State<'_, AppState>,
+    input: LivestreamGenerateInput,
+) -> CommandResult<LivestreamRuntime> {
+    let title = input.title.trim();
+    let language = input.language.trim();
+    let max_segments = usize::from(input.max_segments);
+    if title.is_empty()
+        || title.len() > 200
+        || language.is_empty()
+        || language.len() > 40
+        || !(1..=12).contains(&max_segments)
+        || input.material_ids.is_empty()
+        || input.material_ids.len() > 20
+        || input
+            .material_ids
+            .iter()
+            .any(|id| id.is_empty() || id.len() > 128)
+    {
+        return service_error("LIVESTREAM_GENERATE_INVALID", "直播讲稿生成参数无效");
+    }
+    let database_slot = match state.database.lock() {
+        Ok(slot) => slot,
+        Err(_) => return service_error("DATABASE_OPERATION_FAILED", "资料库暂时不可用"),
+    };
+    let Some(database) = database_slot.as_ref() else {
+        return service_error("DATABASE_OPERATION_FAILED", "资料库尚未就绪");
+    };
+    let mut documents = Vec::new();
+    let mut source_names = Vec::new();
+    let mut total_chars = 0usize;
+    for id in &input.material_ids {
+        let row = database.with_connection(|connection| {
+            connection.query_row(
+                "SELECT m.file_name, d.extracted_text
+                 FROM materials m JOIN material_documents d ON d.material_id = m.id
+                 WHERE m.id = ?1 AND m.retrieval_blocked = 0 AND m.status = 'text_ready'",
+                rusqlite::params![id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+        });
+        let Ok((name, text)) = row else {
+            return service_error("LIVESTREAM_MATERIAL_NOT_READY", "所选产品资料不可用");
+        };
+        let remaining = 64 * 1024usize - total_chars.min(64 * 1024);
+        if remaining == 0 {
+            break;
+        }
+        let excerpt = text.chars().take(remaining).collect::<String>();
+        total_chars += excerpt.chars().count();
+        source_names.push(name.clone());
+        documents.push(format!("资料：{name}\n{excerpt}"));
+    }
+    drop(database_slot);
+    if documents.is_empty() {
+        return service_error("LIVESTREAM_MATERIAL_NOT_READY", "所选产品资料不可用");
+    }
+    let config = match state.config.load() {
+        Ok(config) => public_view(&config),
+        Err(error) => return service_error(error.code(), "模型配置不可用"),
+    };
+    let route = match active_voice_route(&config) {
+        Some(route) if route.mode == crate::config::VoiceRouteMode::Cascaded => route,
+        _ => return service_error("LIVESTREAM_MODEL_REQUIRED", "请选择可用的级联语音线路"),
+    };
+    let provider_id = match route.llm_provider_id.as_deref() {
+        Some(id) => id,
+        None => return service_error("LIVESTREAM_MODEL_REQUIRED", "直播模型尚未配置"),
+    };
+    let model_id = match route.llm_model_id.as_deref() {
+        Some(id) if !id.is_empty() => id,
+        _ => return service_error("LIVESTREAM_MODEL_REQUIRED", "直播模型尚未配置"),
+    };
+    let provider = match config
+        .models
+        .providers
+        .iter()
+        .find(|item| item.id == provider_id)
+    {
+        Some(provider) => provider,
+        None => return service_error("LIVESTREAM_MODEL_REQUIRED", "直播模型供应商不存在"),
+    };
+    let secret = match read_provider_secret(&state, &config, Some(provider_id)) {
+        Ok(secret) => secret,
+        Err(error) => return CommandResult::Err { error },
+    };
+    let model = match OpenAiCompatibleCascade::new() {
+        Ok(model) => model,
+        Err(error) => return service_error(error.code(), "无法初始化直播模型"),
+    };
+    let prompt = format!(
+        "产品标题：{title}\n讲解语言：{language}\n最多 {max_segments} 段。\n只依据以下本地资料生成有限讲稿。不得编造价格、库存、优惠或效果。只输出 JSON：{{\"segments\":[{{\"title\":\"\",\"text\":\"\",\"estimatedSeconds\":30,\"sources\":[\"资料文件名\"]}}]}}。\n\n{}",
+        documents.join("\n\n---\n\n")
+    );
+    let response = match model.complete(
+        &ProviderEndpoint {
+            provider_id: provider.id.clone(),
+            base_url: provider.base_url.clone(),
+        },
+        secret.as_deref().map(|value| value.as_str()),
+        model_id,
+        &[
+            ChatMessage {
+                role: "system".into(),
+                content: "你是产品直播讲稿编辑器，只能使用提供的资料，并严格输出 JSON。".into(),
+            },
+            ChatMessage {
+                role: "user".into(),
+                content: prompt,
+            },
+        ],
+    ) {
+        Ok(response) => response,
+        Err(error) => return service_error(error.code(), "直播讲稿生成失败"),
+    };
+    let mut segments = match crate::livestream::parse_generated_segments(&response, max_segments) {
+        Ok(segments) => segments,
+        Err(_) => {
+            return service_error("LIVESTREAM_MODEL_RESPONSE_INVALID", "模型没有返回有效讲稿");
+        }
+    };
+    for segment in &mut segments {
+        segment.sources = source_names.clone();
+    }
+    let media_path = match resolve_stage_media(input.media_path.as_deref(), input.media_kind) {
+        Ok(path) => path,
+        Err(error) => return CommandResult::Err { error },
+    };
+    save_livestream_runtime(
+        &state,
+        title.to_owned(),
+        segments,
+        input.loop_enabled,
+        media_path,
+        input.media_kind,
+    )
+}
+
+#[tauri::command]
+pub fn livestream_get(state: State<'_, AppState>) -> CommandResult<LivestreamRuntime> {
+    let script = state.livestream.lock().ok().and_then(|slot| slot.clone());
+    let stage = state
+        .livestream_stage
+        .lock()
+        .ok()
+        .and_then(|slot| slot.clone());
+    match (script, stage) {
+        (Some(script), Some(stage)) => CommandResult::Ok {
+            data: LivestreamRuntime { script, stage },
+        },
+        _ => service_error("LIVESTREAM_NOT_FOUND", "尚未创建直播讲稿"),
+    }
+}
+
+#[tauri::command]
+pub fn livestream_control(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    action: String,
+) -> CommandResult<LivestreamRuntime> {
+    match prepare_livestream_control(&state, &action) {
+        Ok((data, playback)) => {
+            if let Some(playback) = playback {
+                spawn_livestream_playback(app, playback);
+            }
+            CommandResult::Ok { data }
+        }
+        Err(error) => CommandResult::Err { error },
+    }
+}
+
+#[derive(Clone)]
+struct LivestreamPlayback {
+    text: String,
+    auto_advance: bool,
+    cancel: Arc<AtomicBool>,
+    voice: Result<crate::livestream::LivestreamVoiceSnapshot, &'static str>,
+}
+
+fn livestream_busy() -> PublicError {
+    PublicError::new("SERVICE_BUSY", "直播状态暂时不可用", true)
+}
+
+fn prepare_livestream_control(
+    state: &AppState,
+    action: &str,
+) -> Result<(LivestreamRuntime, Option<LivestreamPlayback>), PublicError> {
+    // Configuration reads happen outside the state transaction. The chosen
+    // snapshot and token are captured together before scheduling any worker.
+    let voice_candidate = resolve_livestream_voice(state);
+    let mut cancel_slot = state.livestream_playback_cancel.lock().map_err(|_| livestream_busy())?;
+    let mut script_slot = match state.livestream.lock() {
+        Ok(slot) => slot,
+        Err(_) => return Err(livestream_busy()),
+    };
+    let mut stage_slot = match state.livestream_stage.lock() {
+        Ok(slot) => slot,
+        Err(_) => return Err(livestream_busy()),
+    };
+    let (Some(script), Some(stage)) = (script_slot.as_mut(), stage_slot.as_mut()) else {
+        return Err(PublicError::new("LIVESTREAM_NOT_FOUND", "尚未创建直播讲稿", false));
+    };
+    let mut next_script = script.clone();
+    let result = match action {
+        "confirm" => next_script.confirm().map(|_| ()),
+        "start" => next_script.start().map(|_| ()),
+        "pause" | "takeover" => next_script.pause(),
+        "resume" => next_script.resume().map(|_| ()),
+        "previous" => next_script.previous().map(|_| ()),
+        "next" => next_script.next().map(|_| ()),
+        "replay" => next_script.replay().map(|_| ()),
+        "complete" => next_script.complete_current(),
+        _ => Err(crate::livestream::LivestreamError::Invalid),
+    };
+    if let Err(error) = result {
+        return Err(PublicError::new(
+            match error {
+                crate::livestream::LivestreamError::ConfirmationRequired => {
+                    "LIVESTREAM_CONFIRMATION_REQUIRED"
+                }
+                crate::livestream::LivestreamError::Finished => "LIVESTREAM_FINISHED",
+                crate::livestream::LivestreamError::Invalid => "LIVESTREAM_CONTROL_INVALID",
+                crate::livestream::LivestreamError::StateInvalid => "LIVESTREAM_STATE_INVALID",
+            },
+            "直播控制未执行",
+            false,
+        ));
+    }
+    if action != "confirm" {
+        cancel_slot.store(true, Ordering::SeqCst);
+    }
+    *script = next_script;
+    update_stage_from_script(stage, script);
+    match action {
+        "start" | "resume" | "previous" | "next" | "replay" => {
+            stage.output_state = crate::livestream::LivestreamOutputState::Synthesizing;
+            stage.output_error_code = None;
+        }
+        "pause" | "takeover" => {
+            stage.output_state = crate::livestream::LivestreamOutputState::Cancelled;
+            stage.output_error_code = None;
+        }
+        "complete" => {
+            // Manual skip is not proof of playback.
+            stage.output_state = crate::livestream::LivestreamOutputState::Cancelled;
+            stage.output_error_code = None;
+        }
+        _ => {}
+    }
+    if let Err(error) = write_livestream_stage(&state, stage) {
+        return Err(error);
+    }
+    let output = LivestreamRuntime {
+        script: script.clone(),
+        stage: stage.clone(),
+    };
+    let speech_text = matches!(
+        action,
+        "start" | "resume" | "previous" | "next" | "replay"
+    )
+    .then(|| stage.current_subtitle.clone())
+    .filter(|text| !text.is_empty());
+    let playback = speech_text.map(|text| {
+        *cancel_slot = Arc::new(AtomicBool::new(false));
+        LivestreamPlayback {
+            text,
+            auto_advance: true,
+            cancel: Arc::clone(&cancel_slot),
+            voice: freeze_livestream_voice(state, voice_candidate),
+        }
+    });
+    Ok((output, playback))
+}
+
+#[tauri::command]
+pub async fn livestream_insert_question(
+    app: AppHandle,
+    question: String,
+) -> CommandResult<LivestreamRuntime> {
+    dispatch_blocking(move || livestream_insert_question_blocking(app, question)).await
+}
+
+fn livestream_insert_question_blocking(
+    app: AppHandle,
+    question: String,
+) -> CommandResult<LivestreamRuntime> {
+    let question = question.trim();
+    if question.is_empty() || question.len() > 4096 {
+        return service_error("LIVESTREAM_QUESTION_INVALID", "人工问题无效");
+    }
+    let state = app.state::<AppState>();
+    let cancel = match replace_livestream_playback_token(&state) {
+        Some(token) => token,
+        None => return service_error("SERVICE_BUSY", "直播状态暂时不可用"),
+    };
+    let context = {
+        let mut script_slot = match state.livestream.lock() {
+            Ok(slot) => slot,
+            Err(_) => return service_error("SERVICE_BUSY", "直播状态暂时不可用"),
+        };
+        let Some(script) = script_slot.as_mut() else {
+            return service_error("LIVESTREAM_NOT_FOUND", "尚未创建直播讲稿");
+        };
+        if !script.confirmed {
+            return service_error("LIVESTREAM_CONFIRMATION_REQUIRED", "请先确认直播讲稿");
+        }
+        if script.state == crate::livestream::LivestreamState::Playing {
+            let _ = script.pause();
+        }
+        script
+            .segments
+            .iter()
+            .map(|segment| format!("{}：{}", segment.title, segment.text))
+            .collect::<Vec<_>>()
+            .join("\n")
+            .chars()
+            .take(64 * 1024)
+            .collect::<String>()
+    };
+    let config = match state.config.load() {
+        Ok(config) => public_view(&config),
+        Err(error) => return service_error(error.code(), "模型配置不可用"),
+    };
+    let route = match active_voice_route(&config) {
+        Some(route) if route.mode == crate::config::VoiceRouteMode::Cascaded => route,
+        _ => return service_error("LIVESTREAM_MODEL_REQUIRED", "请选择可用的级联语音线路"),
+    };
+    let provider_id = match route.llm_provider_id.as_deref() {
+        Some(id) => id,
+        None => return service_error("LIVESTREAM_MODEL_REQUIRED", "直播模型尚未配置"),
+    };
+    let model_id = match route.llm_model_id.as_deref() {
+        Some(id) if !id.is_empty() => id,
+        _ => return service_error("LIVESTREAM_MODEL_REQUIRED", "直播模型尚未配置"),
+    };
+    let provider = match config
+        .models
+        .providers
+        .iter()
+        .find(|item| item.id == provider_id)
+    {
+        Some(provider) => provider,
+        None => return service_error("LIVESTREAM_MODEL_REQUIRED", "直播模型供应商不存在"),
+    };
+    let secret = match read_provider_secret(&state, &config, Some(provider_id)) {
+        Ok(secret) => secret,
+        Err(error) => return CommandResult::Err { error },
+    };
+    let model = match OpenAiCompatibleCascade::new() {
+        Ok(model) => model,
+        Err(error) => return service_error(error.code(), "无法初始化直播模型"),
+    };
+    let answer = match model.complete(
+        &ProviderEndpoint {
+            provider_id: provider.id.clone(),
+            base_url: provider.base_url.clone(),
+        },
+        secret.as_deref().map(|value| value.as_str()),
+        model_id,
+        &[
+            ChatMessage {
+                role: "system".into(),
+                content: "你是直播讲解员。只依据已确认讲稿回答人工问题；资料不足时明确说不知道，不得编造价格、库存、优惠或效果。只输出要播报的简短答案。".into(),
+            },
+            ChatMessage {
+                role: "user".into(),
+                content: format!("已确认讲稿：\n{context}\n\n人工问题：{question}"),
+            },
+        ],
+    ) {
+        Ok(answer) if !answer.trim().is_empty() => answer.trim().chars().take(4096).collect::<String>(),
+        Ok(_) => return service_error("LIVESTREAM_QUESTION_EMPTY", "模型没有生成可用回答"),
+        Err(error) => return service_error(error.code(), "人工问题回答失败"),
+    };
+    if cancel.load(Ordering::SeqCst) {
+        return service_error("PLAYBACK_CANCELLED", "人工问题已取消");
+    }
+    let output = {
+        let script_slot = match state.livestream.lock() {
+            Ok(slot) => slot,
+            Err(_) => return service_error("SERVICE_BUSY", "直播状态暂时不可用"),
+        };
+        let mut stage_slot = match state.livestream_stage.lock() {
+            Ok(slot) => slot,
+            Err(_) => return service_error("SERVICE_BUSY", "直播舞台暂时不可用"),
+        };
+        let (Some(script), Some(stage)) = (script_slot.as_ref(), stage_slot.as_mut()) else {
+            return service_error("LIVESTREAM_NOT_FOUND", "尚未创建直播讲稿");
+        };
+        stage.state = script.state;
+        stage.current_subtitle = answer.clone();
+        stage.next_hint = "人工回答结束后可继续讲稿".into();
+        stage.output_state = crate::livestream::LivestreamOutputState::Synthesizing;
+        stage.output_error_code = None;
+        if let Err(error) = write_livestream_stage(&state, stage) {
+            return CommandResult::Err { error };
+        }
+        LivestreamRuntime {
+            script: script.clone(),
+            stage: stage.clone(),
+        }
+    };
+    let voice = resolve_livestream_voice(&state);
+    spawn_livestream_playback(
+        app,
+        LivestreamPlayback {
+            text: answer,
+            auto_advance: false,
+            cancel,
+            voice,
+        },
+    );
+    CommandResult::Ok { data: output }
+}
+
+fn spawn_livestream_playback(app: AppHandle, playback: LivestreamPlayback) {
+    let LivestreamPlayback {
+        text,
+        auto_advance,
+        cancel,
+        voice,
+    } = playback;
+    let scheduled_voice = voice.clone();
+    // Capture the cancellation identity at scheduling time, never after the
+    // worker starts: a queued old paragraph must not adopt a newer token. The
+    // voice snapshot obeys the same rule: segments already queued keep the
+    // voice frozen when they were scheduled, never a later config change.
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let result = (|| -> Result<(), &'static str> {
+            if cancel.load(Ordering::SeqCst) {
+                return Err("PLAYBACK_CANCELLED");
+            }
+            let voice = voice?;
+            let config = state
+                .config
+                .load()
+                .map(|config| public_view(&config))
+                .map_err(|_| "LIVESTREAM_VOICE_CONFIG_FAILED")?;
+            let secret = read_provider_secret(&state, &config, Some(&voice.provider_id))
+                .map_err(|_| "LIVESTREAM_TTS_CREDENTIAL_FAILED")?;
+            let tts =
+                OpenAiCompatibleCascade::new().map_err(|_| "LIVESTREAM_TTS_INITIALIZE_FAILED")?;
+            let pcm = tts
+                .synthesize(
+                    &ProviderEndpoint {
+                        provider_id: voice.provider_id.clone(),
+                        base_url: voice.base_url.clone(),
+                    },
+                    secret.as_deref().map(|value| value.as_str()),
+                    &voice.model_id,
+                    &voice.voice_id,
+                    &text,
+                )
+                .map_err(|_| "LIVESTREAM_TTS_FAILED")?;
+            if pcm.is_empty() {
+                return Err("LIVESTREAM_TTS_EMPTY");
+            }
+            if cancel.load(Ordering::SeqCst) {
+                return Err("PLAYBACK_CANCELLED");
+            }
+            set_livestream_output_state(
+                &state,
+                &cancel,
+                crate::livestream::LivestreamOutputState::Playing,
+                None,
+            );
+            let bridge = audio_bridge_path(&app)?;
+            let devices = crate::prerequisites::enumerate_audio_devices(&bridge)?;
+            let preparation = crate::prerequisites::VirtualAudioPreparation::from_devices(&devices);
+            let endpoint_id = preparation
+                .render_endpoint_id
+                .ok_or("VIRTUAL_AUDIO_RENDER_MISSING")?;
+            crate::audio::playback::BridgePlayback {
+                executable: bridge,
+                endpoint_id,
+            }
+            .play(&pcm, 24_000, || cancel.load(Ordering::SeqCst))
+        })();
+        match result {
+            Ok(()) => {
+                if auto_advance {
+                    if let Some(next_text) = advance_livestream_after_success(&state, &cancel) {
+                        spawn_livestream_playback(
+                            app,
+                            LivestreamPlayback {
+                                text: next_text,
+                                auto_advance: true,
+                                cancel: Arc::clone(&cancel),
+                                voice: scheduled_voice,
+                            },
+                        );
+                    }
+                } else {
+                    set_livestream_output_state(
+                        &state,
+                        &cancel,
+                        crate::livestream::LivestreamOutputState::Played,
+                        None,
+                    );
+                }
+            }
+            Err("PLAYBACK_CANCELLED") => set_livestream_output_state(
+                &state,
+                &cancel,
+                crate::livestream::LivestreamOutputState::Cancelled,
+                None,
+            ),
+            Err(code) => set_livestream_output_state(
+                &state,
+                &cancel,
+                crate::livestream::LivestreamOutputState::Failed,
+                Some(code),
+            ),
+        }
+    });
+}
+
+fn advance_livestream_after_success(state: &AppState, token: &Arc<AtomicBool>) -> Option<String> {
+    let current = state.livestream_playback_cancel.lock().ok()?;
+    if !Arc::ptr_eq(&current, token) || token.load(Ordering::SeqCst) {
+        return None;
+    }
+    let mut script_slot = state.livestream.lock().ok()?;
+    let mut stage_slot = state.livestream_stage.lock().ok()?;
+    let script = script_slot.as_mut()?;
+    let stage = stage_slot.as_mut()?;
+    // Only an actively playing script may auto-advance; a user-paused or
+    // finished script must stay where it is until the user resumes it.
+    if script.state != crate::livestream::LivestreamState::Playing {
+        return None;
+    }
+    if script.complete_current().is_err() {
+        return None;
+    }
+    let next_text = match script.next() {
+        Ok(segment) => Some(segment.text.clone()),
+        Err(crate::livestream::LivestreamError::Finished) => None,
+        Err(_) => {
+            stage.output_state = crate::livestream::LivestreamOutputState::Failed;
+            stage.output_error_code = Some("LIVESTREAM_AUTO_ADVANCE_FAILED".into());
+            let _ = write_livestream_stage(state, stage);
+            return None;
+        }
+    };
+    update_stage_from_script(stage, script);
+    stage.output_state = if next_text.is_some() {
+        crate::livestream::LivestreamOutputState::Synthesizing
+    } else {
+        crate::livestream::LivestreamOutputState::Played
+    };
+    stage.output_error_code = None;
+    let _ = write_livestream_stage(state, stage);
+    next_text
+}
+
+fn set_livestream_output_state(
+    state: &AppState,
+    token: &Arc<AtomicBool>,
+    output_state: crate::livestream::LivestreamOutputState,
+    error_code: Option<&str>,
+) {
+    let is_current = state
+        .livestream_playback_cancel
+        .lock()
+        .map(|current| Arc::ptr_eq(&current, token) && !token.load(Ordering::SeqCst))
+        .unwrap_or(false);
+    if !is_current {
+        return;
+    }
+    let mut script_slot = match state.livestream.lock() {
+        Ok(slot) => slot,
+        Err(_) => return,
+    };
+    let mut stage_slot = match state.livestream_stage.lock() {
+        Ok(slot) => slot,
+        Err(_) => return,
+    };
+    let (Some(script), Some(stage)) = (script_slot.as_mut(), stage_slot.as_mut()) else {
+        return;
+    };
+    stage.output_state = output_state;
+    stage.output_error_code = error_code.map(str::to_owned);
+    if output_state == crate::livestream::LivestreamOutputState::Failed
+        && script.state == crate::livestream::LivestreamState::Playing
+    {
+        let _ = script.pause();
+        update_stage_from_script(stage, script);
+    }
+    let _ = write_livestream_stage(state, stage);
+}
+
+#[tauri::command]
+pub fn obs_runtime_status(
+    state: State<'_, AppState>,
+) -> CommandResult<crate::obs::ObsRuntimeStatus> {
+    obs_command(&state, "status")
+}
+
+#[tauri::command]
+pub fn obs_virtual_camera_start(
+    state: State<'_, AppState>,
+) -> CommandResult<crate::obs::ObsRuntimeStatus> {
+    obs_command(&state, "start")
+}
+
+#[tauri::command]
+pub fn obs_virtual_camera_stop(
+    state: State<'_, AppState>,
+) -> CommandResult<crate::obs::ObsRuntimeStatus> {
+    obs_command(&state, "stop")
+}
+
+fn obs_command(state: &AppState, action: &str) -> CommandResult<crate::obs::ObsRuntimeStatus> {
+    let password = match state.secrets.read(OBS_PASSWORD_REF) {
+        Ok(value) => value,
+        Err(_) => return service_error("SECRET_BACKEND_UNAVAILABLE", "OBS 凭据不可用"),
+    };
+    let stage_file = state
+        .paths
+        .data_directory
+        .join("livestream")
+        .join("stage.html");
+    let password = password.as_deref().map(|value| value.as_str());
+    let status = match action {
+        "start" => {
+            let (status, previous) = tauri::async_runtime::block_on(async {
+                let previous = crate::obs::current_program_scene(password).await.ok();
+                let status = crate::obs::start_virtual_camera(password, &stage_file).await;
+                (status, previous)
+            });
+            if status.virtual_camera_active
+                && let Some(previous) = previous.filter(|scene| scene != crate::obs::APP_SCENE_NAME)
+                && let Ok(mut slot) = state.obs_previous_scene.lock()
+            {
+                *slot = Some(previous);
+            }
+            status
+        }
+        "stop" => {
+            let previous = state
+                .obs_previous_scene
+                .lock()
+                .ok()
+                .and_then(|slot| slot.clone());
+            let mut status =
+                tauri::async_runtime::block_on(crate::obs::stop_virtual_camera(password));
+            if !status.virtual_camera_active
+                && let Some(previous) = previous
+            {
+                if let Err(code) = tauri::async_runtime::block_on(
+                    crate::obs::restore_program_scene(password, &previous),
+                ) {
+                    status.error_code = Some(code.into());
+                } else if let Ok(mut slot) = state.obs_previous_scene.lock() {
+                    *slot = None;
+                }
+            }
+            status
+        }
+        _ => tauri::async_runtime::block_on(crate::obs::ensure_stage(password, &stage_file)),
+    };
+    CommandResult::Ok { data: status }
+}
+
+#[tauri::command]
+pub fn obs_password_status(
+    state: State<'_, AppState>,
+) -> CommandResult<crate::contracts::SecretStatus> {
+    match state.secrets.status(OBS_PASSWORD_REF) {
+        Ok(data) => CommandResult::Ok { data },
+        Err(error) => service_error(error.code(), "OBS 凭据状态不可用"),
+    }
+}
+
+#[tauri::command]
+pub fn obs_password_save(
+    state: State<'_, AppState>,
+    password: String,
+) -> CommandResult<crate::contracts::SecretStatus> {
+    if password.len() > 1024 || password.contains(['\r', '\n', '\0']) {
+        return service_error("OBS_PASSWORD_INVALID", "OBS 密码无效");
+    }
+    let result = if password.is_empty() {
+        state.secrets.delete(OBS_PASSWORD_REF)
+    } else {
+        state.secrets.set(OBS_PASSWORD_REF, &password)
+    };
+    match result {
+        Ok(data) => CommandResult::Ok { data },
+        Err(error) => service_error(error.code(), "OBS 密码保存失败"),
+    }
+}
+
+fn resolve_stage_media(
+    path: Option<&str>,
+    kind: Option<crate::livestream::LivestreamMediaKind>,
+) -> Result<Option<String>, PublicError> {
+    let Some(path) = path.map(str::trim).filter(|path| !path.is_empty()) else {
+        return if kind.is_none() {
+            Ok(None)
+        } else {
+            Err(PublicError::new(
+                "LIVESTREAM_MEDIA_INVALID",
+                "直播素材无效",
+                false,
+            ))
+        };
+    };
+    let path = std::path::Path::new(path)
+        .canonicalize()
+        .map_err(|_| PublicError::new("LIVESTREAM_MEDIA_NOT_FOUND", "找不到直播素材", false))?;
+    if !path.is_file() || kind.is_none() {
+        return Err(PublicError::new(
+            "LIVESTREAM_MEDIA_INVALID",
+            "直播素材无效",
+            false,
+        ));
+    }
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let valid = match kind {
+        Some(crate::livestream::LivestreamMediaKind::Image) => {
+            matches!(extension.as_str(), "png" | "jpg" | "jpeg" | "webp" | "gif")
+        }
+        Some(crate::livestream::LivestreamMediaKind::Video) => {
+            matches!(extension.as_str(), "mp4" | "webm" | "mov" | "mkv")
+        }
+        None => false,
+    };
+    if !valid {
+        return Err(PublicError::new(
+            "LIVESTREAM_MEDIA_TYPE_UNSUPPORTED",
+            "不支持的直播素材格式",
+            false,
+        ));
+    }
+    Ok(Some(format!(
+        "file:///{}",
+        path.to_string_lossy().replace('\\', "/")
+    )))
+}
+
+fn update_stage_from_script(
+    stage: &mut crate::livestream::LivestreamStageState,
+    script: &crate::livestream::LivestreamScript,
+) {
+    stage.state = script.state;
+    stage.current_subtitle = script
+        .current_index
+        .and_then(|index| script.segments.get(index))
+        .map(|segment| segment.text.clone())
+        .unwrap_or_default();
+    stage.next_hint = script
+        .current_index
+        .and_then(|index| script.segments.get(index + 1))
+        .map(|segment| format!("下一段：{}", segment.title))
+        .unwrap_or_default();
+}
+
+fn write_livestream_stage(
+    state: &AppState,
+    stage: &crate::livestream::LivestreamStageState,
+) -> Result<(), PublicError> {
+    let directory = state.paths.data_directory.join("livestream");
+    std::fs::create_dir_all(&directory).map_err(|_| {
+        PublicError::new("LIVESTREAM_STAGE_WRITE_FAILED", "无法创建直播舞台", false)
+    })?;
+    std::fs::write(
+        directory.join("stage.html"),
+        crate::livestream::render_stage_html(stage),
+    )
+    .map_err(|_| PublicError::new("LIVESTREAM_STAGE_WRITE_FAILED", "无法更新直播舞台", false))
+}
+
+fn save_livestream_runtime(
+    state: &AppState,
+    title: String,
+    segments: Vec<crate::livestream::LivestreamSegment>,
+    loop_enabled: bool,
+    media_path: Option<String>,
+    media_kind: Option<crate::livestream::LivestreamMediaKind>,
+) -> CommandResult<LivestreamRuntime> {
+    let script =
+        match crate::livestream::LivestreamScript::draft(title.clone(), segments, loop_enabled) {
+            Ok(script) => script,
+            Err(_) => return service_error("LIVESTREAM_SCRIPT_INVALID", "直播讲稿无效"),
+        };
+    let stage = crate::livestream::LivestreamStageState {
+        product_title: title,
+        current_subtitle: String::new(),
+        next_hint: script
+            .segments
+            .first()
+            .map(|segment| format!("下一段：{}", segment.title))
+            .unwrap_or_default(),
+        state: script.state,
+        media_path,
+        media_kind,
+        output_state: crate::livestream::LivestreamOutputState::Idle,
+        output_error_code: None,
+    };
+    replace_livestream_runtime(state, script, stage)
+}
+
+fn replace_livestream_playback_token(state: &AppState) -> Option<Arc<AtomicBool>> {
+    let mut slot = state.livestream_playback_cancel.lock().ok()?;
+    slot.store(true, Ordering::SeqCst);
+    *slot = Arc::new(AtomicBool::new(false));
+    Some(Arc::clone(&slot))
+}
+
+fn cancel_livestream_playback(state: &AppState) {
+    if let Ok(slot) = state.livestream_playback_cancel.lock() {
+        slot.store(true, Ordering::SeqCst);
+    }
+}
+
+fn livestream_voice_from_config(
+    config: &PublicConfig,
+) -> Result<crate::livestream::LivestreamVoiceSnapshot, &'static str> {
+    let route = active_voice_route(config).ok_or("LIVESTREAM_VOICE_ROUTE_MISSING")?;
+    if route.mode != crate::config::VoiceRouteMode::Cascaded {
+        return Err("LIVESTREAM_VOICE_ROUTE_UNSUPPORTED");
+    }
+    let provider_id = route
+        .tts_provider_id
+        .clone()
+        .ok_or("LIVESTREAM_TTS_PROVIDER_MISSING")?;
+    let model_id = route
+        .tts_model_id
+        .clone()
+        .filter(|id| !id.is_empty())
+        .ok_or("LIVESTREAM_TTS_MODEL_MISSING")?;
+    let provider = config
+        .models
+        .providers
+        .iter()
+        .find(|provider| provider.id == provider_id)
+        .ok_or("LIVESTREAM_TTS_PROVIDER_MISSING")?;
+    Ok(crate::livestream::LivestreamVoiceSnapshot {
+        provider_id,
+        base_url: provider.base_url.clone(),
+        model_id,
+        voice_id: route.voice_id.clone().unwrap_or_default(),
+    })
+}
+
+fn freeze_livestream_voice(
+    state: &AppState,
+    candidate: Result<crate::livestream::LivestreamVoiceSnapshot, &'static str>,
+) -> Result<crate::livestream::LivestreamVoiceSnapshot, &'static str> {
+    // The candidate was captured before the state transaction; prefer it when
+    // the slot was cleared in between so every queued segment shares one voice.
+    if let Ok(mut slot) = state.livestream_voice.lock() {
+        if slot.is_none() && let Ok(snapshot) = &candidate {
+            *slot = Some(snapshot.clone());
+        }
+        if let Some(snapshot) = slot.as_ref() {
+            return Ok(snapshot.clone());
+        }
+    }
+    candidate
+}
+
+fn resolve_livestream_voice(
+    state: &AppState,
+) -> Result<crate::livestream::LivestreamVoiceSnapshot, &'static str> {
+    if let Ok(slot) = state.livestream_voice.lock()
+        && let Some(snapshot) = slot.as_ref()
+    {
+        return Ok(snapshot.clone());
+    }
+    let config = state
+        .config
+        .load()
+        .map(|config| public_view(&config))
+        .map_err(|_| "LIVESTREAM_VOICE_CONFIG_FAILED")?;
+    let snapshot = livestream_voice_from_config(&config)?;
+    if let Ok(mut slot) = state.livestream_voice.lock() {
+        *slot = Some(snapshot.clone());
+    }
+    Ok(snapshot)
+}
+
+fn replace_livestream_runtime(
+    state: &AppState,
+    script: crate::livestream::LivestreamScript,
+    stage: crate::livestream::LivestreamStageState,
+) -> CommandResult<LivestreamRuntime> {
+    cancel_livestream_playback(state);
+    let _ = replace_livestream_playback_token(state);
+    if let Ok(mut slot) = state.livestream_voice.lock() {
+        *slot = None;
+    }
+    if let Err(error) = write_livestream_stage(state, &stage) {
+        return CommandResult::Err { error };
+    }
+    let mut script_slot = match state.livestream.lock() {
+        Ok(slot) => slot,
+        Err(_) => return service_error("SERVICE_BUSY", "直播状态暂时不可用"),
+    };
+    let mut stage_slot = match state.livestream_stage.lock() {
+        Ok(slot) => slot,
+        Err(_) => return service_error("SERVICE_BUSY", "直播舞台暂时不可用"),
+    };
+    *script_slot = Some(script.clone());
+    *stage_slot = Some(stage.clone());
+    CommandResult::Ok {
+        data: LivestreamRuntime { script, stage },
+    }
+}
+
 pub fn diagnostics_export_blocking(
     state: State<'_, AppState>,
     destination: String,
 ) -> CommandResult<DiagnosticsExportResult> {
+    diagnostics_export_cmd(&state, destination)
+}
+
+fn diagnostics_export_cmd(
+    state: &AppState,
+    destination: String,
+) -> CommandResult<DiagnosticsExportResult> {
+    // The renderer is untrusted: a compromised page must not be able to place
+    // diagnostic files at arbitrary filesystem locations, so writes are pinned
+    // to the application data directory.
+    if let Err(error) = ensure_diagnostics_destination(state, &destination) {
+        return CommandResult::Err { error };
+    }
     let public_config = match state.config.load() {
         Ok(config) => match serde_json::to_value(diagnostic_view(&config)) {
             Ok(value) => value,
@@ -93,6 +1080,31 @@ pub fn diagnostics_export_blocking(
             error: PublicError::new(error.code(), error.to_string(), false),
         },
     }
+}
+
+fn ensure_diagnostics_destination(state: &AppState, destination: &str) -> Result<(), PublicError> {
+    const INVALID: &str = "DIAGNOSTICS_DESTINATION_INVALID";
+    let destination = std::path::Path::new(destination);
+    if !destination.is_absolute() {
+        return Err(PublicError::new(INVALID, "诊断报告只能导出到应用数据目录", false));
+    }
+    std::fs::create_dir_all(&state.paths.data_directory)
+        .map_err(|_| PublicError::new("DIAGNOSTICS_OPERATION_FAILED", "Diagnostic operation failed", false))?;
+    let data_root = state
+        .paths
+        .data_directory
+        .canonicalize()
+        .map_err(|_| PublicError::new("DIAGNOSTICS_OPERATION_FAILED", "Diagnostic operation failed", false))?;
+    let Some(parent) = destination.parent() else {
+        return Err(PublicError::new(INVALID, "诊断报告只能导出到应用数据目录", false));
+    };
+    let parent = parent
+        .canonicalize()
+        .map_err(|_| PublicError::new(INVALID, "诊断报告只能导出到应用数据目录", false))?;
+    if !parent.starts_with(&data_root) {
+        return Err(PublicError::new(INVALID, "诊断报告只能导出到应用数据目录", false));
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -201,8 +1213,18 @@ fn provider_service_error<T: ts_rs::TS>(error: ProviderServiceError) -> CommandR
     let code = error.code();
     let mut public = PublicError::new(
         code,
-        "Provider operation failed",
-        matches!(code, "PROVIDER_TIMEOUT" | "PROVIDER_REQUEST_FAILED"),
+        match code {
+            "PROVIDER_IN_USE" => "供应商仍被语音线路或 Embedding 配置引用，请先处理关联配置。",
+            "SECRET_CLEANUP_FAILED" => "供应商配置已删除，但密钥清理失败，可以重试清理。",
+            "CONFIG_WRITE_FAILED" => "无法写入配置，删除未完成。请检查目录写入权限。",
+            "CONFIG_READ_FAILED" => "无法读取本地配置，操作未完成。",
+            "PROVIDER_NOT_FOUND" => "供应商不存在，请刷新配置列表。",
+            _ => "供应商操作未完成，请检查配置后重试。",
+        },
+        matches!(
+            code,
+            "PROVIDER_TIMEOUT" | "PROVIDER_REQUEST_FAILED" | "SECRET_CLEANUP_FAILED"
+        ),
     );
     if let Some(field) = match code {
         "PROVIDER_ID_INVALID" => Some("id"),
@@ -483,6 +1505,18 @@ fn load_public_config(state: &AppState) -> Result<PublicConfig, PublicError> {
     }
 }
 
+fn load_session_config(state: &AppState) -> Result<PublicConfig, PublicError> {
+    let sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| PublicError::new("SERVICE_BUSY", "会话暂时忙碌", true))?;
+    if let Some(config) = sessions.config_snapshot() {
+        return Ok(config.clone());
+    }
+    drop(sessions);
+    load_public_config(state)
+}
+
 fn secrets_backend_ready(state: &AppState) -> bool {
     state.secrets.status("system/startup-probe").is_ok()
 }
@@ -660,7 +1694,20 @@ fn session_detail(
 ) -> Result<SessionDetail, SessionServiceError> {
     let session = store.get(id)?.ok_or(SessionServiceError::NotFound)?;
     let mut turns = Vec::new();
+    let events = store.list_events(id)?;
     for turn in store.list_turns(id)? {
+        let web = events
+            .iter()
+            .rev()
+            .filter(|event| event.kind == "web_sources")
+            .filter_map(|event| serde_json::from_str::<serde_json::Value>(&event.payload).ok())
+            .find(|event| event["turnId"] == turn.id);
+        let meta = events
+            .iter()
+            .rev()
+            .filter(|event| event.kind == "turn_meta")
+            .filter_map(|event| serde_json::from_str::<serde_json::Value>(&event.payload).ok())
+            .find(|event| event["turnId"] == turn.id);
         let citations = store
             .list_citations(&turn.id)?
             .into_iter()
@@ -671,6 +1718,21 @@ fn session_detail(
             })
             .collect();
         turns.push(SessionTurnView {
+            trigger_source: meta
+                .as_ref()
+                .and_then(|value| value["triggerSource"].as_str())
+                .map(str::to_owned),
+            user_confirmed: meta
+                .as_ref()
+                .and_then(|value| value["userConfirmed"].as_bool()),
+            playback_status: meta
+                .as_ref()
+                .and_then(|value| value["playbackStatus"].as_str())
+                .map(str::to_owned),
+            web_sources: web
+                .as_ref()
+                .and_then(|event| serde_json::from_value(event["sources"].clone()).ok()),
+            web_degraded: web.as_ref().and_then(|event| event["degraded"].as_bool()),
             id: turn.id,
             turn_index: turn.turn_index,
             user_text: turn.user_text,
@@ -685,15 +1747,77 @@ fn session_detail(
     })
 }
 
+#[cfg(test)]
 fn session_start_cmd(
     state: &AppState,
     transport_mode: Option<&str>,
 ) -> CommandResult<SessionStartResult> {
-    let config = match load_public_config(state) {
+    session_start_selected_cmd(state, transport_mode, None, None, false)
+}
+
+#[cfg(test)]
+fn session_start_selected_cmd(
+    state: &AppState,
+    transport_mode: Option<&str>,
+    role_profile_id: Option<&str>,
+    voice_route_id: Option<&str>,
+    allow_web_search: bool,
+) -> CommandResult<SessionStartResult> {
+    session_start_capture_cmd(
+        state,
+        transport_mode,
+        role_profile_id,
+        voice_route_id,
+        allow_web_search,
+        None,
+    )
+}
+
+fn session_start_capture_cmd(
+    state: &AppState,
+    transport_mode: Option<&str>,
+    role_profile_id: Option<&str>,
+    voice_route_id: Option<&str>,
+    allow_web_search: bool,
+    capture: Option<crate::services::MeetingCapture<'_>>,
+) -> CommandResult<SessionStartResult> {
+    let mut config = match load_public_config(state) {
         Ok(config) => config,
         Err(error) => return CommandResult::Err { error },
     };
+    if let Some(id) = role_profile_id {
+        if !config
+            .role_profiles
+            .iter()
+            .any(|role| role.id == id && role.config_version > 0)
+        {
+            return service_error("SESSION_ROLE_REQUIRED", "请选择有效的会话角色");
+        }
+        config.active_role_profile_id = Some(id.into());
+        for role in &mut config.role_profiles {
+            role.active = role.id == id;
+        }
+    }
+    if let Some(id) = voice_route_id {
+        if !config
+            .speech
+            .voice_routes
+            .iter()
+            .any(|route| route.id == id && route.config_version > 0)
+        {
+            return service_error("SESSION_ROUTE_REQUIRED", "请选择有效的语音线路");
+        }
+        config.speech.active_voice_route_id = Some(id.into());
+        for route in &mut config.speech.voice_routes {
+            route.active = route.id == id;
+        }
+    }
     let secrets_ready = secrets_backend_ready(state);
+    if !allow_web_search {
+        for provider in &mut config.models.providers {
+            provider.web_capability = None;
+        }
+    }
     let database = match state.database.lock() {
         Ok(guard) => guard,
         Err(_) => {
@@ -727,13 +1851,25 @@ fn session_start_cmd(
     let livekit = probe
         .as_ref()
         .map(|probe| LiveKitSettingsService::new(&state.config, &state.secrets, probe));
-    match sessions.start(
-        database,
-        &config,
-        secrets_ready,
-        transport_mode,
-        livekit.as_ref(),
-    ) {
+    let outcome = if let Some(capture) = capture {
+        sessions.start_with_meeting_capture(
+            database,
+            &config,
+            secrets_ready,
+            transport_mode,
+            livekit.as_ref(),
+            capture,
+        )
+    } else {
+        sessions.start(
+            database,
+            &config,
+            secrets_ready,
+            transport_mode,
+            livekit.as_ref(),
+        )
+    };
+    match outcome {
         Ok(SessionStartOutcome::Started { session, livekit }) => CommandResult::Ok {
             data: SessionStartResult::Started {
                 session: session.into(),
@@ -748,8 +1884,51 @@ fn session_start_cmd(
     }
 }
 
+fn keep_session_routing(state: &AppState, change: crate::prerequisites::AudioRoutingChange) {
+    let _ = crate::prerequisites::persist_audio_routing(&state.paths.data_directory, &change);
+    if let Ok(mut slot) = state.audio_routing.lock() {
+        *slot = Some(change);
+    }
+}
+
+fn rollback_session_routing(
+    state: &AppState,
+    change: crate::prerequisites::AudioRoutingChange,
+) -> Option<&'static str> {
+    match crate::prerequisites::restore_communications_mic(&change) {
+        Ok(()) => {
+            crate::prerequisites::clear_persisted_audio_routing(&state.paths.data_directory);
+            None
+        }
+        Err(code) => {
+            keep_session_routing(state, change);
+            Some(code)
+        }
+    }
+}
+
 fn session_stop_cmd(state: &AppState) -> CommandResult<SessionSummary> {
     state.session_control.request_stop();
+    stop_operator_monitor(state);
+    let routing = state
+        .audio_routing
+        .lock()
+        .ok()
+        .and_then(|mut slot| slot.take());
+    let restore_failed = routing
+        .as_ref()
+        .is_some_and(|change| crate::prerequisites::restore_communications_mic(change).is_err());
+    if restore_failed {
+        if let Some(change) = routing
+            && let Ok(mut slot) = state.audio_routing.lock()
+        {
+            *slot = Some(change.clone());
+            let _ =
+                crate::prerequisites::persist_audio_routing(&state.paths.data_directory, &change);
+        }
+    } else {
+        crate::prerequisites::clear_persisted_audio_routing(&state.paths.data_directory);
+    }
     let database = match state.database.try_lock() {
         Ok(guard) => guard,
         Err(TryLockError::WouldBlock) => return session_stop_pending(state),
@@ -770,12 +1949,19 @@ fn session_stop_cmd(state: &AppState) -> CommandResult<SessionSummary> {
             );
         }
     };
-    match sessions.stop(database) {
+    let stopped = match sessions.stop(database) {
         Ok(session) => CommandResult::Ok {
             data: session.into(),
         },
         Err(error) => session_service_error(error),
+    };
+    if restore_failed {
+        return service_error(
+            "AUDIO_ROUTING_RESTORE_FAILED",
+            "会话已停止，但原通信麦克风恢复失败；请在系统声音设置中检查",
+        );
     }
+    stopped
 }
 
 fn session_stop_pending(state: &AppState) -> CommandResult<SessionSummary> {
@@ -973,7 +2159,7 @@ fn session_agent_command_cmd(
             };
         }
     };
-    let config = match load_public_config(state) {
+    let config = match load_session_config(state) {
         Ok(config) => config,
         Err(error) => return CommandResult::Err { error },
     };
@@ -1015,7 +2201,25 @@ fn session_finalize_utterance_cmd(
     credentials: CascadeCredentials<'_>,
     text: Option<&str>,
 ) -> CommandResult<SessionTurnView> {
-    let config = match load_public_config(state) {
+    session_finalize_utterance_cmd_inner(state, probes, credentials, text, false)
+}
+
+fn session_finalize_utterance_forced_cmd(
+    state: &AppState,
+    probes: &SessionProbes<'_>,
+    credentials: CascadeCredentials<'_>,
+) -> CommandResult<SessionTurnView> {
+    session_finalize_utterance_cmd_inner(state, probes, credentials, None, true)
+}
+
+fn session_finalize_utterance_cmd_inner(
+    state: &AppState,
+    probes: &SessionProbes<'_>,
+    credentials: CascadeCredentials<'_>,
+    text: Option<&str>,
+    force_meeting_assistant: bool,
+) -> CommandResult<SessionTurnView> {
+    let config = match load_session_config(state) {
         Ok(config) => config,
         Err(error) => return CommandResult::Err { error },
     };
@@ -1037,7 +2241,12 @@ fn session_finalize_utterance_cmd(
             );
         }
     };
-    match sessions.finalize_utterance(database, &config, probes, credentials, text) {
+    let finalized = if force_meeting_assistant {
+        sessions.finalize_utterance_forced(database, &config, probes, credentials)
+    } else {
+        sessions.finalize_utterance(database, &config, probes, credentials, text)
+    };
+    match finalized {
         Ok(Some(_)) => {
             let Some(session_id) = sessions.session_id() else {
                 return session_service_error(SessionServiceError::NotFound);
@@ -1061,23 +2270,121 @@ fn runtime_get_status_cmd(state: &AppState) -> CommandResult<RuntimeStatus> {
     }
 }
 
+#[tauri::command]
+pub fn session_audio_ready(state: State<'_, AppState>) -> CommandResult<FoundationStatus> {
+    match state.sessions.lock() {
+        Ok(sessions) => CommandResult::Ok {
+            data: FoundationStatus {
+                ready: sessions.utterance_ready(),
+            },
+        },
+        Err(_) => service_error("SERVICE_BUSY", "会话音频状态暂时不可用"),
+    }
+}
+
+#[allow(clippy::too_many_arguments)] // Tauri exposes the backward-compatible IPC fields individually.
 pub fn session_start_blocking<R: tauri::Runtime>(
     app: AppHandle<R>,
     state: State<'_, AppState>,
     transport_mode: Option<String>,
+    role_profile_id: Option<String>,
+    voice_route_id: Option<String>,
+    allow_web_search: Option<bool>,
+    meeting_pid: Option<u32>,
+    output_device_id: Option<String>,
 ) -> CommandResult<SessionStartResult> {
     let _guard = match service_guard(&state) {
         Ok(guard) => guard,
         Err(error) => return error,
     };
-    let result = session_start_cmd(&state, transport_mode.as_deref());
+    let bridge = if cfg!(debug_assertions) {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../native/AudioBridge/publish/AudioBridge.exe")
+    } else {
+        match app.path().resource_dir() {
+            Ok(root) => root.join("audio-bridge/AudioBridge.exe"),
+            Err(_) => {
+                return service_error("SESSION_SIDECAR_MISSING", "无法定位音频组件，请修复安装");
+            }
+        }
+    };
+    let enumerator = crate::processes::PowerShellProcessEnumerator;
+    let output_device_id = if meeting_pid.is_some() {
+        let devices = match crate::prerequisites::enumerate_audio_devices(&bridge) {
+            Ok(devices) => devices,
+            Err(code) => return service_error(code, "无法检测虚拟声卡"),
+        };
+        let status = crate::prerequisites::VirtualAudioPreparation::from_devices(&devices);
+        if !status.installed {
+            return service_error("VIRTUAL_AUDIO_REQUIRED", "请先安装并自动配置虚拟声卡");
+        }
+        status.render_endpoint_id
+    } else {
+        output_device_id
+    };
+    let routing = if meeting_pid.is_some() {
+        match crate::prerequisites::configure_communications_mic(&bridge) {
+            Ok(change) => Some(change),
+            Err(code) => return service_error(code, "无法自动配置会议麦克风"),
+        }
+    } else {
+        None
+    };
+    let capture = meeting_pid.map(|pid| crate::services::MeetingCapture {
+        exe: &bridge,
+        pid,
+        enumerator: &enumerator,
+    });
+    let result = session_start_capture_cmd(
+        &state,
+        transport_mode.as_deref(),
+        role_profile_id.as_deref(),
+        voice_route_id.as_deref(),
+        allow_web_search.unwrap_or(false),
+        capture,
+    );
     if matches!(
-        result,
+        &result,
         CommandResult::Ok {
             data: SessionStartResult::Started { .. }
         }
     ) {
+        if let Ok(mut sessions) = state.sessions.lock() {
+            sessions.configure_playback(output_device_id.filter(|id| !id.trim().is_empty()).map(
+                |endpoint_id| crate::audio::playback::BridgePlayback {
+                    executable: bridge,
+                    endpoint_id,
+                },
+            ));
+        }
+        if let Some(change) = routing {
+            keep_session_routing(&state, change);
+        }
         emit_runtime(&app, &state);
+        return result;
+    }
+    if let Some(change) = routing
+        && let Some(restore_code) = rollback_session_routing(&state, change)
+    {
+        return match result {
+            CommandResult::Err { error } => CommandResult::Err {
+                error: PublicError::new(
+                    error.code,
+                    format!(
+                        "{}；同时未能恢复会议麦克风，已保留恢复信息，请检查系统声音设置或稍后停止会话以重试。",
+                        error.message
+                    ),
+                    error.retryable,
+                ),
+            },
+            other => {
+                let _ = other;
+                service_error(
+                    restore_code,
+                    "会话未能开始，且未能恢复会议麦克风。已保留恢复信息，请检查系统声音设置。",
+                )
+            }
+        };
     }
     result
 }
@@ -1112,7 +2419,18 @@ pub fn session_set_mode<R: tauri::Runtime>(
     state: State<'_, AppState>,
     mode: String,
 ) -> CommandResult<RuntimeStatus> {
-    let result = session_set_mode_cmd(&state, mode);
+    let operator_speaking = mode == "operator_speaking";
+    if !operator_speaking {
+        stop_operator_monitor(&state);
+    }
+    let mut result = session_set_mode_cmd(&state, mode);
+    if operator_speaking
+        && matches!(result, CommandResult::Ok { .. })
+        && let Err(code) = start_operator_monitor(&app, &state)
+    {
+        let _ = session_set_mode_cmd(&state, "ai_active".into());
+        result = service_error(code, "物理麦克风未能进入会议线路");
+    }
     if matches!(result, CommandResult::Ok { .. }) {
         let status = match &result {
             CommandResult::Ok { data } => data.clone(),
@@ -1121,6 +2439,40 @@ pub fn session_set_mode<R: tauri::Runtime>(
         let _ = app.emit(EVENT_RUNTIME_STATUS, &status);
     }
     result
+}
+
+fn stop_operator_monitor(state: &AppState) {
+    if let Ok(mut slot) = state.operator_monitor.lock()
+        && let Some(mut child) = slot.take()
+    {
+        crate::audio::monitor::stop(&mut child);
+    }
+}
+
+fn start_operator_monitor<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    state: &AppState,
+) -> Result<(), &'static str> {
+    stop_operator_monitor(state);
+    let routing = state
+        .audio_routing
+        .lock()
+        .ok()
+        .and_then(|slot| slot.clone())
+        .ok_or("OPERATOR_MONITOR_ROUTE_MISSING")?;
+    if routing.previous_id.is_empty() || routing.previous_id == routing.cable_id {
+        return Err("OPERATOR_PHYSICAL_MIC_MISSING");
+    }
+    let bridge = audio_bridge_path(app)?;
+    let devices = crate::prerequisites::enumerate_audio_devices(&bridge)?;
+    let preparation = crate::prerequisites::VirtualAudioPreparation::from_devices(&devices);
+    let output_id = preparation
+        .render_endpoint_id
+        .ok_or("VIRTUAL_AUDIO_RENDER_MISSING")?;
+    let child = crate::audio::monitor::spawn(&bridge, &routing.previous_id, &output_id)?;
+    let mut slot = state.operator_monitor.lock().map_err(|_| "SERVICE_BUSY")?;
+    *slot = Some(child);
+    Ok(())
 }
 
 pub fn session_export_blocking(
@@ -1162,6 +2514,22 @@ pub fn session_finalize_utterance_blocking<R: tauri::Runtime>(
     state: State<'_, AppState>,
     text: String,
 ) -> CommandResult<SessionTurnView> {
+    session_finalize_utterance_blocking_inner(app, state, text, false)
+}
+
+pub fn session_trigger_assistant_blocking<R: tauri::Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, AppState>,
+) -> CommandResult<SessionTurnView> {
+    session_finalize_utterance_blocking_inner(app, state, String::new(), true)
+}
+
+fn session_finalize_utterance_blocking_inner<R: tauri::Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, AppState>,
+    text: String,
+    force_meeting_assistant: bool,
+) -> CommandResult<SessionTurnView> {
     let _guard = match service_guard(&state) {
         Ok(guard) => guard,
         Err(error) => return error,
@@ -1174,11 +2542,20 @@ pub fn session_finalize_utterance_blocking<R: tauri::Runtime>(
         Ok(client) => client,
         Err(error) => return service_error(error.code(), "Embedding client is unavailable"),
     };
-    let config = match load_public_config(&state) {
+    let config = match load_session_config(&state) {
         Ok(config) => config,
         Err(error) => return CommandResult::Err { error },
     };
     let route = active_voice_route(&config);
+    let cascade = cascade.with_web_capability(
+        config
+            .models
+            .providers
+            .iter()
+            .find(|p| Some(p.id.as_str()) == route.and_then(|r| r.llm_provider_id.as_deref()))
+            .and_then(|p| p.web_capability)
+            .unwrap_or_default(),
+    );
     let embedding = active_embedding(&config);
     let asr_secret = match read_provider_secret(
         &state,
@@ -1232,13 +2609,36 @@ pub fn session_finalize_utterance_blocking<R: tauri::Runtime>(
         e2e: e2e_secret.as_deref().map(String::as_str),
     };
     let trimmed = text.trim();
-    let result = session_finalize_utterance_cmd(
-        &state,
-        &probes,
-        credentials,
-        (!trimmed.is_empty()).then_some(trimmed),
-    );
-    if let CommandResult::Ok { data } = &result {
+    let mut result = if force_meeting_assistant {
+        session_finalize_utterance_forced_cmd(&state, &probes, credentials)
+    } else {
+        session_finalize_utterance_cmd(
+            &state,
+            &probes,
+            credentials,
+            (!trimmed.is_empty()).then_some(trimmed),
+        )
+    };
+    if let CommandResult::Ok { data } = &mut result {
+        let web = cascade.web_result();
+        data.web_sources = Some(web.sources.clone());
+        data.web_degraded = Some(web.degraded);
+        if let Ok(database) = state.database.lock()
+            && let Some(database) = database.as_ref()
+            && let Ok(sessions) = state.sessions.lock()
+            && let Some(id) = sessions.session_id()
+        {
+            let payload = serde_json::json!({ "turnId": data.id, "sources": web.sources, "degraded": web.degraded });
+            if SessionStore::new(database)
+                .append_event(id, "web_sources", &payload.to_string())
+                .is_err()
+            {
+                return service_error(
+                    "DATABASE_OPERATION_FAILED",
+                    "回答已生成，但联网来源保存失败",
+                );
+            }
+        }
         emit_transcript_and_reply(&app, &state, &data.user_text, &data.assistant_text);
     }
     emit_runtime(&app, &state);
@@ -1262,11 +2662,20 @@ pub fn session_agent_command_blocking<R: tauri::Runtime>(
         Ok(client) => client,
         Err(error) => return service_error(error.code(), "Embedding client is unavailable"),
     };
-    let config = match load_public_config(&state) {
+    let config = match load_session_config(&state) {
         Ok(config) => config,
         Err(error) => return CommandResult::Err { error },
     };
     let route = active_voice_route(&config);
+    let cascade = cascade.with_web_capability(
+        config
+            .models
+            .providers
+            .iter()
+            .find(|p| Some(p.id.as_str()) == route.and_then(|r| r.llm_provider_id.as_deref()))
+            .and_then(|p| p.web_capability)
+            .unwrap_or_default(),
+    );
     let embedding = active_embedding(&config);
     let asr_secret = match read_provider_secret(
         &state,
@@ -1394,9 +2803,67 @@ pub fn model_provider_test_blocking(
         Ok(probe) => probe,
         Err(error) => return error,
     };
-    ProviderService::new(&state.config, &state.secrets, &probe)
-        .test(&provider_id)
-        .map_or_else(provider_service_error, |data| CommandResult::Ok { data })
+    let service = ProviderService::new(&state.config, &state.secrets, &probe);
+    let discovered = match service.discover(&provider_id) {
+        Ok(discovered) => discovered,
+        Err(error) => return provider_service_error(error),
+    };
+    let config = match state.config.load() {
+        Ok(config) => public_view(&config),
+        Err(error) => return service_error(error.code(), "模型配置不可用"),
+    };
+    let Some(provider) = config
+        .models
+        .providers
+        .iter()
+        .find(|item| item.id == provider_id)
+    else {
+        return service_error("PROVIDER_NOT_FOUND", "模型供应商不存在");
+    };
+    let capability = provider.web_capability.unwrap_or_default();
+    let mut data = ProviderTestResult {
+        provider_id: provider_id.clone(),
+        reachable: true,
+        model_count: discovered.models.len(),
+        web_status: crate::providers::web_search::WebCapabilityStatus::Disabled,
+        web_source_count: 0,
+    };
+    if capability != crate::providers::web_search::WebCapability::None {
+        let Some(model) = discovered.models.first() else {
+            data.web_status = crate::providers::web_search::WebCapabilityStatus::ModelUnsupported;
+            return CommandResult::Ok { data };
+        };
+        let secret = match read_provider_secret(&state, &config, Some(&provider_id)) {
+            Ok(secret) => secret,
+            Err(error) => return CommandResult::Err { error },
+        };
+        let model_client = match OpenAiCompatibleCascade::new() {
+            Ok(client) => client.with_web_capability(capability),
+            Err(_) => {
+                data.web_status =
+                    crate::providers::web_search::WebCapabilityStatus::NetworkUnreachable;
+                return CommandResult::Ok { data };
+            }
+        };
+        let result = model_client.complete(
+            &ProviderEndpoint {
+                provider_id: provider.id.clone(),
+                base_url: provider.base_url.clone(),
+            },
+            secret.as_deref().map(|value| value.as_str()),
+            &model.id,
+            &[ChatMessage {
+                role: "user".into(),
+                content: "请使用联网搜索回答当前 UTC 日期，并提供来源。".into(),
+            }],
+        );
+        let web = model_client.web_result();
+        data.web_source_count = web.sources.len();
+        data.web_status = crate::providers::web_search::probe_status_from_result(
+            result.as_ref().map(|_| &web).map_err(|error| *error),
+        );
+    }
+    CommandResult::Ok { data }
 }
 
 pub fn model_provider_discover_blocking(
@@ -1450,6 +2917,19 @@ pub fn model_provider_delete_blocking(
         .map_or_else(provider_service_error, |_| CommandResult::Ok {
             data: FoundationStatus { ready: true },
         })
+}
+
+pub fn model_provider_dependencies_blocking(
+    state: State<'_, AppState>,
+    provider_id: String,
+) -> CommandResult<Vec<crate::services::ProviderDependency>> {
+    let probe = match provider_probe() {
+        Ok(probe) => probe,
+        Err(error) => return error,
+    };
+    ProviderService::new(&state.config, &state.secrets, &probe)
+        .dependencies(&provider_id)
+        .map_or_else(provider_service_error, |data| CommandResult::Ok { data })
 }
 
 pub fn speech_route_save_blocking(
@@ -1800,6 +3280,28 @@ fn open_directory(path: &std::path::Path) -> Result<(), ()> {
     }
 }
 
+#[tauri::command]
+pub fn open_web_source(url: String) -> CommandResult<FoundationStatus> {
+    let parsed = match reqwest::Url::parse(&url) {
+        Ok(url)
+            if matches!(url.scheme(), "https" | "http")
+                && url.host_str().is_some()
+                && url.username().is_empty()
+                && url.password().is_none() =>
+        {
+            url
+        }
+        _ => return service_error("WEB_SOURCE_INVALID", "来源地址无效"),
+    };
+    // ShellExecute opens only a validated web URL; no shell command interpolation.
+    match open_directory(std::path::Path::new(parsed.as_str())) {
+        Ok(()) => CommandResult::Ok {
+            data: FoundationStatus { ready: true },
+        },
+        Err(()) => service_error("WEB_SOURCE_OPEN_FAILED", "无法打开系统浏览器"),
+    }
+}
+
 #[cfg(not(windows))]
 fn open_directory(_: &std::path::Path) -> Result<(), ()> {
     Err(())
@@ -1844,18 +3346,360 @@ blocking_command!(material_import, material_import_blocking(path: String) -> Mat
 blocking_command!(material_search, material_search_blocking(query: String, top_k: Option<u32>) -> Vec<MaterialSearchHit>);
 blocking_command!(material_delete, material_delete_blocking(id: String) -> FoundationStatus);
 blocking_command!(material_index, material_index_blocking() -> MaterialIndexResult);
-blocking_command!(with_events session_start, session_start_blocking(transport_mode: Option<String>) -> SessionStartResult);
+blocking_command!(with_events session_start, session_start_blocking(transport_mode: Option<String>, role_profile_id: Option<String>, voice_route_id: Option<String>, allow_web_search: Option<bool>, meeting_pid: Option<u32>, output_device_id: Option<String>) -> SessionStartResult);
+
+pub fn meeting_process_list_blocking(
+    _state: State<'_, AppState>,
+) -> CommandResult<Vec<crate::processes::MeetingProcess>> {
+    match crate::processes::list_meeting_processes(&crate::processes::PowerShellProcessEnumerator) {
+        Ok(data) => CommandResult::Ok { data },
+        Err(_) => service_error(
+            "MEETING_PROCESS_ENUM_FAILED",
+            "无法读取会议进程，请确认会议软件已打开",
+        ),
+    }
+}
+blocking_command!(meeting_process_list, meeting_process_list_blocking() -> Vec<crate::processes::MeetingProcess>);
+
+pub fn audio_output_list_blocking<R: tauri::Runtime>(
+    app: AppHandle<R>,
+    _state: State<'_, AppState>,
+) -> CommandResult<Vec<crate::audio::playback::AudioOutputDevice>> {
+    let bridge = if cfg!(debug_assertions) {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../native/AudioBridge/publish/AudioBridge.exe")
+    } else {
+        match app.path().resource_dir() {
+            Ok(root) => root.join("audio-bridge/AudioBridge.exe"),
+            Err(_) => return service_error("SESSION_SIDECAR_MISSING", "无法定位音频组件"),
+        }
+    };
+    match crate::audio::playback::list_outputs(&bridge) {
+        Ok(data) => CommandResult::Ok { data },
+        Err(code) => service_error(
+            code,
+            "无法读取音频输出设备，请确认 AudioBridge 已安装、音频设备已连接",
+        ),
+    }
+}
+blocking_command!(with_events audio_output_list, audio_output_list_blocking() -> Vec<crate::audio::playback::AudioOutputDevice>);
+
+fn audio_bridge_path<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+) -> Result<std::path::PathBuf, &'static str> {
+    if cfg!(debug_assertions) {
+        Ok(std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../native/AudioBridge/publish/AudioBridge.exe"))
+    } else {
+        app.path()
+            .resource_dir()
+            .map(|root| root.join("audio-bridge/AudioBridge.exe"))
+            .map_err(|_| "SESSION_SIDECAR_MISSING")
+    }
+}
+
+fn prerequisite_script_path<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    name: &str,
+) -> Result<std::path::PathBuf, &'static str> {
+    if !matches!(name, "fetch-prerequisites.ps1" | "install-prerequisite.ps1") {
+        return Err("PREREQUISITE_RESOURCE_MISSING");
+    }
+    if cfg!(debug_assertions) {
+        Ok(std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../scripts")
+            .join(name))
+    } else {
+        app.path()
+            .resource_dir()
+            .map(|root| root.join("prerequisite-scripts").join(name))
+            .map_err(|_| "PREREQUISITE_RESOURCE_MISSING")
+    }
+}
+
+static AUDIO_PREPARATION_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn audio_preparation_failure<T: ts_rs::TS>(code: &'static str) -> CommandResult<T> {
+    service_error(code, crate::prerequisites::preparation_error_message(code))
+}
+
+fn persist_preparation_diagnostic(
+    state: &AppState,
+    diagnostic: &crate::prerequisites::PreparationDiagnostic,
+) -> bool {
+    let directory = state.paths.data_directory.join("prerequisites");
+    if std::fs::create_dir_all(&directory).is_err() {
+        return false;
+    }
+    let record = directory.join("preparation-result.json");
+    serde_json::to_vec(diagnostic)
+        .ok()
+        .and_then(|bytes| std::fs::write(record, bytes).ok())
+        .is_some()
+}
+
+fn attach_preparation_diagnostic(
+    state: &AppState,
+    phase: String,
+    exit_code: Option<i32>,
+    result: CommandResult<crate::prerequisites::VirtualAudioPreparation>,
+) -> CommandResult<crate::prerequisites::VirtualAudioPreparation> {
+    let code = match &result {
+        CommandResult::Err { error } => Some(error.code.clone()),
+        CommandResult::Ok { data } => data
+            .diagnostic
+            .as_ref()
+            .and_then(|item| item.error_code.clone()),
+    };
+    let retry_allowed = !matches!(
+        code.as_deref(),
+        Some("PREREQUISITE_TIMEOUT" | "PREREQUISITE_INSTALL_BUSY")
+    );
+    let diagnostic = crate::prerequisites::PreparationDiagnostic {
+        phase: phase.clone(),
+        retry_allowed,
+        error_code: code.clone(),
+        exit_code,
+    };
+    let persist_ok = persist_preparation_diagnostic(state, &diagnostic);
+    match result {
+        CommandResult::Ok { mut data } => {
+            data.diagnostic = Some(diagnostic);
+            if !persist_ok {
+                data.detail = format!("{}。诊断记录未能写入。", data.detail);
+            }
+            CommandResult::Ok { data }
+        }
+        CommandResult::Err { mut error } => {
+            error.message = format!(
+                "{}（阶段：{}）",
+                error.message,
+                crate::prerequisites::preparation_phase_label(&phase)
+            );
+            if !persist_ok {
+                error.message.push_str("。诊断记录未能写入。");
+            }
+            CommandResult::Err { error }
+        }
+    }
+}
+
+fn audio_preparation_state(
+    state: &str,
+    detail: &str,
+) -> crate::prerequisites::VirtualAudioPreparation {
+    let mut result = crate::prerequisites::VirtualAudioPreparation::from_devices(&[]);
+    result.state = state.into();
+    result.detail = detail.into();
+    result
+}
+
+pub fn virtual_audio_status_blocking<R: tauri::Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, AppState>,
+) -> CommandResult<crate::prerequisites::VirtualAudioPreparation> {
+    let Ok(_guard) = AUDIO_PREPARATION_LOCK.try_lock() else {
+        return CommandResult::Ok {
+            data: audio_preparation_state("installing", "安装任务正在运行，请等待完成。"),
+        };
+    };
+    let bridge = match audio_bridge_path(&app) {
+        Ok(path) => path,
+        Err(code) => return service_error(code, "缺少 AudioBridge 音频组件"),
+    };
+    match crate::prerequisites::enumerate_audio_devices(&bridge) {
+        Ok(devices) => {
+            let mut status = crate::prerequisites::VirtualAudioPreparation::from_devices(&devices);
+            if !status.installed
+                && let Ok(script) = prerequisite_script_path(&app, "install-prerequisite.ps1")
+            {
+                let directory = state
+                    .paths
+                    .data_directory
+                    .join("prerequisites")
+                    .to_string_lossy()
+                    .into_owned();
+                match crate::prerequisites::run_script_bounded(
+                    &script,
+                    &[
+                        "-Component",
+                        "virtual-audio",
+                        "-ResourcesDirectory",
+                        &directory,
+                        "-ProbeOnly",
+                    ],
+                    std::time::Duration::from_secs(15),
+                ) {
+                    Ok(probe) if probe["driverStore"] == true && status.state == "missing" => {
+                        status = audio_preparation_state(
+                            "driver_present",
+                            "驱动已在 Windows 中但端点尚未就绪，请检查设备状态；不会重复安装。必要时请自行重启后重新检测。",
+                        );
+                    }
+                    Err("PREREQUISITE_INSTALL_BUSY") => {
+                        status = audio_preparation_state(
+                            "installing",
+                            "提权安装任务仍在运行，请完成授权或等待安装结束。",
+                        )
+                    }
+                    Err(code) => return audio_preparation_failure(code),
+                    _ => {}
+                }
+            }
+            CommandResult::Ok { data: status }
+        }
+        Err(code) => service_error(code, "无法检测本机音频设备"),
+    }
+}
+blocking_command!(with_events virtual_audio_status, virtual_audio_status_blocking() -> crate::prerequisites::VirtualAudioPreparation);
+
+pub fn virtual_audio_install_blocking<R: tauri::Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, AppState>,
+) -> CommandResult<crate::prerequisites::VirtualAudioPreparation> {
+    let Ok(_guard) = AUDIO_PREPARATION_LOCK.try_lock() else {
+        return attach_preparation_diagnostic(
+            &state,
+            "checking".into(),
+            None,
+            audio_preparation_failure("PREREQUISITE_INSTALL_BUSY"),
+        );
+    };
+    let current_phase = std::cell::RefCell::new("checking".to_string());
+    let exit_code = std::cell::Cell::new(None);
+    let phase = |phase: &str| {
+        *current_phase.borrow_mut() = phase.into();
+        let _ = app.emit("virtual_audio.preparation.v1", phase);
+    };
+    let result = (|| {
+        phase("checking");
+        let bridge = match audio_bridge_path(&app) {
+            Ok(path) => path,
+            Err(code) => return service_error(code, "缺少 AudioBridge 音频组件"),
+        };
+        match crate::prerequisites::enumerate_audio_devices(&bridge) {
+            Ok(devices) => {
+                let status = crate::prerequisites::VirtualAudioPreparation::from_devices(&devices);
+                if status.installed || status.state != "missing" {
+                    return CommandResult::Ok { data: status };
+                }
+            }
+            Err(code) => return audio_preparation_failure(code),
+        }
+        let managed = state.paths.data_directory.join("prerequisites");
+        if std::fs::create_dir_all(&managed).is_err() {
+            return service_error("PREREQUISITE_DIRECTORY_FAILED", "无法创建托管安装目录");
+        }
+        let fetch = match prerequisite_script_path(&app, "fetch-prerequisites.ps1") {
+            Ok(path) => path,
+            Err(code) => return service_error(code, "缺少虚拟声卡准备脚本"),
+        };
+        let install = match prerequisite_script_path(&app, "install-prerequisite.ps1") {
+            Ok(path) => path,
+            Err(code) => return service_error(code, "缺少虚拟声卡安装脚本"),
+        };
+        let destination = managed.to_string_lossy().to_string();
+        // Preflight the worker lock and existing driver before downloading or retrying.
+        match crate::prerequisites::run_script_bounded(
+            &install,
+            &[
+                "-Component",
+                "virtual-audio",
+                "-ResourcesDirectory",
+                &destination,
+                "-ProbeOnly",
+            ],
+            std::time::Duration::from_secs(15),
+        ) {
+            Ok(probe) if probe["driverStore"] == true => {
+                return CommandResult::Ok {
+                    data: audio_preparation_state(
+                        "driver_present",
+                        "驱动已经存在，但端点尚未就绪；不会重复安装。请重新检测设备状态。",
+                    ),
+                };
+            }
+            Err(code) => return audio_preparation_failure(code),
+            _ => {}
+        }
+        phase("verifying");
+        if let Err(code) = crate::prerequisites::run_preparation_script(
+            &fetch,
+            &["-Component", "virtual-audio", "-Destination", &destination],
+            std::time::Duration::from_secs(300),
+            &mut |event| match event {
+                crate::prerequisites::PreparationEvent::Phase(value) => phase(&value),
+                crate::prerequisites::PreparationEvent::Exit(value) => exit_code.set(value),
+            },
+        ) {
+            return audio_preparation_failure(code);
+        }
+        phase("authorizing");
+        exit_code.set(None);
+        let install_result = match crate::prerequisites::run_preparation_script(
+            &install,
+            &[
+                "-Component",
+                "virtual-audio",
+                "-ResourcesDirectory",
+                &destination,
+            ],
+            std::time::Duration::from_secs(600),
+            &mut |event| match event {
+                crate::prerequisites::PreparationEvent::Phase(value) => phase(&value),
+                crate::prerequisites::PreparationEvent::Exit(value) => exit_code.set(value),
+            },
+        ) {
+            Ok(Some(result)) => result,
+            Ok(None) => return audio_preparation_failure("PREREQUISITE_RESULT_INVALID"),
+            Err(code) => return audio_preparation_failure(code),
+        };
+        phase("rechecking");
+        if let Ok(devices) = crate::prerequisites::enumerate_audio_devices(&bridge) {
+            let status = crate::prerequisites::VirtualAudioPreparation::from_devices(&devices);
+            if status.installed {
+                return CommandResult::Ok { data: status };
+            }
+        }
+        let reboot_required = install_result["rebootRequired"].as_bool().unwrap_or(false);
+        CommandResult::Ok {
+            data: crate::prerequisites::VirtualAudioPreparation {
+                state: if reboot_required {
+                    "reboot_required"
+                } else {
+                    "failed"
+                }
+                .into(),
+                installed: false,
+                reboot_required,
+                detail: if reboot_required {
+                    "驱动已安装，需要重启 Windows 后继续"
+                } else {
+                    "安装完成但未检测到虚拟声卡端点"
+                }
+                .into(),
+                render_endpoint_id: None,
+                capture_endpoint_id: None,
+                diagnostic: None,
+            },
+        }
+    })();
+    attach_preparation_diagnostic(&state, current_phase.into_inner(), exit_code.get(), result)
+}
+blocking_command!(with_events virtual_audio_install, virtual_audio_install_blocking() -> crate::prerequisites::VirtualAudioPreparation);
 blocking_command!(session_export, session_export_blocking(session_id: String, format: String) -> SessionExportResult);
 blocking_command!(session_list, session_list_blocking() -> Vec<SessionSummary>);
 blocking_command!(session_get, session_get_blocking(session_id: String) -> SessionDetail);
 blocking_command!(session_delete, session_delete_blocking(session_id: String) -> FoundationStatus);
 blocking_command!(with_events session_finalize_utterance, session_finalize_utterance_blocking(text: String) -> SessionTurnView);
+blocking_command!(with_events session_trigger_assistant, session_trigger_assistant_blocking() -> SessionTurnView);
 blocking_command!(with_events session_agent_command, session_agent_command_blocking(input: AgentCommandInput) -> AgentCommandResult);
 blocking_command!(model_provider_save, model_provider_save_blocking(input: ProviderSaveInput) -> ProviderConfig);
 blocking_command!(model_provider_test, model_provider_test_blocking(provider_id: String) -> ProviderTestResult);
 blocking_command!(model_provider_discover, model_provider_discover_blocking(provider_id: String) -> ModelDiscoveryResult);
 blocking_command!(model_provider_activate, model_provider_activate_blocking(provider_id: String) -> ProviderConfig);
 blocking_command!(model_provider_delete, model_provider_delete_blocking(provider_id: String) -> FoundationStatus);
+blocking_command!(model_provider_dependencies, model_provider_dependencies_blocking(provider_id: String) -> Vec<crate::services::ProviderDependency>);
 blocking_command!(speech_route_save, speech_route_save_blocking(input: VoiceRouteSaveInput) -> VoiceRouteConfig);
 blocking_command!(speech_route_test, speech_route_test_blocking(route_id: String) -> VoiceRouteTestResult);
 blocking_command!(speech_route_activate, speech_route_activate_blocking(route_id: String) -> VoiceRouteConfig);
@@ -2490,7 +4334,17 @@ mod tests {
         let blocked = serde_json::to_value(super::session_start_cmd(&empty, None)).unwrap();
         assert_eq!(blocked["ok"], true);
         assert_eq!(blocked["data"]["kind"], "blocked");
-        assert!(blocked["data"]["issues"].as_array().unwrap().len() >= 2);
+        let issues = blocked["data"]["issues"].as_array().unwrap();
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue["code"] == "SESSION_ROUTE_REQUIRED")
+        );
+        assert!(
+            !issues
+                .iter()
+                .any(|issue| issue["code"] == "SESSION_ROLE_REQUIRED")
+        );
         assert!(!serde_json::to_string(&blocked).unwrap().contains("pcm"));
 
         let ready_dir = tempfile::tempdir().unwrap();
@@ -2505,6 +4359,115 @@ mod tests {
         assert!(!json.contains("PROMPT-BODY"));
         assert!(!json.contains("pcm"));
         assert!(!json.to_ascii_lowercase().contains("sk-"));
+    }
+
+    #[test]
+    fn selected_role_is_session_local_and_snapshot_survives_config_changes() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = session_state(&directory, &ready_session_config());
+        let started = serde_json::to_value(super::session_start_selected_cmd(
+            &state,
+            None,
+            Some("preset-hr"),
+            Some("route-1"),
+            false,
+        ))
+        .unwrap();
+        assert_eq!(started["data"]["session"]["roleProfileId"], "preset-hr");
+        let before = super::load_session_config(&state).unwrap();
+        assert_eq!(
+            state
+                .config
+                .load()
+                .unwrap()
+                .active_role_profile_id
+                .as_deref(),
+            Some("role-1")
+        );
+        state
+            .config
+            .update(|config| {
+                config
+                    .role_profiles
+                    .iter_mut()
+                    .find(|role| role.id == "preset-hr")
+                    .unwrap()
+                    .system_prompt = "changed during session".into();
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(super::load_session_config(&state).unwrap(), before);
+        super::session_stop_cmd(&state);
+        assert_ne!(super::load_session_config(&state).unwrap(), before);
+    }
+
+    #[test]
+    fn invalid_session_selection_does_not_start_or_mutate_defaults() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = session_state(&directory, &ready_session_config());
+        let before = state.config.load().unwrap();
+        for (role, route, code) in [
+            (Some("missing"), None, "SESSION_ROLE_REQUIRED"),
+            (None, Some("missing"), "SESSION_ROUTE_REQUIRED"),
+        ] {
+            let result = serde_json::to_value(super::session_start_selected_cmd(
+                &state, None, role, route, false,
+            ))
+            .unwrap();
+            assert_eq!(result["error"]["code"], code);
+            assert!(state.sessions.lock().unwrap().session_id().is_none());
+            assert_eq!(state.config.load().unwrap(), before);
+        }
+    }
+
+    #[test]
+    fn web_source_opener_rejects_non_web_and_credential_urls() {
+        for url in [
+            "file:///C:/Windows/System32/cmd.exe",
+            "javascript:alert(1)",
+            "https://user:secret@example.com",
+            "https://user@example.com",
+            "ms-settings:privacy",
+            "not a url",
+        ] {
+            let result = serde_json::to_value(super::open_web_source(url.into())).unwrap();
+            assert_eq!(result["error"]["code"], "WEB_SOURCE_INVALID");
+        }
+    }
+
+    #[test]
+    fn meeting_start_never_falls_back_when_capture_is_missing_or_pid_is_invalid() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = session_state(&directory, &ready_session_config());
+        let enumerator = crate::processes::InjectedProcessEnumerator::new(vec![
+            crate::processes::MeetingProcess {
+                pid: 123,
+                name: "zoom.exe".into(),
+                title: "Synthetic meeting".into(),
+            },
+        ]);
+        let missing = directory.path().join("missing-AudioBridge.exe");
+        for (pid, code) in [
+            (123, "SESSION_SIDECAR_MISSING"),
+            (456, "MEETING_PROCESS_NOT_AVAILABLE"),
+            (0, "SESSION_SIDECAR_INVALID_PID"),
+        ] {
+            let result = serde_json::to_value(super::session_start_capture_cmd(
+                &state,
+                None,
+                None,
+                None,
+                false,
+                Some(crate::services::MeetingCapture {
+                    exe: &missing,
+                    pid,
+                    enumerator: &enumerator,
+                }),
+            ))
+            .unwrap();
+            assert_eq!(result["error"]["code"], code);
+            assert!(state.sessions.lock().unwrap().session_id().is_none());
+        }
     }
 
     fn ready_livekit_session_config() -> String {
@@ -3134,5 +5097,271 @@ mod tests {
         assert_eq!(report["ok"], true, "{report}");
         assert_eq!(report["data"]["result"]["summary"], "纪要");
         assert!(!report.to_string().contains("pcm"));
+    }
+
+    #[test]
+    fn livestream_success_advances_only_the_confirmed_bounded_script() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = material_state(&directory);
+        let mut script = crate::livestream::LivestreamScript::draft(
+            "产品".into(),
+            vec![
+                crate::livestream::LivestreamSegment::draft(
+                    "一".into(),
+                    "第一段".into(),
+                    1,
+                    vec![],
+                ),
+                crate::livestream::LivestreamSegment::draft(
+                    "二".into(),
+                    "第二段".into(),
+                    1,
+                    vec![],
+                ),
+            ],
+            false,
+        )
+        .unwrap();
+        script.confirm().unwrap();
+        script.start().unwrap();
+        *state.livestream.lock().unwrap() = Some(script);
+        *state.livestream_stage.lock().unwrap() = Some(crate::livestream::LivestreamStageState {
+            product_title: "产品".into(),
+            current_subtitle: "第一段".into(),
+            next_hint: "下一段：二".into(),
+            state: crate::livestream::LivestreamState::Playing,
+            media_path: None,
+            media_kind: None,
+            output_state: crate::livestream::LivestreamOutputState::Playing,
+            output_error_code: None,
+        });
+        let token = state.livestream_playback_cancel.lock().unwrap().clone();
+
+        assert_eq!(
+            super::advance_livestream_after_success(&state, &token).as_deref(),
+            Some("第二段")
+        );
+        assert!(super::advance_livestream_after_success(&state, &token).is_none());
+        let script = state.livestream.lock().unwrap();
+        assert_eq!(
+            script.as_ref().unwrap().state,
+            crate::livestream::LivestreamState::Finished
+        );
+        let stage = state.livestream_stage.lock().unwrap();
+        assert_eq!(
+            stage.as_ref().unwrap().output_state,
+            crate::livestream::LivestreamOutputState::Played
+        );
+    }
+
+    fn playing_two_segment_runtime(state: &AppState) {
+        let mut script = crate::livestream::LivestreamScript::draft(
+            "产品".into(),
+            vec![
+                crate::livestream::LivestreamSegment::draft(
+                    "一".into(),
+                    "第一段".into(),
+                    1,
+                    vec![],
+                ),
+                crate::livestream::LivestreamSegment::draft(
+                    "二".into(),
+                    "第二段".into(),
+                    1,
+                    vec![],
+                ),
+            ],
+            false,
+        )
+        .unwrap();
+        script.confirm().unwrap();
+        script.start().unwrap();
+        *state.livestream.lock().unwrap() = Some(script);
+        *state.livestream_stage.lock().unwrap() = Some(crate::livestream::LivestreamStageState {
+            product_title: "产品".into(),
+            current_subtitle: "第一段".into(),
+            next_hint: "下一段：二".into(),
+            state: crate::livestream::LivestreamState::Playing,
+            media_path: None,
+            media_kind: None,
+            output_state: crate::livestream::LivestreamOutputState::Playing,
+            output_error_code: None,
+        });
+    }
+
+    #[test]
+    fn livestream_stale_playback_token_does_not_advance_or_mutate_stage() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = material_state(&directory);
+        playing_two_segment_runtime(&state);
+        let stale = state.livestream_playback_cancel.lock().unwrap().clone();
+        *state.livestream_playback_cancel.lock().unwrap() =
+            Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let current = state.livestream_playback_cancel.lock().unwrap().clone();
+
+        assert!(super::advance_livestream_after_success(&state, &stale).is_none());
+        super::set_livestream_output_state(
+            &state,
+            &stale,
+            crate::livestream::LivestreamOutputState::Failed,
+            Some("LIVESTREAM_TTS_FAILED"),
+        );
+
+        {
+            let script = state.livestream.lock().unwrap();
+            assert_eq!(script.as_ref().unwrap().current_index, Some(0));
+            assert_eq!(
+                script.as_ref().unwrap().state,
+                crate::livestream::LivestreamState::Playing
+            );
+            let stage = state.livestream_stage.lock().unwrap();
+            assert_eq!(
+                stage.as_ref().unwrap().output_state,
+                crate::livestream::LivestreamOutputState::Playing
+            );
+            assert_eq!(stage.as_ref().unwrap().output_error_code, None);
+        }
+
+        assert_eq!(
+            super::advance_livestream_after_success(&state, &current).as_deref(),
+            Some("第二段")
+        );
+    }
+
+    #[test]
+    fn livestream_cancelled_token_does_not_advance() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = material_state(&directory);
+        playing_two_segment_runtime(&state);
+        let token = state.livestream_playback_cancel.lock().unwrap().clone();
+        token.store(true, std::sync::atomic::Ordering::SeqCst);
+
+        assert!(super::advance_livestream_after_success(&state, &token).is_none());
+        let script = state.livestream.lock().unwrap();
+        assert_eq!(script.as_ref().unwrap().current_index, Some(0));
+    }
+
+    #[test]
+    fn livestream_completion_cannot_restart_a_paused_script() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = material_state(&directory);
+        playing_two_segment_runtime(&state);
+        let token = state.livestream_playback_cancel.lock().unwrap().clone();
+        state.livestream.lock().unwrap().as_mut().unwrap().pause().unwrap();
+        assert!(super::advance_livestream_after_success(&state, &token).is_none());
+        let script = state.livestream.lock().unwrap();
+        assert_eq!(script.as_ref().unwrap().current_index, Some(0));
+        assert_eq!(script.as_ref().unwrap().state, crate::livestream::LivestreamState::Paused);
+    }
+
+    #[test]
+    fn livestream_cancelled_worker_cannot_report_failure_on_current_script() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = material_state(&directory);
+        playing_two_segment_runtime(&state);
+        let token = state.livestream_playback_cancel.lock().unwrap().clone();
+        token.store(true, std::sync::atomic::Ordering::SeqCst);
+        super::set_livestream_output_state(&state, &token,
+            crate::livestream::LivestreamOutputState::Failed, Some("LIVESTREAM_TTS_FAILED"));
+        assert_eq!(state.livestream_stage.lock().unwrap().as_ref().unwrap().output_error_code, None);
+        assert_eq!(state.livestream.lock().unwrap().as_ref().unwrap().state, crate::livestream::LivestreamState::Playing);
+    }
+
+    #[test]
+    fn replacing_livestream_script_cancels_the_previous_playback_token() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = material_state(&directory);
+        playing_two_segment_runtime(&state);
+        let stale = state.livestream_playback_cancel.lock().unwrap().clone();
+        *state.livestream_voice.lock().unwrap() =
+            Some(crate::livestream::LivestreamVoiceSnapshot {
+                provider_id: "old".into(),
+                base_url: "https://example.test".into(),
+                model_id: "old-voice".into(),
+                voice_id: "alloy".into(),
+            });
+        let result = super::save_livestream_runtime(
+            &state,
+            "新产品".into(),
+            vec![crate::livestream::LivestreamSegment::draft(
+                "一".into(),
+                "新讲稿".into(),
+                1,
+                vec![],
+            )],
+            false,
+            None,
+            None,
+        );
+        assert!(matches!(result, crate::contracts::CommandResult::Ok { .. }));
+        assert!(stale.load(std::sync::atomic::Ordering::SeqCst));
+        assert!(!std::sync::Arc::ptr_eq(
+            &stale,
+            &*state.livestream_playback_cancel.lock().unwrap()
+        ));
+        assert!(super::advance_livestream_after_success(&state, &stale).is_none());
+        assert!(state.livestream_voice.lock().unwrap().is_none());
+        let script = state.livestream.lock().unwrap();
+        assert_eq!(script.as_ref().unwrap().title, "新产品");
+        assert_eq!(
+            script.as_ref().unwrap().state,
+            crate::livestream::LivestreamState::Draft
+        );
+    }
+
+    #[test]
+    fn livestream_voice_snapshot_ignores_later_config_changes() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = material_state(&directory);
+        let frozen = crate::livestream::LivestreamVoiceSnapshot {
+            provider_id: "frozen".into(),
+            base_url: "https://frozen.test/v1".into(),
+            model_id: "tts-frozen".into(),
+            voice_id: "coral".into(),
+        };
+        *state.livestream_voice.lock().unwrap() = Some(frozen.clone());
+        let resolved = super::resolve_livestream_voice(&state).unwrap();
+        assert_eq!(resolved, frozen);
+    }
+
+    #[test]
+    fn livestream_manual_complete_does_not_mark_output_played() {
+        let source = include_str!("commands.rs");
+        let control = source
+            .split("pub fn livestream_control")
+            .nth(1)
+            .expect("livestream_control")
+            .split("pub async fn livestream_insert_question")
+            .next()
+            .unwrap();
+        assert!(control.contains("Manual skip is not proof of playback"));
+        assert!(control.contains("LivestreamOutputState::Cancelled"));
+        assert!(!control.contains("LivestreamOutputState::Played"));
+    }
+
+    #[test]
+    fn session_start_rollback_keeps_routing_when_restore_fails() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = material_state(&directory);
+        let change = crate::prerequisites::AudioRoutingChange {
+            bridge: directory.path().join("missing-audio-bridge.exe"),
+            previous_id: "mic-original".into(),
+            cable_id: "cable-output".into(),
+            changed: true,
+        };
+        let code = super::rollback_session_routing(&state, change);
+        assert!(code.is_some());
+        assert!(state.audio_routing.lock().unwrap().is_some());
+        assert!(
+            directory
+                .path()
+                .join("data/prerequisites/audio-routing.json")
+                .exists()
+                || state
+                    .paths
+                    .data_directory
+                    .join("prerequisites/audio-routing.json")
+                    .exists()
+        );
     }
 }

@@ -1436,6 +1436,7 @@ mod tests {
         let secrets = SecretService::new("test", Arc::new(MemorySecretStore::default())).unwrap();
         ProviderService::new(&config, &secrets, &NoopProviderProbe)
             .save(ProviderSaveInput {
+                web_capability: None,
                 id: Some("openai".into()),
                 name: Some("OpenAI compatible".into()),
                 base_url: "https://embed.example.test/v1".into(),

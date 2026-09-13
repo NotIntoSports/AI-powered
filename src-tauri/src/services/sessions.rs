@@ -1,11 +1,11 @@
 use std::sync::{
     Arc, Mutex,
-    atomic::{AtomicBool, AtomicU8, Ordering},
+    atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering},
 };
 
 use crate::{
     audio::{ASR_SAMPLE_RATE, AudioCapture, AudioError, NoopSink, PlaybackSink, SidecarPoll},
-    config::{PublicConfig, VoiceRouteMode},
+    config::{PublicConfig, RoleScenario, VoiceRouteMode},
     database::{Database, DatabaseError},
     providers::{
         CascadeError, CascadeStage, ChatMessage, ChatModel, EmbeddingProbe, ProviderEndpoint,
@@ -122,6 +122,7 @@ pub struct SessionControl {
     stop_tts: AtomicBool,
     mode: AtomicU8,
     session_id: Mutex<Option<String>>,
+    confirmation_epoch: AtomicU64,
 }
 
 impl SessionControl {
@@ -132,14 +133,17 @@ impl SessionControl {
             stop_tts: AtomicBool::new(false),
             mode: AtomicU8::new(mode_u8(AgentMode::AiActive)),
             session_id: Mutex::new(None),
+            confirmation_epoch: AtomicU64::new(0),
         })
     }
 
     pub fn request_cancel(&self) {
+        self.confirmation_epoch.fetch_add(1, Ordering::SeqCst);
         self.cancel.store(true, Ordering::SeqCst);
     }
 
     pub fn request_stop(&self) {
+        self.confirmation_epoch.fetch_add(1, Ordering::SeqCst);
         self.stop_requested.store(true, Ordering::SeqCst);
         self.cancel.store(true, Ordering::SeqCst);
         self.stop_tts.store(true, Ordering::SeqCst);
@@ -150,6 +154,7 @@ impl SessionControl {
         if mode == AgentMode::AiActive {
             self.stop_tts.store(false, Ordering::SeqCst);
         } else {
+            self.confirmation_epoch.fetch_add(1, Ordering::SeqCst);
             self.stop_tts.store(true, Ordering::SeqCst);
             self.cancel.store(true, Ordering::SeqCst);
         }
@@ -209,6 +214,10 @@ pub struct SessionService<S: PlaybackSink = NoopSink> {
     revision: u64,
     unused_materials: bool,
     last_error_code: Option<String>,
+    config_snapshot: Option<PublicConfig>,
+    playback: Option<crate::audio::playback::BridgePlayback>,
+    text_only: bool,
+    pending_confirmation_epoch: Option<u64>,
 }
 
 impl SessionService<NoopSink> {
@@ -235,11 +244,21 @@ impl<S: PlaybackSink> SessionService<S> {
             revision: 0,
             unused_materials: false,
             last_error_code: None,
+            config_snapshot: None,
+            playback: None,
+            text_only: false,
+            pending_confirmation_epoch: None,
         }
     }
 
     pub fn control(&self) -> Arc<SessionControl> {
         Arc::clone(&self.control)
+    }
+
+    pub fn config_snapshot(&self) -> Option<&PublicConfig> {
+        self.has_active_session()
+            .then_some(self.config_snapshot.as_ref())
+            .flatten()
     }
 
     pub fn phase(&self) -> SessionPhase {
@@ -262,6 +281,12 @@ impl<S: PlaybackSink> SessionService<S> {
         &mut self.capture
     }
 
+    pub fn utterance_ready(&self) -> bool {
+        self.has_active_session()
+            && self.runtime.phase() == SessionPhase::Listening
+            && self.capture.utterance_ready()
+    }
+
     pub fn sink(&self) -> &S {
         &self.sink
     }
@@ -280,6 +305,11 @@ impl<S: PlaybackSink> SessionService<S> {
 
     pub fn reset(&mut self) {
         self.reset_runtime();
+    }
+
+    pub fn configure_playback(&mut self, playback: Option<crate::audio::playback::BridgePlayback>) {
+        self.text_only = playback.is_none();
+        self.playback = playback;
     }
 
     #[cfg(test)]
@@ -352,10 +382,11 @@ impl<S: PlaybackSink> SessionService<S> {
         self.reset_runtime();
         self.unused_materials = false;
         self.last_error_code = None;
-        if let Some(capture) = capture {
-            self.capture =
-                AudioCapture::spawn_bridge(capture.exe, capture.pid, capture.enumerator)?;
-        }
+        // Keep the process locally owned until every startup step succeeds. Any
+        // subsequent database/transport error drops it and terminates the sidecar.
+        let pending_capture = capture
+            .map(|capture| AudioCapture::spawn_bridge(capture.exe, capture.pid, capture.enumerator))
+            .transpose()?;
         let session_id = uuid::Uuid::new_v4().to_string();
         let join_token = if transport_mode == "livekit" {
             let issuer =
@@ -387,6 +418,7 @@ impl<S: PlaybackSink> SessionService<S> {
         })?;
         persist_snapshot(&store, &session_id, config, transport_mode)?;
         self.session_id = Some(session_id.clone());
+        self.config_snapshot = Some(config.clone());
         self.runtime.transition(SessionPhase::Preparing)?;
         persist_phase(&store, &session_id, SessionPhase::Preparing)?;
         self.runtime.transition(SessionPhase::Listening)?;
@@ -394,6 +426,9 @@ impl<S: PlaybackSink> SessionService<S> {
         let session = store
             .get(&session_id)?
             .ok_or(SessionServiceError::NotFound)?;
+        if let Some(capture) = pending_capture {
+            self.capture = capture;
+        }
         Ok(SessionStartOutcome::Started {
             session,
             livekit: join_token,
@@ -403,6 +438,7 @@ impl<S: PlaybackSink> SessionService<S> {
     pub fn stop(&mut self, database: &Database) -> Result<SessionRecord, SessionServiceError> {
         self.control.request_stop();
         self.sink.cancel();
+        self.supersede_pending_confirmation(database);
         self.finish_stop(database)
     }
 
@@ -415,6 +451,9 @@ impl<S: PlaybackSink> SessionService<S> {
         self.runtime.set_mode(mode);
         if self.control.take_stop_tts() || self.runtime.take_stop_tts() {
             self.sink.cancel();
+        }
+        if mode != AgentMode::AiActive {
+            self.supersede_pending_confirmation(database);
         }
         if let Some(session_id) = &self.session_id {
             SessionStore::new(database).append_event(
@@ -438,6 +477,37 @@ impl<S: PlaybackSink> SessionService<S> {
         credentials: CascadeCredentials<'_>,
         text: Option<&str>,
     ) -> Result<Option<CascadeTurn>, SessionServiceError> {
+        self.finalize_utterance_inner(database, config, probes, credentials, text, false)
+    }
+
+    pub fn finalize_utterance_forced(
+        &mut self,
+        database: &Database,
+        config: &PublicConfig,
+        probes: &SessionProbes<'_>,
+        credentials: CascadeCredentials<'_>,
+    ) -> Result<Option<CascadeTurn>, SessionServiceError> {
+        self.finalize_utterance_inner(database, config, probes, credentials, None, true)
+    }
+
+    fn finalize_utterance_inner(
+        &mut self,
+        database: &Database,
+        config: &PublicConfig,
+        probes: &SessionProbes<'_>,
+        credentials: CascadeCredentials<'_>,
+        text: Option<&str>,
+        force_meeting_assistant: bool,
+    ) -> Result<Option<CascadeTurn>, SessionServiceError> {
+        if force_meeting_assistant
+            && self
+                .config_snapshot
+                .as_ref()
+                .and_then(active_session_role_scenario)
+                != Some(RoleScenario::MeetingAssistant)
+        {
+            return Err(SessionServiceError::StateInvalid);
+        }
         self.poll_sidecar(database)?;
         self.runtime.set_mode(self.control.mode());
         if self.control.take_stop_tts() {
@@ -451,6 +521,10 @@ impl<S: PlaybackSink> SessionService<S> {
             return Ok(None);
         }
         self.control.clear_cancel();
+        // A new submitted question invalidates an older suggestion even if the
+        // next ASR/model request fails before creating a new persisted turn.
+        self.supersede_pending_confirmation(database);
+        let confirmation_epoch = self.control.confirmation_epoch.load(Ordering::SeqCst);
         let session_id = self
             .session_id
             .clone()
@@ -459,7 +533,7 @@ impl<S: PlaybackSink> SessionService<S> {
         let store = SessionStore::new(database);
         persist_phase(&store, &session_id, SessionPhase::Thinking)?;
 
-        let config = with_default_voice(config);
+        let config = with_default_voice(self.config_snapshot.as_ref().unwrap_or(config));
         let history = store
             .list_turns(&session_id)?
             .into_iter()
@@ -468,8 +542,36 @@ impl<S: PlaybackSink> SessionService<S> {
                 assistant_text: turn.assistant_text,
             })
             .collect::<Vec<_>>();
-        let pcm = self.capture.pcm_for_asr();
         let user_text = text.map(str::trim).filter(|value| !value.is_empty());
+        let pcm = if user_text.is_none() {
+            self.capture
+                .take_utterance_for_asr()
+                .unwrap_or_else(|| self.capture.pcm_for_asr())
+        } else {
+            Vec::new()
+        };
+        let role_scenario = active_session_role_scenario(&config);
+        let e2e_route =
+            active_voice_route(&config).is_some_and(|route| route.mode == VoiceRouteMode::E2e);
+        let transcribed_meeting_text = if user_text.is_none()
+            && role_scenario == Some(RoleScenario::MeetingAssistant)
+            && !e2e_route
+        {
+            match transcribe_meeting_pcm(probes.asr, &config, credentials, &pcm) {
+                Ok(text) => Some(text),
+                Err(error) => {
+                    return self.recover_from_cascade_error(database, &session_id, error);
+                }
+            }
+        } else {
+            None
+        };
+        let effective_user_text = user_text.or(transcribed_meeting_text.as_deref());
+        let meeting_role_name = active_role_profile(&config).map(|role| role.name.as_str());
+        let transcript_only = !force_meeting_assistant
+            && transcribed_meeting_text.as_deref().is_some_and(|text| {
+                !meeting_assistant_was_mentioned(text, meeting_role_name.unwrap_or("会议助手"))
+            });
         let deps = CascadeTurnDeps {
             asr: probes.asr,
             llm: probes.llm,
@@ -482,14 +584,21 @@ impl<S: PlaybackSink> SessionService<S> {
         let request = CascadeTurnRequest {
             config: &config,
             credentials,
-            pcm: user_text.is_none().then_some(pcm.as_slice()),
+            pcm: effective_user_text.is_none().then_some(pcm.as_slice()),
             sample_rate: ASR_SAMPLE_RATE,
-            user_text,
+            user_text: effective_user_text,
             history: &history,
         };
-        let e2e_route =
-            active_voice_route(&config).is_some_and(|route| route.mode == VoiceRouteMode::E2e);
-        let turn = if e2e_route {
+        let turn = if transcript_only {
+            CascadeTurn {
+                user_text: transcribed_meeting_text.unwrap_or_default(),
+                assistant_text: String::new(),
+                tts_pcm: Vec::new(),
+                citations: Vec::new(),
+                materials_used: false,
+                error_code: None,
+            }
+        } else if e2e_route {
             match run_e2e_turn(
                 probes.realtime,
                 &deps,
@@ -550,11 +659,61 @@ impl<S: PlaybackSink> SessionService<S> {
 
         self.runtime.transition(SessionPhase::Speaking)?;
         persist_phase(&store, &session_id, SessionPhase::Speaking)?;
-        if self.control.take_stop_tts() || self.control.is_cancelled() {
+        let candidate_confirmation_required = self
+            .config_snapshot
+            .as_ref()
+            .and_then(active_session_role_scenario)
+            == Some(RoleScenario::Candidate);
+        let mut playback_status = if candidate_confirmation_required {
+            "pending_confirmation"
+        } else if turn.tts_pcm.is_empty() {
+            "text_only"
+        } else {
+            "not_played"
+        };
+        if candidate_confirmation_required {
+            if confirmation_epoch != self.control.confirmation_epoch.load(Ordering::SeqCst) {
+                playback_status = "cancelled";
+                self.pending_confirmation_epoch = None;
+            } else {
+                self.pending_confirmation_epoch = Some(confirmation_epoch);
+            }
+            // Candidate mode is advisory: generated speech must never reach the
+            // meeting until the user explicitly confirms the current answer.
+        } else if self.control.take_stop_tts() || self.control.is_cancelled() {
             self.sink.cancel();
+            playback_status = "cancelled";
         } else if !turn.tts_pcm.is_empty() {
-            self.sink.play_pcm(&turn.tts_pcm, 24_000);
+            if let Some(output) = &self.playback {
+                let seconds = turn.tts_pcm.len() as f64 / (24_000.0 * 2.0) + 0.7;
+                self.capture
+                    .suppress_echo_for(std::time::Duration::from_secs_f64(seconds));
+                if let Err(code) =
+                    output.play(&turn.tts_pcm, 24_000, || self.control.is_cancelled())
+                {
+                    self.last_error_code = Some(code.into());
+                    playback_status = "failed";
+                } else {
+                    playback_status = "played";
+                }
+                self.capture
+                    .suppress_echo_for(std::time::Duration::from_millis(700));
+            } else if !self.text_only {
+                self.sink.play_pcm(&turn.tts_pcm, 24_000);
+                playback_status = "played";
+            }
         }
+        store.append_event(
+            &session_id,
+            "turn_meta",
+            &serde_json::json!({
+                "turnId": turn_id,
+                "triggerSource": if force_meeting_assistant { "hotkey" } else if user_text.is_some() { "manual" } else { "voice" },
+                "userConfirmed": !candidate_confirmation_required,
+                "playbackStatus": playback_status,
+            })
+            .to_string(),
+        )?;
         if self.control.stop_requested() {
             self.finish_stop(database)?;
             return Ok(Some(turn));
@@ -599,7 +758,9 @@ impl<S: PlaybackSink> SessionService<S> {
         }
         if matches!(
             command.action,
-            AgentCommandAction::Retry | AgentCommandAction::Correct
+            AgentCommandAction::Retry
+                | AgentCommandAction::Correct
+                | AgentCommandAction::ConfirmCandidate
         ) && let Err(error) = assert_expected_revision(command.expected_revision, self.revision)
         {
             return Ok(AgentCommandOutcome::fail(
@@ -610,9 +771,23 @@ impl<S: PlaybackSink> SessionService<S> {
         }
         let store = SessionStore::new(database);
         let turns = store.list_turns(&session_id)?;
+        let candidate_session = self
+            .config_snapshot
+            .as_ref()
+            .and_then(active_session_role_scenario)
+            == Some(RoleScenario::Candidate);
+        if candidate_session && command.action == AgentCommandAction::Say {
+            return Ok(AgentCommandOutcome::fail(
+                command.command_id,
+                command.action,
+                AgentCommandError::Invalid.code(),
+            ));
+        }
         if matches!(
             command.action,
-            AgentCommandAction::Retry | AgentCommandAction::Correct
+            AgentCommandAction::Retry
+                | AgentCommandAction::Correct
+                | AgentCommandAction::ConfirmCandidate
         ) && turns.is_empty()
         {
             return Ok(AgentCommandOutcome::fail(
@@ -621,7 +796,31 @@ impl<S: PlaybackSink> SessionService<S> {
                 AgentCommandError::Invalid.code(),
             ));
         }
-        let config = with_default_voice(config);
+        if command.action == AgentCommandAction::ConfirmCandidate {
+            let pending_current_turn = store
+                .list_events(&session_id)?
+                .into_iter()
+                .rev()
+                .find(|event| event.kind == "turn_meta")
+                .and_then(|event| serde_json::from_str::<serde_json::Value>(&event.payload).ok())
+                .is_some_and(|payload| {
+                    payload["turnId"].as_str() == turns.last().map(|turn| turn.id.as_str())
+                        && payload["userConfirmed"].as_bool() == Some(false)
+                        && payload["playbackStatus"].as_str() == Some("pending_confirmation")
+                });
+            if !candidate_session
+                || !pending_current_turn
+                || self.pending_confirmation_epoch
+                    != Some(self.control.confirmation_epoch.load(Ordering::SeqCst))
+            {
+                return Ok(AgentCommandOutcome::fail(
+                    command.command_id,
+                    command.action,
+                    AgentCommandError::Invalid.code(),
+                ));
+            }
+        }
+        let config = with_default_voice(self.config_snapshot.as_ref().unwrap_or(config));
         let e2e_route = active_voice_route(&config)
             .is_some_and(|route| route.mode == crate::config::VoiceRouteMode::E2e);
         let history = turns
@@ -633,6 +832,7 @@ impl<S: PlaybackSink> SessionService<S> {
             .collect::<Vec<_>>();
         let last_turn_id = turns.last().map(|turn| turn.id.clone());
         let cached_pcm = std::cell::RefCell::new(Option::<Vec<u8>>::None);
+        let played_audio = std::cell::Cell::new(false);
         let last_error = std::cell::RefCell::new(Option::<SessionServiceError>::None);
         let include_audio = command.action != AgentCommandAction::Report;
         let cancel = self.control.cancel_flag();
@@ -672,7 +872,15 @@ impl<S: PlaybackSink> SessionService<S> {
                 if self.control.take_stop_tts() || self.control.is_cancelled() {
                     self.sink.cancel();
                 } else if !pcm.is_empty() {
-                    self.sink.play_pcm(&pcm, 24_000);
+                    if let Some(output) = &self.playback {
+                        output
+                            .play(&pcm, 24_000, || self.control.is_cancelled())
+                            .map_err(|_| AgentCommandError::Invalid)?;
+                        played_audio.set(true);
+                    } else if !self.text_only {
+                        self.sink.play_pcm(&pcm, 24_000);
+                        played_audio.set(true);
+                    }
                 }
                 Ok(())
             }
@@ -683,6 +891,28 @@ impl<S: PlaybackSink> SessionService<S> {
         };
         match execute_agent_command(&command, generate, speak) {
             Ok(result) => {
+                if command.action == AgentCommandAction::ConfirmCandidate {
+                    if let Some(turn_id) = last_turn_id.as_deref() {
+                        store.update_assistant_text(turn_id, &command.text)?;
+                        store.append_event(
+                            &session_id,
+                            "reply",
+                            &serde_json::json!({ "text": truncate(&command.text) }).to_string(),
+                        )?;
+                        store.append_event(
+                            &session_id,
+                            "turn_meta",
+                            &serde_json::json!({
+                                "turnId": turn_id,
+                                "triggerSource": "user_confirmation",
+                                "userConfirmed": true,
+                                "playbackStatus": if played_audio.get() { "played" } else { "text_only" },
+                            })
+                            .to_string(),
+                        )?;
+                    }
+                    self.revision += 1;
+                }
                 if matches!(
                     command.action,
                     AgentCommandAction::Retry | AgentCommandAction::Correct
@@ -750,12 +980,41 @@ impl<S: PlaybackSink> SessionService<S> {
     fn reset_runtime(&mut self) {
         self.runtime = SessionRuntime::new();
         self.session_id = None;
+        self.config_snapshot = None;
+        self.playback = None;
+        self.text_only = false;
+        self.pending_confirmation_epoch = None;
         self.turn_index = 0;
         self.revision = 0;
         self.unused_materials = false;
         self.last_error_code = None;
         self.control.reset();
         self.capture = AudioCapture::from_injected();
+    }
+
+    fn supersede_pending_confirmation(&mut self, database: &Database) {
+        self.pending_confirmation_epoch = None;
+        let Some(session_id) = self.session_id.clone() else {
+            return;
+        };
+        let store = SessionStore::new(database);
+        let Ok(events) = store.list_events(&session_id) else {
+            return;
+        };
+        let Some(payload) = events
+            .iter()
+            .rev()
+            .find(|event| event.kind == "turn_meta")
+            .and_then(|event| serde_json::from_str::<serde_json::Value>(&event.payload).ok())
+        else {
+            return;
+        };
+        if payload["playbackStatus"].as_str() != Some("pending_confirmation") {
+            return;
+        }
+        let mut next = payload;
+        next["playbackStatus"] = serde_json::json!("superseded");
+        let _ = store.append_event(&session_id, "turn_meta", &next.to_string());
     }
 
     fn recover_from_cascade_error(
@@ -1282,6 +1541,64 @@ fn is_terminal_phase(phase: SessionPhase) -> bool {
     matches!(phase, SessionPhase::Completed | SessionPhase::Failed)
 }
 
+fn active_session_role_scenario(config: &PublicConfig) -> Option<RoleScenario> {
+    let active_id = config.active_role_profile_id.as_deref()?;
+    let profile = config
+        .role_profiles
+        .iter()
+        .find(|profile| profile.id == active_id)?;
+    profile
+        .scenario
+        .clone()
+        .or_else(|| RoleScenario::from_preset_id(&profile.id))
+}
+
+fn transcribe_meeting_pcm(
+    asr: &dyn SpeechToText,
+    config: &PublicConfig,
+    credentials: CascadeCredentials<'_>,
+    pcm: &[u8],
+) -> Result<String, CascadeError> {
+    let route =
+        active_voice_route(config).ok_or(CascadeError::EndpointInvalid(CascadeStage::Asr))?;
+    let provider_id = route
+        .asr_provider_id
+        .as_deref()
+        .filter(|id| !id.is_empty())
+        .ok_or(CascadeError::EndpointInvalid(CascadeStage::Asr))?;
+    let provider = config
+        .models
+        .providers
+        .iter()
+        .find(|provider| provider.id == provider_id)
+        .ok_or(CascadeError::EndpointInvalid(CascadeStage::Asr))?;
+    let model_id = route
+        .asr_model_id
+        .as_deref()
+        .filter(|id| !id.is_empty())
+        .ok_or(CascadeError::EndpointInvalid(CascadeStage::Asr))?;
+    let endpoint = ProviderEndpoint {
+        provider_id: provider.id.clone(),
+        base_url: provider.base_url.clone(),
+    };
+    let text = asr.transcribe(&endpoint, credentials.asr, model_id, pcm, ASR_SAMPLE_RATE)?;
+    let text = text.trim();
+    if text.is_empty() {
+        Err(CascadeError::ResponseEmpty(CascadeStage::Asr))
+    } else {
+        Ok(text.to_owned())
+    }
+}
+
+fn meeting_assistant_was_mentioned(text: &str, role_name: &str) -> bool {
+    let normalized = text.to_ascii_lowercase();
+    let name = role_name.trim().to_ascii_lowercase();
+    (!name.is_empty() && normalized.contains(&name))
+        || normalized.contains("会议助手")
+        || normalized.contains("ai助手")
+        || normalized.contains("ai 助手")
+}
+
 fn with_default_voice(config: &PublicConfig) -> PublicConfig {
     let mut config = config.clone();
     let active_id = config.speech.active_voice_route_id.clone();
@@ -1778,6 +2095,430 @@ mod tests {
         assert_eq!(stored[0].user_text, "你好");
         assert_eq!(stored[0].assistant_text, "助手回复");
         assert!(!stored[0].materials_used);
+    }
+
+    #[test]
+    fn candidate_suggestion_never_plays_before_user_confirmation() {
+        let (_directory, database) = opened();
+        let mut config = ready_public_config();
+        config.role_profiles[0].id = "personal-candidate".into();
+        config.role_profiles[0].scenario = Some(crate::config::RoleScenario::Candidate);
+        config.active_role_profile_id = Some("personal-candidate".into());
+        let mut service = SessionService::with_sink(RecordingSink::default());
+        match service.start(&database, &config, true, None, None).unwrap() {
+            SessionStartOutcome::Started { .. } => {}
+            SessionStartOutcome::Blocked { issues } => panic!("blocked: {issues:?}"),
+        }
+        let asr = ScriptedAsr::ok("ignored");
+        let llm = ScriptedLlm::ok("建议回答");
+        let tts = ScriptedTts::ok(&[1, 2, 3, 4]);
+        let embed = UnusedEmbed;
+        let probes = SessionProbes {
+            asr: &asr,
+            llm: &llm,
+            tts: &tts,
+            embed: &embed,
+            realtime: &UnusedRealtime,
+        };
+        service
+            .finalize_utterance(&database, &config, &probes, credentials(), Some("面试问题"))
+            .unwrap();
+        assert!(
+            service.sink().recorded().is_empty(),
+            "candidate audio played without confirmation"
+        );
+        let id = service.session_id().unwrap();
+        let meta = SessionStore::new(&database)
+            .list_events(id)
+            .unwrap()
+            .into_iter()
+            .find(|event| event.kind == "turn_meta")
+            .unwrap();
+        let payload: serde_json::Value = serde_json::from_str(&meta.payload).unwrap();
+        assert_eq!(payload["userConfirmed"], false);
+        assert_eq!(payload["playbackStatus"], "pending_confirmation");
+
+        let say = service
+            .execute_command(
+                &database,
+                &config,
+                &SessionProbes {
+                    asr: &asr,
+                    llm: &llm,
+                    tts: &tts,
+                    embed: &embed,
+                    realtime: &UnusedRealtime,
+                },
+                credentials(),
+                parse_cmd(serde_json::json!({
+                    "v": 1,
+                    "id": "candidate-say-bypass",
+                    "action": "say",
+                    "text": "绕过确认"
+                })),
+            )
+            .unwrap();
+        assert!(!say.ok);
+        assert!(service.sink().recorded().is_empty());
+    }
+
+    #[test]
+    fn candidate_confirmation_plays_only_the_current_edited_answer() {
+        let (_directory, database) = opened();
+        let mut config = ready_public_config();
+        config.role_profiles[0].id = "preset-candidate".into();
+        config.active_role_profile_id = Some("preset-candidate".into());
+        let mut service = SessionService::with_sink(RecordingSink::default());
+        match service.start(&database, &config, true, None, None).unwrap() {
+            SessionStartOutcome::Started { .. } => {}
+            SessionStartOutcome::Blocked { issues } => panic!("blocked: {issues:?}"),
+        }
+        let asr = ScriptedAsr::ok("ignored");
+        let llm = ScriptedLlm::ok("初始建议");
+        let tts = ScriptedTts::ok(&[9, 8, 7]);
+        let embed = UnusedEmbed;
+        let probes = cascaded_probes(&asr, &llm, &tts, &embed);
+        service
+            .finalize_utterance(&database, &config, &probes, credentials(), Some("面试问题"))
+            .unwrap();
+
+        let outcome = service
+            .execute_command(
+                &database,
+                &config,
+                &probes,
+                credentials(),
+                parse_cmd(serde_json::json!({
+                    "v": 1,
+                    "id": "confirm-current",
+                    "action": "confirm_candidate",
+                    "text": "编辑后的回答",
+                    "expectedRevision": service.revision()
+                })),
+            )
+            .expect("confirm candidate answer");
+
+        assert!(outcome.ok);
+        assert_eq!(service.sink().recorded(), [9, 8, 7]);
+        let id = service.session_id().unwrap();
+        let meta = SessionStore::new(&database)
+            .list_events(id)
+            .unwrap()
+            .into_iter()
+            .rev()
+            .find(|event| event.kind == "turn_meta")
+            .unwrap();
+        let payload: serde_json::Value = serde_json::from_str(&meta.payload).unwrap();
+        assert_eq!(payload["userConfirmed"], true);
+        assert_eq!(payload["playbackStatus"], "played");
+    }
+
+    #[test]
+    fn candidate_confirmation_cannot_be_revived_after_takeover_and_resume() {
+        let (_directory, database) = opened();
+        let mut config = ready_public_config();
+        config.role_profiles[0].id = "preset-candidate".into();
+        config.active_role_profile_id = Some("preset-candidate".into());
+        let mut service = SessionService::with_sink(RecordingSink::default());
+        service.start(&database, &config, true, None, None).unwrap();
+        let asr = ScriptedAsr::ok("ignored");
+        let llm = ScriptedLlm::ok("old suggestion");
+        let tts = ScriptedTts::ok(&[9, 8, 7]);
+        let embed = UnusedEmbed;
+        let probes = cascaded_probes(&asr, &llm, &tts, &embed);
+        service
+            .finalize_utterance(&database, &config, &probes, credentials(), Some("question"))
+            .unwrap();
+        service
+            .set_mode(&database, AgentMode::OperatorSpeaking)
+            .unwrap();
+        service.set_mode(&database, AgentMode::AiActive).unwrap();
+        let result = service.execute_command(&database, &config, &probes, credentials(), parse_cmd(serde_json::json!({
+            "v": 1, "id": "revive-old", "action": "confirm_candidate", "text": "old answer", "expectedRevision": service.revision()
+        }))).unwrap();
+        assert!(
+            !result.ok,
+            "takeover must permanently invalidate the old confirmation"
+        );
+        assert!(service.sink().recorded().is_empty());
+        let meta = latest_turn_meta(&database, service.session_id().unwrap());
+        assert_eq!(meta["playbackStatus"], "superseded");
+    }
+
+    fn latest_turn_meta(
+        database: &crate::database::Database,
+        session_id: &str,
+    ) -> serde_json::Value {
+        SessionStore::new(database)
+            .list_events(session_id)
+            .unwrap()
+            .into_iter()
+            .rev()
+            .find(|event| event.kind == "turn_meta")
+            .map(|event| serde_json::from_str(&event.payload).unwrap())
+            .unwrap()
+    }
+
+    fn start_candidate(
+        service: &mut SessionService<RecordingSink>,
+        database: &crate::database::Database,
+    ) -> crate::config::PublicConfig {
+        let mut config = ready_public_config();
+        config.role_profiles[0].id = "preset-candidate".into();
+        config.active_role_profile_id = Some("preset-candidate".into());
+        service.start(database, &config, true, None, None).unwrap();
+        config
+    }
+
+    #[test]
+    fn candidate_confirmation_is_superseded_when_a_new_question_fails() {
+        let (_directory, database) = opened();
+        let mut service = SessionService::with_sink(RecordingSink::default());
+        let config = start_candidate(&mut service, &database);
+        let asr = ScriptedAsr::ok("ignored");
+        let llm = ScriptedLlm::ok("old suggestion");
+        let tts = ScriptedTts::ok(&[9, 8, 7]);
+        let embed = UnusedEmbed;
+        let probes = cascaded_probes(&asr, &llm, &tts, &embed);
+        service
+            .finalize_utterance(&database, &config, &probes, credentials(), Some("question"))
+            .unwrap();
+        let fail = FailingLlm::new(crate::providers::CascadeError::RequestFailed(
+            crate::providers::CascadeStage::Llm,
+        ));
+        let failed = SessionProbes {
+            asr: &asr,
+            llm: &fail,
+            tts: &tts,
+            embed: &embed,
+            realtime: &UnusedRealtime,
+        };
+        assert!(
+            service
+                .finalize_utterance(&database, &config, &failed, credentials(), Some("next"))
+                .is_err()
+        );
+        let meta = latest_turn_meta(&database, service.session_id().unwrap());
+        assert_eq!(meta["playbackStatus"], "superseded");
+        let result = service.execute_command(&database, &config, &probes, credentials(), parse_cmd(serde_json::json!({
+            "v": 1, "id": "after-fail", "action": "confirm_candidate", "text": "old answer", "expectedRevision": service.revision()
+        }))).unwrap();
+        assert!(!result.ok);
+        assert!(service.sink().recorded().is_empty());
+    }
+
+    #[test]
+    fn candidate_confirmation_is_superseded_by_pause_mute_and_stop() {
+        let (_directory, database) = opened();
+        let mut service = SessionService::with_sink(RecordingSink::default());
+        let config = start_candidate(&mut service, &database);
+        let asr = ScriptedAsr::ok("ignored");
+        let llm = ScriptedLlm::ok("old suggestion");
+        let tts = ScriptedTts::ok(&[9, 8, 7]);
+        let embed = UnusedEmbed;
+        let probes = cascaded_probes(&asr, &llm, &tts, &embed);
+        service
+            .finalize_utterance(&database, &config, &probes, credentials(), Some("question"))
+            .unwrap();
+        service.set_mode(&database, AgentMode::Paused).unwrap();
+        assert_eq!(
+            latest_turn_meta(&database, service.session_id().unwrap())["playbackStatus"],
+            "superseded"
+        );
+        let result = service.execute_command(&database, &config, &probes, credentials(), parse_cmd(serde_json::json!({
+            "v": 1, "id": "after-pause", "action": "confirm_candidate", "text": "old answer", "expectedRevision": service.revision()
+        }))).unwrap();
+        assert!(!result.ok);
+
+        let (_directory, database) = opened();
+        let mut service = SessionService::with_sink(RecordingSink::default());
+        let config = start_candidate(&mut service, &database);
+        service
+            .finalize_utterance(&database, &config, &probes, credentials(), Some("question"))
+            .unwrap();
+        service.set_mode(&database, AgentMode::Muted).unwrap();
+        assert_eq!(
+            latest_turn_meta(&database, service.session_id().unwrap())["playbackStatus"],
+            "superseded"
+        );
+
+        let (_directory, database) = opened();
+        let mut service = SessionService::with_sink(RecordingSink::default());
+        let config = start_candidate(&mut service, &database);
+        service
+            .finalize_utterance(&database, &config, &probes, credentials(), Some("question"))
+            .unwrap();
+        service.stop(&database).unwrap();
+        assert_eq!(
+            latest_turn_meta(&database, service.session_id().unwrap())["playbackStatus"],
+            "superseded"
+        );
+    }
+
+    #[test]
+    fn candidate_late_response_after_stop_does_not_restore_confirmation() {
+        let (_directory, database) = opened();
+        let mut service = SessionService::with_sink(RecordingSink::default());
+        let config = start_candidate(&mut service, &database);
+        let asr = ScriptedAsr::ok("ignored");
+        let first = ScriptedLlm::ok("old suggestion");
+        let tts = ScriptedTts::ok(&[9, 8, 7]);
+        let embed = UnusedEmbed;
+        service
+            .finalize_utterance(
+                &database,
+                &config,
+                &cascaded_probes(&asr, &first, &tts, &embed),
+                credentials(),
+                Some("question"),
+            )
+            .unwrap();
+        let entered = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let proceed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let gated = GateLlm {
+            reply: "late".into(),
+            entered: std::sync::Arc::clone(&entered),
+            proceed: std::sync::Arc::clone(&proceed),
+            calls: AtomicU32::new(0),
+        };
+        let control = service.control();
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                while !entered.load(std::sync::atomic::Ordering::SeqCst) {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                control.request_stop();
+                proceed.store(true, std::sync::atomic::Ordering::SeqCst);
+            });
+            let _ = service.finalize_utterance(
+                &database,
+                &config,
+                &SessionProbes {
+                    asr: &asr,
+                    llm: &gated,
+                    tts: &tts,
+                    embed: &embed,
+                    realtime: &UnusedRealtime,
+                },
+                credentials(),
+                Some("next"),
+            );
+        });
+        let status = latest_turn_meta(&database, service.session_id().unwrap())["playbackStatus"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert_ne!(status, "pending_confirmation");
+        let result = service.execute_command(&database, &config, &cascaded_probes(&asr, &first, &tts, &embed), credentials(), parse_cmd(serde_json::json!({
+            "v": 1, "id": "late-stop", "action": "confirm_candidate", "text": "late", "expectedRevision": service.revision()
+        }))).unwrap();
+        assert!(!result.ok);
+        assert!(service.sink().recorded().is_empty());
+    }
+
+    #[test]
+    fn meeting_assistant_only_transcribes_ordinary_voice_discussion() {
+        let (_directory, database) = opened();
+        let mut config = ready_public_config();
+        config.role_profiles[0].id = "personal-meeting-assistant".into();
+        config.role_profiles[0].name = "小助理".into();
+        config.role_profiles[0].scenario = Some(crate::config::RoleScenario::MeetingAssistant);
+        config.active_role_profile_id = Some("personal-meeting-assistant".into());
+        let mut service = SessionService::with_sink(RecordingSink::default());
+        match service.start(&database, &config, true, None, None).unwrap() {
+            SessionStartOutcome::Started { .. } => {}
+            SessionStartOutcome::Blocked { issues } => panic!("blocked: {issues:?}"),
+        }
+        service.push_pcm(&[1, 0, 2, 0, 3, 0]);
+        let asr = ScriptedAsr::ok("今天讨论项目进度");
+        let llm = ScriptedLlm::ok("不应生成回复");
+        let tts = ScriptedTts::ok(&[1, 2]);
+        let embed = UnusedEmbed;
+
+        let turn = service
+            .finalize_utterance(
+                &database,
+                &config,
+                &cascaded_probes(&asr, &llm, &tts, &embed),
+                credentials(),
+                None,
+            )
+            .unwrap()
+            .expect("transcript turn");
+
+        assert_eq!(turn.user_text, "今天讨论项目进度");
+        assert_eq!(turn.assistant_text, "");
+        assert_eq!(asr.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(llm.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(tts.calls.load(Ordering::SeqCst), 0);
+        assert!(service.sink().recorded().is_empty());
+    }
+
+    #[test]
+    fn meeting_assistant_hotkey_forces_one_answer_and_records_trigger() {
+        let (_directory, database) = opened();
+        let mut config = ready_public_config();
+        config.role_profiles[0].scenario = Some(crate::config::RoleScenario::MeetingAssistant);
+        let mut service = SessionService::with_sink(RecordingSink::default());
+        start_ready_sink(&mut service, &database, &config);
+        service.push_pcm(&[1, 0, 2, 0, 3, 0]);
+        let asr = ScriptedAsr::ok("今天讨论项目进度");
+        let llm = ScriptedLlm::ok("当前进度正常");
+        let tts = ScriptedTts::ok(&[7, 8]);
+        let embed = UnusedEmbed;
+
+        let turn = service
+            .finalize_utterance_forced(
+                &database,
+                &config,
+                &cascaded_probes(&asr, &llm, &tts, &embed),
+                credentials(),
+            )
+            .unwrap()
+            .expect("hotkey turn");
+
+        assert_eq!(turn.assistant_text, "当前进度正常");
+        assert_eq!(llm.calls.load(Ordering::SeqCst), 1);
+        let event = SessionStore::new(&database)
+            .list_events(service.session_id().unwrap())
+            .unwrap()
+            .into_iter()
+            .rev()
+            .find(|event| event.kind == "turn_meta")
+            .unwrap();
+        let payload: serde_json::Value = serde_json::from_str(&event.payload).unwrap();
+        assert_eq!(payload["triggerSource"], "hotkey");
+    }
+
+    #[test]
+    fn meeting_assistant_answers_when_its_configured_name_is_mentioned() {
+        let (_directory, database) = opened();
+        let mut config = ready_public_config();
+        config.role_profiles[0].name = "小助理".into();
+        config.role_profiles[0].scenario = Some(crate::config::RoleScenario::MeetingAssistant);
+        let mut service = SessionService::with_sink(RecordingSink::default());
+        start_ready_sink(&mut service, &database, &config);
+        service.push_pcm(&[1, 0, 2, 0, 3, 0]);
+        let asr = ScriptedAsr::ok("小助理，请总结刚才的结论");
+        let llm = ScriptedLlm::ok("结论是按计划推进");
+        let tts = ScriptedTts::ok(&[4, 5, 6]);
+        let embed = UnusedEmbed;
+
+        let turn = service
+            .finalize_utterance(
+                &database,
+                &config,
+                &cascaded_probes(&asr, &llm, &tts, &embed),
+                credentials(),
+                None,
+            )
+            .unwrap()
+            .expect("answer turn");
+
+        assert_eq!(turn.assistant_text, "结论是按计划推进");
+        assert_eq!(asr.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(llm.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(service.sink().recorded(), [4, 5, 6]);
     }
 
     #[test]

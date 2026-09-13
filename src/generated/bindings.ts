@@ -18,7 +18,23 @@ export type SecretSlot = { reference: string, configured: boolean, };
 
 export type ApplicationConfig = { locale: string | null, };
 
-export type ProviderConfig = { id: string, name: string | null, baseUrl: string, credential: SecretSlot | null, };
+export type ProviderConfig = { webCapability?: WebCapability, id: string, name: string | null, baseUrl: string, credential: SecretSlot | null, };
+
+export type WebCapability = "none" | "openai_responses_web_search" | "qwen_responses_web_search" | "qwen_chat_enable_search";
+
+export type WebCapabilityStatus = "disabled" | "available" | "model_unsupported" | "interface_incompatible" | "network_unreachable" | "authentication_failed";
+
+export type WebSource = { title: string, url: string, };
+
+export type MeetingProcess = { pid: number, name: string, title: string, };
+
+export type AudioOutputDevice = { id: string, name: string, };
+
+export type LocalAudioDevice = { id: string, name: string, flow: string, state: string, };
+
+export type VirtualAudioPreparation = { state: string, installed: boolean, rebootRequired: boolean, detail: string, renderEndpointId: string | null, captureEndpointId: string | null, diagnostic?: PreparationDiagnostic, };
+
+export type PreparationDiagnostic = { phase: string, errorCode: string | null, exitCode: number | null, retryAllowed: boolean, };
 
 export type ModelConfig = { providers: Array<ProviderConfig>, activeProviderId: string | null, };
 
@@ -40,15 +56,19 @@ export type KnowledgeConfig = { embeddingConfigs: Array<EmbeddingConfig>, active
 
 export type StorageConfig = { exportDirectory: string | null, };
 
-export type RoleProfileConfig = { id: string, name: string, systemPrompt: string, openingMessage: string, styleInstructions: string, active: boolean, configVersion: number, };
+export type RoleScenario = "interviewer" | "hr" | "candidate" | "meetingAssistant" | "livestreamPresenter";
+
+export type RoleProfileConfig = { id: string, name: string, systemPrompt: string, openingMessage: string, styleInstructions: string, scenario?: RoleScenario, active: boolean, configVersion: number, };
 
 export type DiagnosticsConfig = { logRetentionDays: number, };
 
 export type PublicConfig = { configVersion: number, application: ApplicationConfig, models: ModelConfig, speech: SpeechConfig, transport: TransportConfig, knowledge: KnowledgeConfig, storage: StorageConfig, roleProfiles: Array<RoleProfileConfig>, activeRoleProfileId: string | null, diagnostics: DiagnosticsConfig, };
 
-export type ProviderSaveInput = { id: string | null, name: string | null, baseUrl: string, apiKey: string | null, };
+export type ProviderSaveInput = { webCapability?: WebCapability, id: string | null, name: string | null, baseUrl: string, apiKey: string | null, };
 
-export type ProviderTestResult = { providerId: string, reachable: boolean, modelCount: number, };
+export type ProviderTestResult = { providerId: string, reachable: boolean, modelCount: number, webStatus: WebCapabilityStatus, webSourceCount: number, };
+
+export type ProviderDependency = { kind: string, id: string, name: string, };
 
 export type DiscoveredModelDto = { id: string, };
 
@@ -90,7 +110,7 @@ export type SessionExportResult = { path: string, };
 
 export type SessionCitationView = { materialId: string, chunkId: string, snippet: string, };
 
-export type SessionTurnView = { id: string, turnIndex: number, userText: string, assistantText: string, materialsUsed: boolean, citations: Array<SessionCitationView>, };
+export type SessionTurnView = { webSources?: Array<WebSource>, webDegraded?: boolean, triggerSource?: string, userConfirmed?: boolean, playbackStatus?: string, id: string, turnIndex: number, userText: string, assistantText: string, materialsUsed: boolean, citations: Array<SessionCitationView>, };
 
 export type SessionDetail = { session: SessionSummary, turns: Array<SessionTurnView>, };
 
@@ -103,5 +123,29 @@ export type AudioLevelEvent = { peak: number, seq: number, };
 export type AgentCommandInput = { id: string, action: string, text: string | null, answer: string | null, mode: string | null, expectedRevision: number, };
 
 export type AgentCommandResult = { commandId: string, action: string, ok: boolean, result: Record<string, unknown>, error: string, };
+
+export type LivestreamState = "draft" | "ready" | "playing" | "paused" | "finished";
+
+export type LivestreamSegmentStatus = "draft" | "ready" | "playing" | "played";
+
+export type LivestreamOutputState = "idle" | "synthesizing" | "playing" | "played" | "cancelled" | "failed";
+
+export type LivestreamMediaKind = "image" | "video";
+
+export type LivestreamSegment = { id: string, title: string, text: string, estimatedSeconds: number, sources: Array<string>, status: LivestreamSegmentStatus, };
+
+export type LivestreamScript = { id: string, title: string, segments: Array<LivestreamSegment>, loopEnabled: boolean, confirmed: boolean, currentIndex: number | null, state: LivestreamState, };
+
+export type LivestreamStageState = { productTitle: string, currentSubtitle: string, nextHint: string, state: LivestreamState, mediaPath: string | null, mediaKind: LivestreamMediaKind | null, outputState: LivestreamOutputState, outputErrorCode: string | null, };
+
+export type LivestreamSegmentDraftInput = { title: string, text: string, estimatedSeconds: number, sources: Array<string>, };
+
+export type LivestreamDraftInput = { title: string, segments: Array<LivestreamSegmentDraftInput>, loopEnabled: boolean, mediaPath: string | null, mediaKind: LivestreamMediaKind | null, };
+
+export type LivestreamGenerateInput = { title: string, materialIds: Array<string>, language: string, maxSegments: number, loopEnabled: boolean, mediaPath: string | null, mediaKind: LivestreamMediaKind | null, };
+
+export type LivestreamRuntime = { script: LivestreamScript, stage: LivestreamStageState, };
+
+export type ObsRuntimeStatus = { connected: boolean, sceneReady: boolean, browserSourceReady: boolean, virtualCameraActive: boolean, errorCode: string | null, };
 
 export type CommandResult<T> = { ok: true; data: T } | { ok: false; error: PublicError };

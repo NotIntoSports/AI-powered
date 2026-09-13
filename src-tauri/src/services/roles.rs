@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use ts_rs::TS;
 
-use crate::config::{ConfigError, ConfigStore, RoleProfileConfig};
+use crate::config::{ConfigError, ConfigStore, RoleProfileConfig, RoleScenario};
 
 const MAX_SYSTEM_PROMPT_BYTES: usize = 32 * 1024;
 const MAX_OPENING_MESSAGE_BYTES: usize = 4 * 1024;
@@ -65,7 +65,12 @@ impl<'a> RoleProfileService<'a> {
         input: RoleProfileSaveInput,
     ) -> Result<RoleProfileConfig, RoleProfileServiceError> {
         let input = clean_save_input(input);
-        let id = super::ids::resolve_optional_id(input.id.as_deref())
+        let preset_scenario = input.id.as_deref().and_then(RoleScenario::from_preset_id);
+        let requested_id = input
+            .id
+            .as_deref()
+            .filter(|id| !crate::config::presets::is_preset(id));
+        let id = super::ids::resolve_optional_id(requested_id)
             .map_err(|_| RoleProfileServiceError::InvalidId)?;
         validate_save_fields(&input)?;
         let mut saved = None;
@@ -77,12 +82,20 @@ impl<'a> RoleProfileService<'a> {
                     .find(|profile| profile.id == id)
                     .map(|profile| profile.config_version.saturating_add(1))
                     .unwrap_or(1);
+                let scenario = preset_scenario.clone().or_else(|| {
+                    config
+                        .role_profiles
+                        .iter()
+                        .find(|profile| profile.id == id)
+                        .and_then(|profile| profile.scenario.clone())
+                });
                 let profile = RoleProfileConfig {
                     id: id.clone(),
                     name: input.name.clone(),
                     system_prompt: input.system_prompt.clone(),
                     opening_message: input.opening_message.clone(),
                     style_instructions: input.style_instructions.clone(),
+                    scenario,
                     active: false,
                     config_version,
                 };
@@ -140,6 +153,10 @@ impl<'a> RoleProfileService<'a> {
                     system_prompt: source.system_prompt.clone(),
                     opening_message: source.opening_message.clone(),
                     style_instructions: source.style_instructions.clone(),
+                    scenario: source
+                        .scenario
+                        .clone()
+                        .or_else(|| RoleScenario::from_preset_id(&source.id)),
                     active: false,
                     config_version: 1,
                 };
@@ -184,6 +201,9 @@ impl<'a> RoleProfileService<'a> {
 
     pub fn delete(&self, id: &str) -> Result<(), RoleProfileServiceError> {
         let id = id.trim();
+        if crate::config::presets::is_preset(id) {
+            return Err(RoleProfileServiceError::FieldsInvalid);
+        }
         self.config
             .update(|config| {
                 let count = config.role_profiles.len();
@@ -206,7 +226,10 @@ impl<'a> RoleProfileService<'a> {
 
 fn clean_save_input(input: RoleProfileSaveInput) -> RoleProfileSaveInput {
     RoleProfileSaveInput {
-        id: input.id.map(|id| id.trim().to_owned()).filter(|id| !id.is_empty()),
+        id: input
+            .id
+            .map(|id| id.trim().to_owned())
+            .filter(|id| !id.is_empty()),
         name: input.name.trim().into(),
         system_prompt: input.system_prompt.trim().into(),
         opening_message: input.opening_message.trim().into(),

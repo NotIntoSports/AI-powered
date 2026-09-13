@@ -118,6 +118,7 @@ pub(crate) mod test_support {
                 system_prompt: PROMPT_MARKERS[0].into(),
                 opening_message: PROMPT_MARKERS[1].into(),
                 style_instructions: PROMPT_MARKERS[2].into(),
+                scenario: None,
                 active: true,
                 config_version: 1,
             }],
@@ -179,6 +180,7 @@ pub(crate) mod test_support {
                 system_prompt: PROMPT_MARKERS[0].into(),
                 opening_message: PROMPT_MARKERS[1].into(),
                 style_instructions: PROMPT_MARKERS[2].into(),
+                scenario: None,
                 active: true,
                 config_version: 1,
             }],
@@ -189,6 +191,7 @@ pub(crate) mod test_support {
 
     fn provider(id: &str, base_url: &str) -> ProviderConfig {
         ProviderConfig {
+            web_capability: None,
             id: id.into(),
             name: None,
             base_url: base_url.into(),

@@ -34,10 +34,33 @@ pub struct AppState {
     pub sessions: Mutex<SessionService>,
     pub session_control: Arc<SessionControl>,
     pub event_seq: AtomicU64,
+    pub audio_routing: Mutex<Option<crate::prerequisites::AudioRoutingChange>>,
+    pub livestream: Mutex<Option<crate::livestream::LivestreamScript>>,
+    pub livestream_stage: Mutex<Option<crate::livestream::LivestreamStageState>>,
+    pub livestream_playback_cancel: Mutex<Arc<std::sync::atomic::AtomicBool>>,
+    pub livestream_voice: Mutex<Option<crate::livestream::LivestreamVoiceSnapshot>>,
+    pub obs_previous_scene: Mutex<Option<String>>,
+    pub operator_monitor: Mutex<Option<std::process::Child>>,
     database_path: PathBuf,
     secret_backend_ready: bool,
     startup: RwLock<StartupState>,
     pub paths: AppPaths,
+}
+
+impl Drop for AppState {
+    fn drop(&mut self) {
+        if let Ok(slot) = self.operator_monitor.get_mut()
+            && let Some(mut child) = slot.take()
+        {
+            crate::audio::monitor::stop(&mut child);
+        }
+        if let Ok(slot) = self.audio_routing.get_mut()
+            && let Some(change) = slot.take()
+            && crate::prerequisites::restore_communications_mic(&change).is_ok()
+        {
+            crate::prerequisites::clear_persisted_audio_routing(&self.paths.data_directory);
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -131,6 +154,10 @@ impl AppState {
         };
         let sessions = SessionService::new();
         let session_control = sessions.control();
+        // Best-effort only: a killed process never runs Drop. Leftover device IDs
+        // can restore the previous communications microphone if it is still CABLE.
+        let audio_routing =
+            crate::prerequisites::recover_persisted_audio_routing(&paths.data_directory);
         Ok(Self {
             secrets,
             database: Mutex::new(database),
@@ -140,6 +167,15 @@ impl AppState {
             sessions: Mutex::new(sessions),
             session_control,
             event_seq: AtomicU64::new(0),
+            audio_routing: Mutex::new(audio_routing),
+            livestream: Mutex::new(None),
+            livestream_stage: Mutex::new(None),
+            livestream_playback_cancel: Mutex::new(Arc::new(std::sync::atomic::AtomicBool::new(
+                false,
+            ))),
+            livestream_voice: Mutex::new(None),
+            obs_previous_scene: Mutex::new(None),
+            operator_monitor: Mutex::new(None),
             database_path,
             secret_backend_ready,
             startup: RwLock::new(startup),

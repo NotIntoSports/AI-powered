@@ -4,7 +4,8 @@ param(
   [ValidateSet("install", "uninstall")][string]$Operation = "install",
   [switch]$Worker,
   [string]$EncodedRequest,
-  [string]$EncodedResultPath
+  [string]$EncodedResultPath,
+  [switch]$ProbeOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -159,7 +160,22 @@ function Test-VbCableInDriverStore {
 }
 
 function Test-VirtualAudioAlreadyUsable([string]$Output) {
-  return (Test-VbCablePairPresent $Output) -or (Test-VoicemeeterPairPresent $Output) -or (Test-LegacyVirtualAudioStarted $Output)
+  # The desktop route supports VB-CABLE, not arbitrary legacy virtual drivers.
+  return Test-VbCablePairPresent $Output
+}
+
+function Enter-InstallerLock([string]$Name) {
+  $mutex = [Threading.Mutex]::new($false, "Local\AI.VirtualAssistant.VirtualAudio.$Name")
+  $acquired = $false
+  try {
+    try { $acquired = $mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $acquired = $true }
+    if (-not $acquired) { throw "PREREQUISITE_INSTALL_BUSY: another installation is still running" }
+    return $mutex
+  } catch { $mutex.Dispose(); throw }
+}
+
+function Write-PreparationPhase([string]$Phase) {
+  [Console]::WriteLine((@{ phase = $Phase } | ConvertTo-Json -Compress))
 }
 
 function Invoke-VbCableSetup([string]$SetupPath, [bool]$Silent) {
@@ -175,7 +191,9 @@ function Write-WorkerResult([string]$ResultPath, [bool]$Success, [string]$ErrorC
 }
 
 function Invoke-PrerequisiteWorker($Request, [string]$ResultPath) {
+  $workerLock = $null
   try {
+    if ($Request.component -eq "virtual-audio") { $workerLock = Enter-InstallerLock "Worker" }
     Import-SecurityModule
     if ($Request.component -eq "obs") {
       Assert-ObsModule $Request.module32 $ObsVirtualCamera32Sha256
@@ -224,9 +242,7 @@ function Invoke-PrerequisiteWorker($Request, [string]$ResultPath) {
     }
     Assert-AuthenticodePublisher $setupPath $VbCablePublisher
     $setup = Invoke-VbCableSetup $setupPath $true
-    if ($setup.ExitCode -ne 0 -and $setup.ExitCode -ne 3010) {
-      $setup = Invoke-VbCableSetup $setupPath $false
-    }
+    # Do not retry a partially successful driver installer: it may offer removal.
     if ($setup.ExitCode -ne 0 -and $setup.ExitCode -ne 3010) {
       throw "PREREQUISITE_INSTALL_FAILED: VB-CABLE setup returned $($setup.ExitCode)"
     }
@@ -241,6 +257,8 @@ function Invoke-PrerequisiteWorker($Request, [string]$ResultPath) {
     $errorCode = if ($detail -match "^(PREREQUISITE_[A-Z_]+)") { $Matches[1] } else { "PREREQUISITE_INSTALL_FAILED" }
     try { Write-WorkerResult $ResultPath $false $errorCode $detail $false } catch {}
     exit 1
+  } finally {
+    if ($workerLock) { $workerLock.ReleaseMutex(); $workerLock.Dispose() }
   }
 }
 
@@ -273,11 +291,15 @@ function Invoke-ElevatedWorker([hashtable]$Request) {
     $hostExecutable = (Get-Process -Id $PID).Path
     if (-not $hostExecutable) { $hostExecutable = "powershell.exe" }
     if (Test-Administrator) {
+      Write-PreparationPhase "installing"
       & $hostExecutable @argumentList
       $workerExitCode = $LASTEXITCODE
     } else {
       try {
-        $process = Start-Process -FilePath $hostExecutable -ArgumentList $argumentString -Verb RunAs -WindowStyle Hidden -Wait -PassThru
+        Write-PreparationPhase "authorizing"
+        $process = Start-Process -FilePath $hostExecutable -ArgumentList $argumentString -Verb RunAs -WindowStyle Hidden -PassThru
+        Write-PreparationPhase "installing"
+        $process.WaitForExit()
         $workerExitCode = $process.ExitCode
       } catch {
         if ($_.Exception.NativeErrorCode -eq 1223 -or $_.Exception.Message -match "cancel|\u53D6\u6D88") {
@@ -336,9 +358,23 @@ if ($Worker) {
   }
 }
 
+$preparationLock = $null
 try {
 if (-not $Component -or -not $ResourcesDirectory) {
   throw "PREREQUISITE_INSTALL_FAILED: component and resources directory are required"
+}
+
+if ($Component -eq "virtual-audio") {
+  $preparationLock = Enter-InstallerLock "Preparation"
+  $probeLock = Enter-InstallerLock "Worker"
+  $probeLock.ReleaseMutex(); $probeLock.Dispose()
+}
+if ($ProbeOnly) {
+  Import-SecurityModule
+  $output = Get-VirtualAudioDeviceOutput
+  $inStore = Test-VbCableInDriverStore
+  Write-Output (@{ success = $true; phase = "checked"; driverStore = $inStore; devicePair = (Test-VbCablePairPresent $output) } | ConvertTo-Json -Compress)
+  exit 0
 }
 
 if ($Component -eq "obs") {
@@ -407,4 +443,6 @@ exit 0
   $errorCode = if ($detail -match "^(PREREQUISITE_[A-Z_]+)") { $Matches[1] } else { "PREREQUISITE_INSTALL_FAILED" }
   Write-InstallerJson $false $errorCode $detail $false
   exit 1
+} finally {
+  if ($preparationLock) { $preparationLock.ReleaseMutex(); $preparationLock.Dispose() }
 }

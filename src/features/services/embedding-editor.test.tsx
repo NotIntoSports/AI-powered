@@ -160,4 +160,26 @@ describe("EmbeddingEditor", () => {
     fireEvent.click(screen.getByRole("button", { name: "删除" }));
     await waitFor(() => expect(commands.deleteEmbeddingConfig).toHaveBeenCalledWith("primary"));
   });
+
+  it("loads the focused embedding into the editor", async () => {
+    const target = embedding({ id: "embedding-2", modelId: "embed-focus", dimensions: 1024 });
+    vi.mocked(commands.getConfigPublic).mockResolvedValue({
+      ok: true,
+      data: { ...emptyConfig, knowledge: { embeddingConfigs: [embedding(), target], activeEmbeddingConfigId: null } },
+    });
+    render(<EmbeddingEditor focusId="embedding-2" />);
+    expect(await screen.findByRole("heading", { name: "编辑配置" })).toBeTruthy();
+    expect((screen.getByLabelText("模型") as HTMLInputElement).value).toBe("embed-focus");
+    expect((screen.getByLabelText("维度") as HTMLInputElement).value).toBe("1024");
+  });
+
+  it("clears a stale focused embedding that no longer exists", async () => {
+    vi.mocked(commands.getConfigPublic).mockResolvedValue({
+      ok: true,
+      data: { ...emptyConfig, knowledge: { embeddingConfigs: [embedding()], activeEmbeddingConfigId: null } },
+    });
+    render(<EmbeddingEditor focusId="missing-id" />);
+    expect(await screen.findByText(/找不到 Embedding 配置（missing-id）/)).toBeTruthy();
+    expect((screen.getByLabelText("模型") as HTMLInputElement).value).toBe("");
+  });
 });

@@ -316,6 +316,93 @@ mod cascade_http {
     }
 
     #[test]
+    fn native_search_uses_selected_protocol_and_parses_sources() {
+        use super::super::web_search::WebCapability;
+        for capability in [
+            WebCapability::OpenaiResponsesWebSearch,
+            WebCapability::QwenResponsesWebSearch,
+            WebCapability::QwenChatEnableSearch,
+        ] {
+            let is_chat = capability == WebCapability::QwenChatEnableSearch;
+            let body = if is_chat {
+                serde_json::json!({ "choices": [{ "message": { "content": "answer" } }], "search_info": { "search_results": [{ "url": "https://example.com/news", "title": "News" }] } })
+            } else {
+                serde_json::json!({ "status": "completed", "output": [{ "type": "message", "content": [{ "type": "output_text", "text": "answer" }] }, { "type": "web_search_call", "action": { "sources": [{ "url": "https://example.com/news", "title": "News" }] } }] })
+            };
+            let (url, captured) = serve_once(response(
+                "200 OK",
+                &serde_json::to_vec(&body).unwrap(),
+                "application/json",
+                "",
+            ));
+            let adapter = OpenAiCompatibleCascade::new()
+                .unwrap()
+                .with_web_capability(capability);
+            assert_eq!(
+                adapter
+                    .complete(&endpoint(url), Some("synthetic"), "chosen-model", &[])
+                    .unwrap(),
+                "answer"
+            );
+            let request = captured.recv_timeout(Duration::from_secs(2)).unwrap();
+            assert!(request.request_line.contains(if is_chat {
+                "/v1/chat/completions"
+            } else {
+                "/v1/responses"
+            }));
+            let payload: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
+            assert_eq!(payload["model"], "chosen-model");
+            if is_chat {
+                assert_eq!(payload["enable_search"], true);
+            } else {
+                assert_eq!(payload["tools"][0]["type"], "web_search");
+            }
+            assert_eq!(adapter.web_result().sources.len(), 1);
+            assert!(!adapter.web_result().degraded);
+        }
+    }
+
+    #[test]
+    fn failed_search_falls_back_without_search_tools_or_fake_sources() {
+        use super::super::web_search::WebCapability;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/v1", listener.local_addr().unwrap());
+        let worker = thread::spawn(move || {
+            let (mut first, _) = listener.accept().unwrap();
+            assert!(read_request(&mut first).request_line.contains("/responses"));
+            first
+                .write_all(&response("400 Bad Request", b"{}", "application/json", ""))
+                .unwrap();
+            drop(first);
+            let (mut second, _) = listener.accept().unwrap();
+            let request = read_request(&mut second);
+            let payload: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
+            assert!(payload.get("tools").is_none());
+            assert!(payload.get("enable_search").is_none());
+            second
+                .write_all(&response(
+                    "200 OK",
+                    br#"{"choices":[{"message":{"content":"ordinary answer"}}]}"#,
+                    "application/json",
+                    "",
+                ))
+                .unwrap();
+        });
+        let adapter = OpenAiCompatibleCascade::new()
+            .unwrap()
+            .with_web_capability(WebCapability::OpenaiResponsesWebSearch);
+        assert_eq!(
+            adapter
+                .complete(&endpoint(url), None, "model", &[])
+                .unwrap(),
+            "ordinary answer"
+        );
+        assert!(adapter.web_result().degraded);
+        assert!(adapter.web_result().sources.is_empty());
+        worker.join().unwrap();
+    }
+
+    #[test]
     fn transcribes_wav_multipart_and_returns_text() {
         let body = r#"{"text":"你好候选人"}"#.as_bytes();
         let (base_url, captured) = serve_once(response("200 OK", body, "application/json", ""));

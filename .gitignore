@@ -45,3 +45,4 @@ native/**/publish/
 docs/
 resources/prerequisites/*
 !resources/prerequisites/.gitkeep
+.codex-tmp/

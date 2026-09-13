@@ -133,7 +133,14 @@ test("route ids match the design spec", async () => {
   const match = routesContent.match(/routeIds\s*=\s*\[([^\]]+)\]/);
   assert.ok(match, "routeIds array must exist in routes.ts");
   const ids = match[1].split(",").map(s => s.trim().replace(/["']/g, ""));
-  assert.deepEqual(ids, ["workspace", "materials", "records", "services", "settings"]);
+  assert.deepEqual(ids, [
+    "workspace",
+    "livestream",
+    "materials",
+    "records",
+    "services",
+    "settings",
+  ]);
 });
 
 test("app.tsx retains startup dispatch structure", async () => {

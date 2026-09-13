@@ -10,16 +10,23 @@ import type {
   SessionSummary,
   SessionTranscriptEvent,
   SessionTurnView,
+  PublicConfig,
 } from "../../generated/bindings";
 import { WorkspaceSession } from "./workspace-session";
 
 vi.mock("../../api/commands", () => ({
+  getConfigPublic: vi.fn(),
+  listMeetingProcesses: vi.fn(),
+  getVirtualAudioStatus: vi.fn(),
+  installVirtualAudio: vi.fn(),
+  listAudioOutputs: vi.fn(),
   startSession: vi.fn(),
   stopSession: vi.fn(),
   setSessionMode: vi.fn(),
   getRuntimeStatus: vi.fn(),
   getSession: vi.fn(),
   finalizeSessionUtterance: vi.fn(),
+  triggerMeetingAssistant: vi.fn(),
   sessionAgentCommand: vi.fn(),
 }));
 
@@ -97,6 +104,8 @@ function detail(overrides: Partial<SessionDetail> = {}): SessionDetail {
 
 describe("WorkspaceSession", () => {
   beforeEach(() => {
+    vi.mocked(commands.getConfigPublic).mockResolvedValue({ ok: false, error: { code: "TEST_CONFIG_UNAVAILABLE", message: "unavailable", retryable: false, requestId: "test" } });
+    vi.mocked(commands.getVirtualAudioStatus).mockResolvedValue({ ok: true, data: { state: "ready", installed: true, rebootRequired: false, detail: "ready", renderEndpointId: "cable-input", captureEndpointId: "cable-output" } });
     vi.mocked(commands.getRuntimeStatus).mockResolvedValue({ ok: true, data: status() });
     vi.mocked(commands.startSession).mockResolvedValue({
       ok: true,
@@ -118,6 +127,7 @@ describe("WorkspaceSession", () => {
       ok: true,
       data: turn(),
     });
+    vi.mocked(commands.triggerMeetingAssistant).mockResolvedValue({ ok: true, data: turn() });
     vi.mocked(commands.sessionAgentCommand).mockResolvedValue({
       ok: true,
       data: commandResult(),
@@ -142,6 +152,56 @@ describe("WorkspaceSession", () => {
     expect((screen.getByRole("button", { name: "发送" }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByRole("heading", { name: "当前会话" })).toBeTruthy();
     expect(document.body.textContent).toContain("未开始");
+  });
+
+  it("requires an explicit choice with multiple meetings and sends the chosen PID", async () => {
+    const config: PublicConfig = {
+      configVersion: 1, application: { locale: null }, models: { providers: [], activeProviderId: null },
+      speech: { activeVoiceRouteId: "route-1", voiceRoutes: [{ id: "route-1", name: "测试线路", mode: "cascaded", asrProviderId: null, asrModelId: null, llmProviderId: null, llmModelId: null, ttsProviderId: null, ttsModelId: null, voiceId: null, e2eProviderId: null, e2eModelId: null, active: true, ready: true, status: null, configVersion: 1 }] },
+      transport: { livekit: { enabled: false, url: null, apiKey: null, apiSecret: null, ready: false, status: null, configVersion: 0 } },
+      knowledge: { embeddingConfigs: [], activeEmbeddingConfigId: null }, storage: { exportDirectory: null },
+      roleProfiles: [{ id: "role-1", name: "会议助手", systemPrompt: "listen", openingMessage: "", styleInstructions: "", active: true, configVersion: 1 }],
+      activeRoleProfileId: "role-1", diagnostics: { logRetentionDays: 14 },
+    };
+    vi.mocked(commands.getConfigPublic).mockResolvedValue({ ok: true, data: config });
+    vi.mocked(commands.listMeetingProcesses).mockResolvedValue({ ok: true, data: [
+      { pid: 101, name: "zoom.exe", title: "Meeting A" }, { pid: 202, name: "wemeetapp.exe", title: "Meeting B" },
+    ] });
+    render(<WorkspaceSession />);
+    fireEvent.change(await screen.findByLabelText("输入来源"), { target: { value: "meeting" } });
+    await screen.findByRole("option", { name: /Meeting B/ });
+    expect(screen.getByLabelText("会议进程")).toHaveValue("");
+    fireEvent.click(screen.getByRole("button", { name: "开始会话" }));
+    await screen.findByText("请刷新并选择会议进程。");
+    expect(commands.startSession).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText("会议进程"), { target: { value: "202" } });
+    fireEvent.click(screen.getByRole("button", { name: "开始会话" }));
+    await waitFor(() => expect(commands.startSession).toHaveBeenCalledWith("direct", expect.objectContaining({ meetingPid: 202 })));
+  });
+
+  it("answers once when the Rust global-hotkey event reaches an active meeting assistant", async () => {
+    const config: PublicConfig = {
+      configVersion: 1, application: { locale: null }, models: { providers: [], activeProviderId: null },
+      speech: { activeVoiceRouteId: "route-1", voiceRoutes: [{ id: "route-1", name: "测试线路", mode: "cascaded", asrProviderId: null, asrModelId: null, llmProviderId: null, llmModelId: null, ttsProviderId: null, ttsModelId: null, voiceId: null, e2eProviderId: null, e2eModelId: null, active: true, ready: true, status: null, configVersion: 1 }] },
+      transport: { livekit: { enabled: false, url: null, apiKey: null, apiSecret: null, ready: false, status: null, configVersion: 0 } },
+      knowledge: { embeddingConfigs: [], activeEmbeddingConfigId: null }, storage: { exportDirectory: null },
+      roleProfiles: [{ id: "role-1", name: "会议助手", systemPrompt: "listen", openingMessage: "", styleInstructions: "", scenario: "meetingAssistant", active: true, configVersion: 1 }],
+      activeRoleProfileId: "role-1", diagnostics: { logRetentionDays: 14 },
+    };
+    let hotkey: (() => void) | undefined;
+    const listen = vi.fn(async (event: string, handler: (payload: never) => void) => {
+      if (event === "session.assistant_hotkey.v1") hotkey = handler as () => void;
+      return () => {};
+    });
+    vi.mocked(commands.getConfigPublic).mockResolvedValue({ ok: true, data: config });
+    vi.mocked(commands.listMeetingProcesses).mockResolvedValue({ ok: true, data: [{ pid: 101, name: "zoom.exe", title: "Meeting" }] });
+    render(<WorkspaceSession listen={listen} />);
+    fireEvent.change(await screen.findByLabelText("输入来源"), { target: { value: "meeting" } });
+    await screen.findByRole("option", { name: /Meeting/ });
+    fireEvent.click(screen.getByRole("button", { name: "开始会话" }));
+    await waitFor(() => expect(hotkey).toBeTypeOf("function"));
+    act(() => hotkey?.());
+    await waitFor(() => expect(commands.triggerMeetingAssistant).toHaveBeenCalledTimes(1));
   });
 
   it("starts a session and shows the listening phase", async () => {
@@ -236,9 +296,11 @@ describe("WorkspaceSession", () => {
     render(<WorkspaceSession />);
     fireEvent.click(await screen.findByRole("button", { name: "开始会话" }));
     expect((await screen.findByRole("status")).textContent).toContain(
-      "speech：SESSION_ROUTE_REQUIRED：open_services",
+      "请先配置并启用语音线路。",
     );
-    expect(screen.getByRole("status").textContent).toContain("role：SESSION_ROLE_REQUIRED：open_services");
+    expect(screen.getByRole("status").textContent).toContain("请选择一个会话角色。");
+    expect(screen.getByRole("link", { name: "选择或创建角色" })).toHaveAttribute("href", "/settings?category=roles");
+    expect(screen.getByRole("link", { name: "配置语音线路" })).toHaveAttribute("href", "/services?category=routes");
 
     vi.mocked(commands.startSession).mockResolvedValueOnce({
       ok: false,
@@ -424,7 +486,7 @@ describe("WorkspaceSession", () => {
     });
 
     render(<WorkspaceSession listen={listen} />);
-    await waitFor(() => expect(listen).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(listen).toHaveBeenCalledWith("session.reply.v1", expect.any(Function)));
 
     act(() => {
       listeners.status?.({
@@ -520,6 +582,54 @@ describe("WorkspaceSession", () => {
     );
     expect(screen.getByLabelText("语句输入")).toBeTruthy();
     expect((screen.getByLabelText("语句输入") as HTMLInputElement).value).toBe("");
+    vi.mocked(globalThis.crypto.randomUUID).mockRestore();
+  });
+
+  it("hold-to-talk enters operator mode only while the control is held", async () => {
+    vi.mocked(commands.getRuntimeStatus).mockResolvedValue({
+      ok: true,
+      data: status({ phase: "listening", seq: 2 }),
+    });
+    render(<WorkspaceSession />);
+    await screen.findByText("聆听中");
+    const hold = screen.getByRole("button", { name: "按住人工发言" });
+    fireEvent.pointerDown(hold);
+    await waitFor(() => expect(commands.setSessionMode).toHaveBeenCalledWith("operator_speaking"));
+    fireEvent.pointerUp(hold);
+    await waitFor(() => expect(commands.setSessionMode).toHaveBeenCalledWith("ai_active"));
+  });
+
+  it("lets a candidate edit and explicitly confirm only the current suggestion", async () => {
+    vi.mocked(commands.getRuntimeStatus)
+      .mockResolvedValueOnce({ ok: true, data: status() })
+      .mockResolvedValue({ ok: true, data: status({ phase: "listening", seq: 2, revision: 7 }) });
+    vi.mocked(commands.getSession).mockResolvedValue({
+      ok: true,
+      data: detail({
+        turns: [turn({
+          assistantText: "建议原稿",
+          userConfirmed: false,
+          playbackStatus: "pending_confirmation",
+        })],
+      }),
+    });
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("00000000-0000-0000-0000-000000000009");
+
+    render(<WorkspaceSession />);
+    fireEvent.click(await screen.findByRole("button", { name: "开始会话" }));
+    const answer = await screen.findByLabelText("确认播报内容");
+    expect(answer).toHaveValue("建议原稿");
+    fireEvent.change(answer, { target: { value: "编辑后的回答" } });
+    fireEvent.click(screen.getByRole("button", { name: "确认并播报" }));
+
+    await waitFor(() => expect(commands.sessionAgentCommand).toHaveBeenCalledWith({
+      id: "00000000-0000-0000-0000-000000000009",
+      action: "confirm_candidate",
+      text: "编辑后的回答",
+      answer: null,
+      mode: null,
+      expectedRevision: 7,
+    }));
     vi.mocked(globalThis.crypto.randomUUID).mockRestore();
   });
 
@@ -635,5 +745,137 @@ describe("WorkspaceSession", () => {
     expect((screen.getByRole("button", { name: "接管" }) as HTMLButtonElement).disabled).toBe(false);
     release();
     await waitFor(() => expect(commands.sessionAgentCommand).toHaveBeenCalled());
+  });
+
+  const meetingConfig: PublicConfig = {
+    configVersion: 1, application: { locale: null }, models: { providers: [], activeProviderId: null },
+    speech: { activeVoiceRouteId: "route-1", voiceRoutes: [{ id: "route-1", name: "测试线路", mode: "cascaded", asrProviderId: null, asrModelId: null, llmProviderId: null, llmModelId: null, ttsProviderId: null, ttsModelId: null, voiceId: null, e2eProviderId: null, e2eModelId: null, active: true, ready: true, status: null, configVersion: 1 }] },
+    transport: { livekit: { enabled: false, url: null, apiKey: null, apiSecret: null, ready: false, status: null, configVersion: 0 } },
+    knowledge: { embeddingConfigs: [], activeEmbeddingConfigId: null }, storage: { exportDirectory: null },
+    roleProfiles: [{ id: "role-1", name: "会议助手", systemPrompt: "listen", openingMessage: "", styleInstructions: "", scenario: "meetingAssistant", active: true, configVersion: 1 }],
+    activeRoleProfileId: "role-1", diagnostics: { logRetentionDays: 14 },
+  };
+
+  async function openMeetingSource() {
+    vi.mocked(commands.getConfigPublic).mockResolvedValue({ ok: true, data: meetingConfig });
+    vi.mocked(commands.listMeetingProcesses).mockResolvedValue({ ok: true, data: [{ pid: 101, name: "zoom.exe", title: "Meeting" }] });
+    render(<WorkspaceSession />);
+    fireEvent.change(await screen.findByLabelText("输入来源"), { target: { value: "meeting" } });
+    await screen.findByRole("button", { name: "重新检测虚拟声卡" });
+  }
+
+  it("offers install only when the virtual audio device is missing", async () => {
+    vi.mocked(commands.getVirtualAudioStatus).mockResolvedValue({
+      ok: true,
+      data: { state: "missing", installed: false, rebootRequired: false, detail: "未检测到", renderEndpointId: null, captureEndpointId: null },
+    });
+    await openMeetingSource();
+    expect(screen.getByText(/检测到缺少虚拟声卡，是否安装/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "是，自动安装" })).toBeTruthy();
+  });
+
+  it("does not offer install for disabled, incomplete or driver-present devices", async () => {
+    for (const state of ["disabled", "incomplete", "driver_present"] as const) {
+      cleanup();
+      vi.mocked(commands.getVirtualAudioStatus).mockResolvedValue({
+        ok: true,
+        data: { state, installed: false, rebootRequired: false, detail: `${state} 详情`, renderEndpointId: null, captureEndpointId: null },
+      });
+      await openMeetingSource();
+      expect(screen.queryByText(/检测到缺少虚拟声卡，是否安装/)).toBeNull();
+      expect(screen.queryByRole("button", { name: "是，自动安装" })).toBeNull();
+      expect(screen.getByText(`${state} 详情`)).toBeTruthy();
+    }
+  });
+
+  it("asks the user to reboot when the driver requires it and does not auto-restart", async () => {
+    vi.mocked(commands.getVirtualAudioStatus).mockResolvedValue({
+      ok: true,
+      data: { state: "reboot_required", installed: false, rebootRequired: true, detail: "需要重启", renderEndpointId: null, captureEndpointId: null },
+    });
+    await openMeetingSource();
+    expect(screen.getByText(/需要重启 Windows 后继续/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "是，自动安装" })).toBeNull();
+    expect(screen.getByText(/软件不会自动重启电脑/)).toBeTruthy();
+  });
+
+  it("blocks repeat install after timeout until the user rechecks", async () => {
+    vi.mocked(commands.getVirtualAudioStatus).mockResolvedValue({
+      ok: true,
+      data: { state: "missing", installed: false, rebootRequired: false, detail: "未检测到", renderEndpointId: null, captureEndpointId: null },
+    });
+    vi.mocked(commands.installVirtualAudio).mockResolvedValue({
+      ok: false,
+      error: { code: "PREREQUISITE_TIMEOUT", message: "安装等待超时，提权任务可能仍在运行。请先检查状态，不要重复安装。", retryable: false, requestId: "t1" },
+    });
+    await openMeetingSource();
+    fireEvent.click(screen.getByRole("button", { name: "是，自动安装" }));
+    expect(await screen.findByText(/请先重新检测/)).toBeTruthy();
+    expect((screen.getByRole("button", { name: "是，自动安装" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "是，自动安装" }));
+    expect(commands.installVirtualAudio).toHaveBeenCalledTimes(1);
+    vi.mocked(commands.getVirtualAudioStatus).mockResolvedValue({
+      ok: true,
+      data: { state: "missing", installed: false, rebootRequired: false, detail: "仍缺失", renderEndpointId: null, captureEndpointId: null },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "重新检测虚拟声卡" }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "是，自动安装" }) as HTMLButtonElement).disabled).toBe(false));
+  });
+
+  it("shows UAC cancellation and busy states without offering a missing-device install", async () => {
+    vi.mocked(commands.getVirtualAudioStatus).mockResolvedValue({
+      ok: true,
+      data: { state: "missing", installed: false, rebootRequired: false, detail: "未检测到", renderEndpointId: null, captureEndpointId: null },
+    });
+    vi.mocked(commands.installVirtualAudio).mockResolvedValue({
+      ok: false,
+      error: { code: "PREREQUISITE_UAC_CANCELLED", message: "已取消管理员授权，尚未完成安装。可以重新点击安装。", retryable: true, requestId: "uac" },
+    });
+    await openMeetingSource();
+    fireEvent.click(screen.getByRole("button", { name: "是，自动安装" }));
+    expect(await screen.findByText(/已取消管理员授权/)).toBeTruthy();
+    cleanup();
+    vi.mocked(commands.getVirtualAudioStatus).mockResolvedValue({
+      ok: true,
+      data: { state: "installing", installed: false, rebootRequired: false, detail: "提权安装任务仍在运行", renderEndpointId: null, captureEndpointId: null },
+    });
+    await openMeetingSource();
+    expect(screen.getByText(/提权安装任务仍在运行/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "是，自动安装" })).toBeNull();
+  });
+
+  it("unsubscribes the preparation listener on unmount", async () => {
+    const unlisten = vi.fn();
+    const listen = vi.fn(async () => unlisten);
+    const { unmount } = render(<WorkspaceSession listen={listen} />);
+    await waitFor(() => expect(listen).toHaveBeenCalled());
+    unmount();
+    expect(unlisten).toHaveBeenCalled();
+  });
+
+  it("hides candidate confirmation after takeover even if turn metadata is still pending", async () => {
+    vi.mocked(commands.getRuntimeStatus)
+      .mockResolvedValueOnce({ ok: true, data: status() })
+      .mockResolvedValueOnce({ ok: true, data: status({ phase: "listening", seq: 2, revision: 7 }) })
+      .mockResolvedValue({ ok: true, data: status({ phase: "listening", mode: "operator_speaking", seq: 3, revision: 7 }) });
+    vi.mocked(commands.getSession).mockResolvedValue({
+      ok: true,
+      data: detail({
+        turns: [turn({
+          assistantText: "建议原稿",
+          userConfirmed: false,
+          playbackStatus: "pending_confirmation",
+        })],
+      }),
+    });
+    vi.mocked(commands.setSessionMode).mockResolvedValue({
+      ok: true,
+      data: status({ mode: "operator_speaking", phase: "listening", seq: 3 }),
+    });
+    render(<WorkspaceSession />);
+    fireEvent.click(await screen.findByRole("button", { name: "开始会话" }));
+    expect(await screen.findByLabelText("确认播报内容")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "接管" }));
+    await waitFor(() => expect(screen.queryByLabelText("确认播报内容")).toBeNull());
   });
 });

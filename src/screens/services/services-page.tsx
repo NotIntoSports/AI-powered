@@ -3,12 +3,16 @@ import { AudioLines, Boxes, Cable, Server } from "lucide-react";
 import * as api from "../../api/commands";
 import { EmbeddingEditor } from "../../features/services/embedding-editor";
 import { LiveKitEditor } from "../../features/services/livekit-editor";
-import type { CommandResult, PublicConfig, VoiceRouteMode } from "../../generated/bindings";
+import type { CommandResult, ProviderDependency, ProviderTestResult, PublicConfig, VoiceRouteMode, WebCapability } from "../../generated/bindings";
 import { PageShell } from "../page-shell";
 import "../../styles/configuration.css";
 
 const optional = (value: string) => value.trim() || null;
-const errorText = (error: { code: string; message: string; field?: string | null }) => `${error.field ? error.field + "：" : ""}${error.code}：${error.message}`;
+const errorText = (error: { code: string; message: string; field?: string | null }) => ({
+  PROVIDER_IN_USE: "供应商仍被配置引用，请先处理下方关联配置，再重试删除。",
+  SECRET_CLEANUP_FAILED: "供应商配置已删除，但密钥清理失败。请点击重试清理密钥；不要重新添加供应商。",
+  CONFIG_WRITE_FAILED: "配置写入失败，原配置未被删除，请检查目录写入权限。",
+}[error.code] ?? error.message);
 const providerTestMessage = (error: { code: string; message: string; field?: string | null }) => {
   switch (error.code) {
     case "PROVIDER_TIMEOUT": return "连接超时，请检查接入地址或网络";
@@ -22,6 +26,17 @@ const providerTestMessage = (error: { code: string; message: string; field?: str
     default: return errorText(error);
   }
 };
+const providerTestSuccessMessage = (result: ProviderTestResult) => {
+  const connection = `连接测试通过，发现 ${result.modelCount} 个模型`;
+  switch (result.webStatus) {
+    case "available": return `${connection}；联网可用，返回 ${result.webSourceCount} 个来源`;
+    case "model_unsupported": return `${connection}；当前模型不支持联网`;
+    case "interface_incompatible": return `${connection}；联网接口不兼容`;
+    case "network_unreachable": return `${connection}；联网探测时网络不可达`;
+    case "authentication_failed": return "鉴权失败：API Key 无效或没有联网权限";
+    case "disabled": return `${connection}；未启用联网`;
+  }
+};
 const initialRoute = { id: "", name: "", mode: "cascaded" as VoiceRouteMode, asrProviderId: "", asrModelId: "", llmProviderId: "", llmModelId: "", ttsProviderId: "", ttsModelId: "", voiceId: "", e2eProviderId: "", e2eModelId: "" };
 type MessageTone = "info" | "pending" | "success" | "error";
 type ProviderTestState = { tone: Exclude<MessageTone, "info">; text: string };
@@ -33,15 +48,57 @@ const categories = [
 ] as const;
 
 export function ServicesPage() {
-  const [category, setCategory] = useState<(typeof categories)[number]["id"]>("providers");
+  const [category, setCategory] = useState<(typeof categories)[number]["id"]>(() => {
+    const requested = new URLSearchParams(window.location.search).get("category");
+    return categories.find((item) => item.id === requested)?.id ?? "providers";
+  });
   const [config, setConfig] = useState<PublicConfig | null>(null);
   const [message, setMessage] = useState("正在读取本地配置…");
   const [messageTone, setMessageTone] = useState<MessageTone>("pending");
   const [busy, setBusy] = useState(false);
   const [models, setModels] = useState<Record<string, string[]>>({});
   const [providerTests, setProviderTests] = useState<Record<string, ProviderTestState>>({});
-  const [provider, setProvider] = useState({ id: "", name: "", baseUrl: "", apiKey: "" });
+  const [provider, setProvider] = useState({ id: "", name: "", baseUrl: "", apiKey: "", webCapability: "none" as WebCapability });
   const [route, setRoute] = useState(initialRoute);
+  const [deletion, setDeletion] = useState<{ id: string; name: string; references: ProviderDependency[]; cleanup?: boolean } | null>(null);
+  const [embeddingFocusId, setEmbeddingFocusId] = useState<string | null>(null);
+
+  async function inspectDeletion(id: string, name: string) {
+    setBusy(true);
+    try {
+      const result = await api.getModelProviderDependencies(id);
+      if (!result.ok) { announce(errorText(result.error), "error"); return; }
+      setDeletion({ id, name, references: result.data });
+    } catch { announce("无法检查供应商引用，请重试。", "error"); }
+    finally { setBusy(false); }
+  }
+
+  async function confirmDeletion() {
+    if (!deletion) return;
+    const target = deletion;
+    const result = await run(() => api.deleteModelProvider(target.id), "供应商及密钥已删除");
+    if (result?.ok || (result && !result.ok && result.error.code === "SECRET_CLEANUP_FAILED")) {
+      if (provider.id === target.id) setProvider({ id: "", name: "", baseUrl: "", apiKey: "", webCapability: "none" });
+      setModels((current) => { const next = { ...current }; delete next[target.id]; return next; });
+      setProviderTests((current) => { const next = { ...current }; delete next[target.id]; return next; });
+      setDeletion(result.ok ? null : { ...target, cleanup: true });
+    } else if (result && !result.ok && result.error.code === "PROVIDER_IN_USE") {
+      await inspectDeletion(target.id, target.name);
+    }
+  }
+
+  function openReference(reference: ProviderDependency) {
+    if (reference.kind === "voiceRoute") {
+      const item = config?.speech.voiceRoutes.find((value) => value.id === reference.id);
+      if (item) setRoute({ ...initialRoute, ...Object.fromEntries(Object.entries(item).filter(([key]) => key in initialRoute).map(([key, value]) => [key, value ?? ""])) } as typeof initialRoute);
+      setCategory("routes");
+    } else {
+      setEmbeddingFocusId(reference.id);
+      setCategory("embedding");
+    }
+    setDeletion(null);
+    announce(`请处理关联配置「${reference.name}」（${reference.id}），完成后返回供应商重新删除。`, "info");
+  }
 
   const announce = (text: string, tone: MessageTone) => {
     setMessage(text);
@@ -54,6 +111,7 @@ export function ServicesPage() {
       if (result.ok) {
         setConfig(result.data);
         if (clearMessage) { setMessage(""); setMessageTone("info"); }
+        return true;
       } else {
         setMessage(errorText(result.error));
         setMessageTone("error");
@@ -62,6 +120,7 @@ export function ServicesPage() {
       setMessage("IPC_UNAVAILABLE：无法读取本地配置");
       setMessageTone("error");
     }
+    return false;
   }, []);
   useEffect(() => { void reload(); }, [reload]);
 
@@ -69,8 +128,9 @@ export function ServicesPage() {
     setBusy(true);
     try {
       const result = await action();
-      await reload(false);
+      const refreshed = await reload(false);
       if (!result.ok) { announce(errorText(result.error), "error"); return result; }
+      if (!refreshed) { announce("操作已完成，但无法重新读取配置。请重新打开服务页核对。", "error"); return result; }
       announce(success, "success");
       return result;
     } catch {
@@ -98,9 +158,10 @@ export function ServicesPage() {
         setProviderTests((current) => ({ ...current, [id]: { tone: "error", text } }));
         return;
       }
-      const text = `连接测试通过，发现 ${result.data.modelCount} 个模型`;
-      announce(text, "success");
-      setProviderTests((current) => ({ ...current, [id]: { tone: "success", text } }));
+      const text = providerTestSuccessMessage(result.data);
+      const tone = result.data.webStatus === "authentication_failed" ? "error" : "success";
+      announce(text, tone);
+      setProviderTests((current) => ({ ...current, [id]: { tone, text } }));
     } catch {
       const text = "IPC_UNAVAILABLE：连接测试失败";
       announce(text, "error");
@@ -111,7 +172,7 @@ export function ServicesPage() {
   async function submitProvider(event: FormEvent) {
     event.preventDefault();
     try {
-      const result = await run(() => api.saveModelProvider({ id: optional(provider.id), name: provider.name.trim() || null, baseUrl: provider.baseUrl.trim(), apiKey: optional(provider.apiKey) }), "供应商已保存");
+      const result = await run(() => api.saveModelProvider({ id: optional(provider.id), name: provider.name.trim() || null, baseUrl: provider.baseUrl.trim(), apiKey: optional(provider.apiKey), ...(provider.webCapability !== "none" ? { webCapability: provider.webCapability } : {}) }), "供应商已保存");
       if (result?.ok) {
         setProvider((current) => ({ ...current, id: result.data.id, apiKey: "" }));
         return;
@@ -163,6 +224,11 @@ export function ServicesPage() {
       </nav>
       <div className="configuration-content">
       {message && <p className="services-message" data-tone={messageTone} role="status" aria-live="polite">{message}</p>}
+      {deletion && <section className="service-card" role="region" aria-label="删除供应商确认">
+        <h3>{deletion.references.length ? "暂时无法删除" : deletion.cleanup ? "重试密钥清理" : "确认删除供应商"}：{deletion.name}</h3>
+        {deletion.references.length ? <><p>请先修改或删除以下引用，不会自动删除关联配置。</p><ul>{deletion.references.map((reference) => <li key={`${reference.kind}/${reference.id}`}><button disabled={busy} onClick={() => openReference(reference)}>处理 {reference.kind === "voiceRoute" ? "语音线路" : "Embedding"}：{reference.name}</button></li>)}</ul></> : <><p>{deletion.cleanup ? "配置已删除，仅重试清理 Windows 凭据管理器中的密钥。" : "将删除此供应商配置和已保存的密钥，历史记录和资料文件不受影响。"}</p><button className="button-danger" disabled={busy} onClick={() => void confirmDeletion()}>{deletion.cleanup ? "重试清理密钥" : "确认删除供应商"}</button></>}
+        <button disabled={busy} onClick={() => setDeletion(null)}>取消</button>
+      </section>}
       <section id="services-panel-providers" className="service-panel" hidden={category !== "providers"} aria-labelledby="services-category-providers">
         <h2 className="section-heading">模型供应商</h2>
         <p className="configuration-description">连接 OpenAI 兼容服务。密钥仅保存到 Windows 凭据管理器。</p>
@@ -172,6 +238,12 @@ export function ServicesPage() {
           <label>显示名称<input required value={provider.name} onChange={(e) => setProvider({ ...provider, name: e.target.value })}/></label>
           <label>接入地址<input required type="url" placeholder="https://example.com/v1" value={provider.baseUrl} onChange={(e) => setProvider({ ...provider, baseUrl: e.target.value })}/></label>
           <label>API Key<input type="password" autoComplete="new-password" value={provider.apiKey} onChange={(e) => setProvider({ ...provider, apiKey: e.target.value })}/><small>留空会保留已保存的密钥</small></label>
+          <label>联网搜索协议<select value={provider.webCapability} onChange={(e) => setProvider({ ...provider, webCapability: e.target.value as WebCapability })}>
+            <option value="none">不启用 / 普通兼容接口</option>
+            <option value="openai_responses_web_search">OpenAI Responses</option>
+            <option value="qwen_responses_web_search">千问 Responses</option>
+            <option value="qwen_chat_enable_search">千问 Chat Completions</option>
+          </select><small>仅适用于支持原生搜索的模型，搜索可能另行计费。模型列表连接测试不代表联网搜索可用。</small></label>
           <button className="button-primary" disabled={busy} type="submit">保存供应商</button>
         </form>
         <div className="service-list configuration-list">
@@ -183,11 +255,11 @@ export function ServicesPage() {
             {config?.models.activeProviderId === item.id && <span className="status-badge">当前默认</span>}
             {providerTests[item.id] && <p className="service-test-result" data-tone={providerTests[item.id].tone} role="status">{providerTests[item.id].text}</p>}
             <div className="service-actions">
-              <button aria-label={"编辑 " + (item.name || "未命名供应商")} disabled={busy} onClick={() => setProvider({ id: item.id, name: item.name ?? "", baseUrl: item.baseUrl, apiKey: "" })}>编辑</button>
+              <button aria-label={"编辑 " + (item.name || "未命名供应商")} disabled={busy} onClick={() => setProvider({ id: item.id, name: item.name ?? "", baseUrl: item.baseUrl, apiKey: "", webCapability: item.webCapability ?? "none" })}>编辑</button>
               <button aria-label={"测试 " + (item.name || "未命名供应商")} disabled={busy} onClick={() => void testProvider(item.id)}>{providerTests[item.id]?.tone === "pending" ? "测试中…" : "测试"}</button>
               <button disabled={busy} onClick={() => void discover(item.id)}>发现模型</button>
               <button disabled={busy} onClick={() => void run(() => api.activateModelProvider(item.id), "默认供应商已更新")}>设为默认</button>
-              <button className="button-danger" disabled={busy} onClick={() => void run(() => api.deleteModelProvider(item.id), "供应商已删除")}>删除</button>
+              <button className="button-danger" disabled={busy} onClick={() => void inspectDeletion(item.id, item.name ?? item.id)}>删除</button>
             </div>
             {models[item.id]?.length > 0 && <p>模型：{models[item.id].join("、")}</p>}
           </article>)}
@@ -234,7 +306,7 @@ export function ServicesPage() {
         </div>
         </div>
       </section>
-      <section id="services-panel-embedding" hidden={category !== "embedding"} aria-labelledby="services-category-embedding"><EmbeddingEditor /></section>
+      <section id="services-panel-embedding" hidden={category !== "embedding"} aria-labelledby="services-category-embedding"><EmbeddingEditor focusId={embeddingFocusId} /></section>
       <section id="services-panel-livekit" hidden={category !== "livekit"} aria-labelledby="services-category-livekit"><LiveKitEditor /></section>
       </div>
     </div>

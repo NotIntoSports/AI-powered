@@ -3,7 +3,9 @@ use ts_rs::TS;
 use zeroize::Zeroizing;
 
 use crate::{
-    config::{ConfigError, ConfigStore, EmbeddingConfig, EmbeddingDistance, ModelConfig, SecretSlot},
+    config::{
+        ConfigError, ConfigStore, EmbeddingConfig, EmbeddingDistance, ModelConfig, SecretSlot,
+    },
     providers::{EmbeddingError, EmbeddingProbe, ProviderEndpoint},
     secrets::{SecretError, SecretService},
 };
@@ -171,13 +173,13 @@ impl<'a> EmbeddingService<'a> {
             .filter(|value| !value.trim().is_empty())
             .map(Zeroizing::new);
         let mut key_changed = false;
-        if provider_id.is_empty() {
-            if let Some(value) = submitted.as_deref() {
-                self.secrets
-                    .set(&reference, value)
-                    .map_err(EmbeddingServiceError::Secret)?;
-                key_changed = true;
-            }
+        if provider_id.is_empty()
+            && let Some(value) = submitted.as_deref()
+        {
+            self.secrets
+                .set(&reference, value)
+                .map_err(EmbeddingServiceError::Secret)?;
+            key_changed = true;
         }
         let custom_configured = provider_id.is_empty() && (key_changed || old_secret.is_some());
 
@@ -260,7 +262,8 @@ impl<'a> EmbeddingService<'a> {
             .find(|item| item.id == embedding_id)
             .cloned()
             .ok_or(EmbeddingServiceError::NotFound)?;
-        let endpoint = embedding_endpoint(&config.models, &embedding).ok_or(EmbeddingServiceError::SourceInvalid)?;
+        let endpoint = embedding_endpoint(&config.models, &embedding)
+            .ok_or(EmbeddingServiceError::SourceInvalid)?;
         let slot = embedding_credential_slot(&config.models, &embedding);
         let credential = slot
             .map(|slot| self.secrets.read(&slot.reference))

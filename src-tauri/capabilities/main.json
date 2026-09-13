@@ -19,6 +19,7 @@
     "allow-model-provider-discover",
     "allow-model-provider-activate",
     "allow-model-provider-delete",
+    "allow-model-provider-dependencies",
     "allow-speech-route-save",
     "allow-speech-route-test",
     "allow-speech-route-activate",
@@ -48,7 +49,24 @@
     "allow-session-get",
     "allow-session-delete",
     "allow-session-finalize-utterance",
+    "allow-session-trigger-assistant",
     "allow-session-agent-command",
-    "allow-runtime-get-status"
+    "allow-runtime-get-status",
+    "allow-open-web-source",
+    "allow-meeting-process-list",
+    "allow-audio-output-list",
+    "allow-virtual-audio-status",
+    "allow-virtual-audio-install",
+    "allow-session-audio-ready",
+    "allow-livestream-create-draft",
+    "allow-livestream-generate",
+    "allow-livestream-get",
+    "allow-livestream-control",
+    "allow-livestream-insert-question",
+    "allow-obs-runtime-status",
+    "allow-obs-virtual-camera-start",
+    "allow-obs-virtual-camera-stop",
+    "allow-obs-password-status",
+    "allow-obs-password-save"
   ]
 }

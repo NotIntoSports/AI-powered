@@ -268,3 +268,42 @@ fn slow_model_ipc_allows_takeover_and_stop_before_the_model_returns() {
         "TTS must not be requested after cancellation"
     );
 }
+
+#[test]
+fn diagnostics_export_rejects_destinations_outside_the_data_directory() {
+    let directory = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let app = mock_builder()
+        .manage(state(directory.path()))
+        .invoke_handler(tauri::generate_handler![super::diagnostics_export])
+        .build(mock_context(noop_assets()))
+        .unwrap();
+    let window = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .unwrap();
+    let escape_destination = outside.path().join("escape").join("report.json");
+    std::fs::create_dir_all(outside.path().join("escape")).unwrap();
+    let result = invoke(
+        &window,
+        "diagnostics_export",
+        serde_json::json!({ "destination": escape_destination.to_string_lossy() }),
+    );
+    assert_eq!(result["ok"], false, "{result}");
+    assert_eq!(result["error"]["code"], "DIAGNOSTICS_DESTINATION_INVALID", "{result}");
+    assert!(
+        !escape_destination.exists(),
+        "diagnostics export must not write outside the data directory"
+    );
+
+    let state = app.state::<AppState>();
+    let allowed_directory = state.paths.data_directory.join("diagnostics");
+    std::fs::create_dir_all(&allowed_directory).unwrap();
+    let allowed_destination = allowed_directory.join("report.json");
+    let result = invoke(
+        &window,
+        "diagnostics_export",
+        serde_json::json!({ "destination": allowed_destination.to_string_lossy() }),
+    );
+    assert_eq!(result["ok"], true, "{result}");
+    assert!(allowed_destination.exists(), "in-data-directory export must still work");
+}
