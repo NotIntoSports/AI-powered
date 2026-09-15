@@ -49,38 +49,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ai-virtual-assistant-desktop"
-version = "0.1.0"
-dependencies = [
- "base64 0.22.1",
- "chrono",
- "docx-rs",
- "keyring",
- "livekit-api",
- "obws",
- "pdf-extract",
- "reqwest",
- "rusqlite",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "sqlite-vec",
- "tauri",
- "tauri-build",
- "tauri-plugin-global-shortcut",
- "tauri-plugin-single-instance",
- "tempfile",
- "thiserror 2.0.20",
- "tracing",
- "tracing-subscriber",
- "ts-rs",
- "tungstenite",
- "uuid",
- "windows-sys 0.61.2",
- "zeroize",
-]
-
-[[package]]
 name = "alloc-no-stdlib"
 version = "2.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3886,6 +3854,38 @@ dependencies = [
  "libc",
  "untrusted",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "role-ai-desktop"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "chrono",
+ "docx-rs",
+ "keyring",
+ "livekit-api",
+ "obws",
+ "pdf-extract",
+ "reqwest",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "sqlite-vec",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-global-shortcut",
+ "tauri-plugin-single-instance",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tracing",
+ "tracing-subscriber",
+ "ts-rs",
+ "tungstenite",
+ "uuid",
+ "windows-sys 0.61.2",
+ "zeroize",
 ]
 
 [[package]]

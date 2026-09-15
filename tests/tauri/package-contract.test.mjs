@@ -49,7 +49,7 @@ test("bundle inspection permits normal application artifacts", async () => {
 test("process inspection rejects forbidden service descendants", () => {
   assert.throws(
     () => assertAllowedProcessTree([
-      { processId: 4100, parentProcessId: 4000, name: "AI Virtual Assistant.exe" },
+      { processId: 4100, parentProcessId: 4000, name: "role-ai-desktop.exe" },
       { processId: 4200, parentProcessId: 4100, name: "python.exe" },
     ]),
     /python\.exe/,

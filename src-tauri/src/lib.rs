@@ -194,7 +194,7 @@ pub fn run() {
                 window = window.data_directory(isolated.webview_data_directory.clone());
             }
             window
-                .title("AI Virtual Assistant")
+                .title("RoleAI")
                 .inner_size(1180.0, 760.0)
                 .min_inner_size(900.0, 620.0)
                 .on_navigation(navigation_is_allowed)
@@ -207,7 +207,7 @@ pub fn run() {
             Ok(())
         })
         .run(tauri::generate_context!())
-        .expect("failed to run AI Virtual Assistant");
+        .expect("failed to run RoleAI");
 }
 
 #[cfg(test)]

@@ -23,7 +23,7 @@ export function AppNav({ current, onNavigate }: AppNavProps) {
   }
   return (
     <nav className="app-nav" aria-label="主导航">
-      <div className="app-brand"><span className="brand-mark"><Sparkles size={19} aria-hidden="true" /></span><span>AI 虚拟助手</span></div>
+      <div className="app-brand"><span className="brand-mark"><Sparkles size={19} aria-hidden="true" /></span><span>RoleAI</span></div>
       <div className="app-nav-primary">{routeIds.filter((id) => id !== "settings").map(item)}</div>
       <div className="app-nav-footer">{item("settings")}<p>本地工作空间</p></div>
     </nav>

@@ -190,7 +190,7 @@ async function runPackageSmoke() {
 
   const repositoryRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
   const executable = await requirePackagedExecutable(
-    process.env.TAURI_SMOKE_EXECUTABLE ?? join(repositoryRoot, "src-tauri", "target", "release", "ai-virtual-assistant-desktop.exe"),
+    process.env.TAURI_SMOKE_EXECUTABLE ?? join(repositoryRoot, "src-tauri", "target", "release", "role-ai-desktop.exe"),
   );
   const bundleDirectory = resolve(
     process.env.TAURI_SMOKE_BUNDLE ?? join(repositoryRoot, "src-tauri", "target", "release", "bundle"),

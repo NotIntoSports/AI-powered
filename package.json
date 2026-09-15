@@ -1,8 +1,8 @@
 {
-  "name": "authorized-interview-screen-helper",
+  "name": "role-ai",
   "version": "0.1.0",
-  "description": "Windows desktop client for local AI Virtual Assistant interactions",
-  "author": "AI Virtual Assistant contributors",
+  "description": "Windows desktop client for local RoleAI interactions",
+  "author": "RoleAI contributors",
   "private": true,
   "scripts": {
     "dev:tauri-ui": "vite --config vite.config.ts",

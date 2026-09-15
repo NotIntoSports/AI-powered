@@ -1,10 +1,14 @@
-# AI虚拟助手
+# RoleAI
 
-本地 **AI虚拟助手**：可用于面试官 / 候选人辅助、会议主持、虚拟直播互动等场景。
+本地 **RoleAI（AI 角色交互助手）**：可用于面试官 / 候选人辅助、会议主持、虚拟直播互动等场景。
 
 仓库里只有一条产品路径：**Tauri** 桌面客户端。不再提供 Electron、Next.js、登录、Control API 或 Python Agent。
 
 > 当前版本是 Windows x64 内部试用版。使用前须告知对方 AI 参与和记录方式，并由人工复核；不得用于隐蔽冒充或未经复核的自动决策。
+
+## 名称与兼容性
+
+应用名称为 **RoleAI**，Windows 可执行文件为 `role-ai-desktop.exe`。为继续读取已有配置与数据，保留原有应用标识、`%APPDATA%\AI Virtual Assistant` 配置目录及 `AI_VIRTUAL_ASSISTANT_CONFIG` 环境变量。GitHub 仓库名与本地目录名不影响应用名称。
 
 ## 环境要求
 

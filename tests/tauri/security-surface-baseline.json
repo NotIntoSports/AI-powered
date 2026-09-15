@@ -4,10 +4,10 @@
   "normalization": "crlf-to-lf",
   "files": {
     "src-tauri/capabilities/main.json": "dcf3a50a9e6647d1707f37a97d94a2cfa349b822bb8e64bdfefa3bfa14a5e4a7",
-    "src-tauri/src/lib.rs": "a978e955da168aaef2a3b9e15f9a344b6f460975e7009c418535ab28ad8be668",
+    "src-tauri/src/lib.rs": "89e7aa8e47c6d29a711c3450a08d2ab5093bc334231bf0ec9a5cadd803d8393e",
     "src-tauri/src/contracts.rs": "73548af7ec5c9463c9b46171b14a29255eedc32f3208fc29ab6a454bbcda2fe2",
     "src-tauri/src/commands.rs": "850efcfac5b1cedf06187f2bab22d8177a0c09c08ce93be931ff78bda9457291",
-    "src-tauri/tauri.conf.json": "9abc8f87016616fa7ba028736cc09b094fb81e4d7956d7ab9d573344b13a5ec5",
+    "src-tauri/tauri.conf.json": "4186f5b7139c52d550b8cab6afcf95a46f8bde64bc9e220e4cb781bcd47684d1",
     "src/api/commands.ts": "a3616ca3b915176152ea5d043bd13a4474bdbb1a33728c2f4dfa667e560cfbfd",
     "src/generated/bindings.ts": "d3fe20b5c4e7ed86a874198abe8385383a54425ff30248e9f7ae0a1cac550783",
     "tests/tauri/shell-contract.test.mjs": "7a9e13b97754f371ec3e95d3c01cc888394e007207ea16371768574e09ed452f",

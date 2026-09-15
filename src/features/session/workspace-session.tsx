@@ -740,7 +740,7 @@ export function WorkspaceSession({
           <div className="session-welcome">
             <span className="session-welcome-icon"><MessageSquare size={25} strokeWidth={1.5} aria-hidden="true" /></span>
             <h3>{active ? "正在等待你的输入" : "开始一段新对话"}</h3>
-            <p>{active ? "说出问题，或在下方输入语句。" : "点击「开始会话」，与 AI 虚拟助手交流。"}</p>
+            <p>{active ? "说出问题，或在下方输入语句。" : "点击「开始会话」，与 RoleAI 交流。"}</p>
           </div>
         ) : (
           <div className="session-turn">
@@ -753,7 +753,7 @@ export function WorkspaceSession({
             )}
             {reply && (
               <article className="session-bubble session-bubble-assistant" aria-label="AI 回复">
-                <h3><Bot size={16} aria-hidden="true" />AI 虚拟助手</h3>
+                <h3><Bot size={16} aria-hidden="true" />RoleAI</h3>
                 <p>{reply}</p>
               </article>
             )}
